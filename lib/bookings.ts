@@ -283,6 +283,23 @@ export function notifyAdminNewReview(reviewId: string): void {
   });
 }
 
+export function notifyAdminListingUpdated(listingId: string): void {
+  const adminPhone = process.env.ADMIN_PHONE;
+  if (!adminPhone) return;
+  after(async () => {
+    const listing = await prisma.listing.findUnique({
+      where: { id: listingId },
+      include: { host: true },
+    });
+    if (!listing) return;
+    const h = listing.host;
+    await sendWhatsApp(
+      adminPhone,
+      `*Listing updated — needs re-review*\n\nHost: ${h.name ?? "—"} (${h.phone ?? "no number"})\nFlat: ${unitBlock(listing)}\nTitle: ${listing.title}\n\nReview & re-publish it in the admin dashboard.`
+    );
+  });
+}
+
 /** Find a listing by its short refCode (the "Ref" in the guest enquiry). */
 export async function findListingByRefCode(refCode: string) {
   return prisma.listing.findFirst({

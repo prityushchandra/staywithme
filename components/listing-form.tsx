@@ -80,7 +80,7 @@ export function ListingForm({
   listingId?: string;
 }) {
   const router = useRouter();
-  const { update } = useSession();
+  const { data: session, update } = useSession();
   const isEdit = !!listingId;
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -151,12 +151,12 @@ export function ListingForm({
         return;
       }
 
-      // Saved — go straight to the dashboard. Refresh the session in the
-      // background (so the navbar picks up the new HOST role) instead of
-      // blocking the redirect on it. Keep the button in its "Saving…" state
-      // until the page navigates away, so it never flashes back.
+      // Saved — go back to the dashboard the editor was opened from. Admins
+      // moderating a listing return to the admin list; hosts go to their own.
+      // Refresh the session in the background (so the navbar picks up the new
+      // HOST role) instead of blocking the redirect on it.
       void update();
-      router.push("/host");
+      router.push(session?.user?.isAdmin ? "/admin/listings" : "/host");
       router.refresh();
     } catch {
       setSubmitting(false);

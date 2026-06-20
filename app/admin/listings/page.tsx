@@ -4,7 +4,7 @@ import { formatINR } from "@/lib/pricing";
 import { Badge } from "@/components/ui/badge";
 import { SmartImage } from "@/components/smart-image";
 import { AdminListingActions } from "@/components/admin/listing-actions";
-import { ExternalLink, CalendarDays, Lock } from "lucide-react";
+import { ExternalLink, CalendarDays, Lock, Pencil } from "lucide-react";
 import type { Prisma } from "@prisma/client";
 
 export const metadata = { title: "Admin · Listings" };
@@ -111,6 +111,12 @@ export default async function AdminListingsPage({
                     >
                       <ExternalLink className="h-4 w-4" /> Open listing
                     </a>
+                    <Link
+                      href={`/host/listings/${l.id}/edit`}
+                      className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium hover:border-foreground"
+                    >
+                      <Pencil className="h-4 w-4" /> Edit
+                    </Link>
                     <Link
                       href={`/host/listings/${l.id}/availability`}
                       className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium hover:border-foreground"

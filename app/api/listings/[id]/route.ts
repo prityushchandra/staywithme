@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { listingInputSchema } from "@/lib/validation";
 import { getAmenityIdByKey } from "@/lib/search";
+import { notifyAdminListingUpdated } from "@/lib/bookings";
 
 async function loadOwned(id: string) {
   const session = await auth();
@@ -83,6 +84,9 @@ export async function PATCH(
 
   revalidateTag("listings");
   clearMemo();
+  // Tell the admin a host edited their listing (so it gets re-reviewed). Skip
+  // when the admin is the one editing — no point notifying yourself.
+  if (!ctx.session.user.isAdmin) notifyAdminListingUpdated(id);
   return NextResponse.json({ id, status: "PENDING" });
 }
 
