@@ -1,0 +1,91 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Warm editorial palette — beige paper, saffron + terracotta accents. */
+    --background: 37 30% 92%;
+    --foreground: 30 25% 9%;
+    --card: 36 42% 95%;
+    --card-foreground: 30 25% 9%;
+    --primary: 32 48% 12%;
+    --primary-foreground: 36 42% 95%;
+    --secondary: 34 30% 86%;
+    --secondary-foreground: 30 25% 9%;
+    --muted: 34 30% 86%;
+    --muted-foreground: 32 16% 41%;
+    --accent: 34 30% 86%;
+    --accent-foreground: 30 25% 9%;
+    --destructive: 8 50% 46%;
+    --destructive-foreground: 36 42% 95%;
+    --border: 30 18% 66%;
+    --input: 30 18% 66%;
+    --ring: 11 49% 58%;
+    --radius: 0.5rem;
+  }
+}
+
+/* Brand gradient (saffron → terracotta) for primary CTAs, plus a matching
+   warm text gradient for hero accents — the editorial beige look. */
+@layer utilities {
+  .bg-brand-gradient {
+    background-image: linear-gradient(135deg, #e0911c 0%, #c8705e 100%);
+  }
+  .text-brand-gradient {
+    background-image: linear-gradient(120deg, #e8a020 0%, #c8705e 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    /* iOS-like: no grey tap-flash on touch. */
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    /* Solid warm beige — NO background-attachment:fixed (that causes scroll jank). */
+    @apply bg-background text-foreground antialiased;
+  }
+}
+
+@layer utilities {
+  /* The springy ease iOS uses for most transitions. */
+  .ease-ios {
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  /* Subtle press feedback for tappable surfaces. */
+  .press {
+    transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .press:active {
+    transform: scale(0.97);
+  }
+}
+
+/* Respect users who prefer less motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Mobile Safari/Chrome auto-zoom when focusing a form control whose text is
+   smaller than 16px. Force >= 16px on small screens so tapping an input (search,
+   dates, guests, sign-in, review box) never zooms the page. !important is needed
+   to beat Tailwind's text-sm utility. Desktop keeps its smaller sizing. */
+@media (max-width: 767px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}

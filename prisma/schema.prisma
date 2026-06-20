@@ -1,0 +1,373 @@
+// MyBnB — Prisma schema (full platform data model, built in Sub-project #1).
+// Prices are stored as integers in MINOR units (paise). Display as ₹ (value / 100).
+// Listings carry NO contact/phone fields, ever — inquiry routing is global only.
+
+generator client {
+  provider = "prisma-client-js"
+  // "native" for local dev; the rhel target is the Vercel serverless runtime so
+  // the Query Engine is bundled for production (avoids "could not locate the
+  // Query Engine for runtime rhel-openssl-3.0.x" at runtime on Vercel).
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum PropertyType {
+  APARTMENT
+  HOUSE
+  VILLA
+  CABIN
+  COTTAGE
+  LOFT
+  GUESTHOUSE
+}
+
+enum RoomType {
+  ENTIRE
+  PRIVATE
+  SHARED
+}
+
+enum CancellationPolicy {
+  FLEXIBLE
+  MODERATE
+  STRICT
+}
+
+enum ListingStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+  PUBLISHED
+}
+
+// ---------------------------------------------------------------------------
+// Auth & users (single account model; GUEST always, HOST opt-in, admin seeded)
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  name         String?
+  firstName    String?
+  lastName     String?
+  // Phone is the primary login identity (E.164, e.g. +919876543210).
+  phone        String?  @unique
+  email        String?  @unique // optional now that phone is the identity
+  passwordHash String? // legacy; phone-OTP accounts have none
+  image        String?
+  // GUEST is always present; HOST added when the user opts into hosting.
+  roles        String[] @default(["GUEST"])
+  isAdmin      Boolean  @default(false) // seeded only, never self-assignable
+  suspended    Boolean  @default(false) // suspended users cannot sign in
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  listings      Listing[]
+  wishlists     Wishlist[]
+  reviews       Review[]
+  bookings      Booking[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// Phone one-time passcodes for sign-in / sign-up. One active code per phone is
+// the norm (older ones are deleted when a new code is requested). `verifiedAt`
+// is set the moment the correct code is entered; the phone credentials provider
+// then trusts a verified-but-unconsumed code (within a short window) to issue a
+// session, and stamps `consumedAt` so it cannot be reused.
+model OtpCode {
+  id         String    @id @default(cuid())
+  phone      String
+  code       String
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  verifiedAt DateTime?
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([phone])
+}
+
+// ---------------------------------------------------------------------------
+// Listings
+// ---------------------------------------------------------------------------
+
+model Listing {
+  id          String        @id @default(cuid())
+  // Short, human-friendly reference shown to guests (e.g. "K7M2Q"). Used by the
+  // WhatsApp bot to identify the flat instead of the long cuid.
+  refCode     String?       @unique
+  hostId      String
+  host        User          @relation(fields: [hostId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String        @db.Text
+
+  // Name guests see as "Hosted by …". Falls back to the host's account name.
+  hostDisplayName String?
+
+  propertyType PropertyType
+  roomType     RoomType
+
+  addressLine String
+  city        String
+  country     String
+  lat         Float?
+  lng         Float?
+
+  // Confidential exact-location fields. NEVER returned to guests (stripped from
+  // every public read); visible only in the admin dashboard.
+  flatNumber  String?
+  block       String?
+
+  bedrooms    Int           @default(1)
+  bathrooms   Int           @default(1)
+  beds        Int           @default(1)
+  maxGuests   Int           @default(2)
+
+  basePrice   Int // minor units (paise), INR
+  // Optional monthly rate (paise). When set, stays of 30+ nights are charged at
+  // this rate pro-rated per night instead of the nightly basePrice.
+  monthlyPrice Int?
+
+  cancellationPolicy CancellationPolicy
+
+  // Host-set "things to know" details
+  checkInTime  String? // e.g. "3:00 PM"
+  checkOutTime String? // e.g. "11:00 AM"
+  houseRules   String? @db.Text // one rule per line
+
+  status         ListingStatus @default(DRAFT)
+  rejectionReason String?
+  featured       Boolean       @default(false) // admin homepage curation
+
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  images      ListingImage[]
+  amenities   ListingAmenity[]
+  wishlistItems WishlistItem[]
+  reviews     Review[]
+  availability AvailabilityBlock[]
+  bookings    Booking[]
+
+  @@index([status])
+  @@index([city])
+  @@index([hostId])
+  @@index([featured])
+}
+
+// Blocked / booked date ranges. Manual entry (e.g. a confirmed WhatsApp booking)
+// that auto-propagates to the listing calendar and guest date pickers.
+model AvailabilityBlock {
+  id          String   @id @default(cuid())
+  listingId   String
+  listing     Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  startDate   DateTime // check-in, inclusive (UTC midnight)
+  endDate     DateTime // check-out, exclusive
+  kind        String   @default("MANUAL") // BOOKING | MANUAL
+  guestName   String?
+  guests      Int?
+  note        String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@index([listingId])
+}
+
+model ListingImage {
+  id                 String  @id @default(cuid())
+  listingId          String
+  listing            Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  cloudinaryPublicId String?
+  url                String
+  width              Int?
+  height             Int?
+  order              Int     @default(0)
+  isCover            Boolean @default(false)
+
+  @@index([listingId])
+}
+
+model Amenity {
+  id        String           @id @default(cuid())
+  key       String           @unique
+  label     String
+  icon      String?
+  listings  ListingAmenity[]
+}
+
+model ListingAmenity {
+  listingId String
+  amenityId String
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  amenity   Amenity @relation(fields: [amenityId], references: [id], onDelete: Cascade)
+
+  @@id([listingId, amenityId])
+}
+
+// ---------------------------------------------------------------------------
+// Platform settings (single row; admin-only; the ONLY home for these values)
+// ---------------------------------------------------------------------------
+
+model PlatformSettings {
+  id                 String @id @default("singleton")
+  whatsappNumber     String @default("+918789194107")
+  platformFeePercent Int    @default(10)
+  suggestedPriceMin  Int    @default(220000) // ₹2,200 in paise
+  suggestedPriceMax  Int    @default(250000) // ₹2,500 in paise
+  rankWeightView   Int @default(1)
+  rankWeightSave   Int @default(3)
+  rankWeightClick  Int @default(5)
+  // When false (default), only guests who completed a stay at a listing may
+  // review it; everyone else can read reviews but not write one. Admin can flip
+  // this to open reviews to any signed-in guest.
+  reviewsOpenToAll Boolean @default(false)
+  updatedAt          DateTime @updatedAt
+}
+
+model CancellationPolicyText {
+  policy      CancellationPolicy @id
+  title       String
+  description String             @db.Text
+}
+
+// ---------------------------------------------------------------------------
+// Stub models — created now so later sub-projects add features, not migrations.
+// ---------------------------------------------------------------------------
+
+model Wishlist {
+  id        String         @id @default(cuid())
+  userId    String
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String         @default("My Wishlist")
+  createdAt DateTime       @default(now())
+  items     WishlistItem[]
+
+  @@index([userId])
+}
+
+model WishlistItem {
+  id         String   @id @default(cuid())
+  wishlistId String
+  listingId  String
+  wishlist   Wishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  listing    Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([wishlistId, listingId])
+}
+
+model Review {
+  id         String   @id @default(cuid())
+  listingId  String
+  authorId   String
+  listing    Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  author     User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  rating     Int // 1..5
+  body       String   @db.Text
+  status     String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  createdAt  DateTime @default(now())
+
+  @@unique([listingId, authorId]) // one review per user per listing
+  @@index([listingId])
+  @@index([status])
+}
+
+// A guest's reservation request. Created on "Reserve"; an admin confirms or
+// cancels it (in-app or via the WhatsApp bot). On confirm we block the dates and
+// notify host + guest over WhatsApp.
+model Booking {
+  id          String   @id @default(cuid())
+  listingId   String
+  listing     Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  guestId     String
+  guest       User     @relation(fields: [guestId], references: [id], onDelete: Cascade)
+
+  checkIn     DateTime // UTC midnight, inclusive
+  checkOut    DateTime // UTC midnight, exclusive (checkout day)
+  guests      Int      @default(1)
+  totalAmount Int      @default(0) // paise snapshot of the guest-facing total
+  amountPaid  Int      @default(0) // paise received from the guest (rest is due)
+
+  status      String   @default("PENDING") // PENDING | CONFIRMED | CANCELLED
+  // The availability block created on confirm (so cancel can remove it).
+  blockId     String?
+  // Set when the 3-days-before-check-in reminder has been sent (dedup).
+  reminderSentAt DateTime?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([listingId])
+  @@index([guestId])
+  @@index([status])
+}
+
+model AnalyticsEvent {
+  id        String   @id @default(cuid())
+  type      String // VIEW | WISHLIST_ADD | SEARCH_IMPRESSION | WHATSAPP_CLICK | ...
+  listingId String?
+  userId    String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([type])
+  @@index([listingId])
+}
+
+// The WhatsApp bot's in-flight conversation with the admin, keyed by phone.
+// Lives in the DB (not process memory) so it survives across serverless
+// invocations on Vercel. `state` holds the discriminated-union Convo object;
+// expired rows are ignored on read and overwritten on the next message.
+model BotConversation {
+  phone     String   @id
+  state     Json
+  expiresAt DateTime
+  updatedAt DateTime @updatedAt
+
+  @@index([expiresAt])
+}

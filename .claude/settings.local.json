@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(npm install *)",
+      "Bash(npx vitest *)",
+      "Bash(npx prisma *)",
+      "Bash(DATABASE_URL=\"postgresql://u:p@localhost:5432/db\" AUTH_SECRET=\"build-time-placeholder-secret-0000000000\" NEXTAUTH_URL=\"http://localhost:3000\" npm run build)",
+      "Bash(grep -vE \"jose|Edge Runtime|Import trace|node_modules|deflate|CompressionStream|DecompressionStream|^$|Learn more\")",
+      "Bash(grep -vE \"jose|Edge Runtime|Import trace|node_modules|deflate|CompressionStream|DecompressionStream|^$|Learn more|Accelerate|Tip:|importing your\")",
+      "Read(//tmp/**)",
+      "Bash(curl -s -o /dev/null http://localhost:3000/api/auth/session)",
+      "Bash(DATABASE_URL=\"postgresql://u:p@localhost:5432/db\" AUTH_SECRET=\"build-placeholder-0000000000000000\" NEXTAUTH_URL=\"http://localhost:3000\" npm run build)",
+      "Bash(npm run *)",
+      "Bash(echo \"dev restarted \\(pid $!\\)\")",
+      "Bash(curl -sf -o /dev/null http://localhost:3000/api/auth/csrf)",
+      "Bash(curl -s http://localhost:3000/)",
+      "Bash(curl -s \"http://localhost:3000/search?destination=Goa\")",
+      "Bash(curl -s \"http://localhost:3000/search?maxPrice=3000\")",
+      "Bash(curl -s http://localhost:3000/api/wishlist)",
+      "Bash(pkill -9 -f \"next\")",
+      "Bash(echo \"build exit: $?\")",
+      "Bash(pkill -f \"next dev\")",
+      "Bash(pkill -f \"next-server\")",
+      "Bash(grep -vE \"jose|Edge Runtime|Import trace|webpack-internal|node_modules|deflate|CompressionStream|DecompressionStream|Learn more|Accelerate|Tip:|importing your|deprecated|prisma-config|migrate to|telemetry|nextjs.org/tele|^\\\\s*$\")"
+    ]
+  }
+}

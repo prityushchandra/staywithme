@@ -1,0 +1,83 @@
+import NextAuth from "next-auth";
+import type { Provider } from "next-auth/providers";
+import Credentials from "next-auth/providers/credentials";
+import Google from "next-auth/providers/google";
+import { PrismaAdapter } from "@auth/prisma-adapter";
+import { prisma } from "./db";
+import { authConfig } from "@/auth.config";
+import { normalizePhone, consumeVerifiedOtp } from "./otp";
+
+// Node-runtime providers. Sign-in is by phone + a one-time code: the OTP is
+// generated/verified by the /api/auth/otp/* routes, and this provider trusts a
+// freshly-verified (single-use) code to mint the session.
+const providers: Provider[] = [
+  Credentials({
+    id: "phone",
+    name: "Phone",
+    credentials: { phone: { label: "Phone", type: "text" } },
+    async authorize(raw) {
+      const phone = normalizePhone(String(raw?.phone ?? ""));
+      if (!phone) return null;
+
+      // Single-use: a verified, unconsumed code must exist for this number.
+      if (!(await consumeVerifiedOtp(phone))) return null;
+
+      let user = await prisma.user.findUnique({ where: { phone } });
+
+      // Bootstrap the admin on first login from the configured admin number,
+      // so platform access never depends on a re-seed.
+      if (!user && process.env.ADMIN_PHONE && phone === normalizePhone(process.env.ADMIN_PHONE)) {
+        user = await prisma.user.create({
+          data: { phone, name: "Platform Admin", roles: ["GUEST"], isAdmin: true },
+        });
+      }
+
+      if (!user || user.suspended) return null; // unknown or suspended → no session
+      return { id: user.id, name: user.name, email: user.email, image: user.image };
+    },
+  }),
+];
+
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  providers.push(
+    Google({
+      clientId: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      allowDangerousEmailAccountLinking: true,
+    })
+  );
+}
+
+export const { handlers, auth, signIn, signOut } = NextAuth({
+  ...authConfig,
+  adapter: PrismaAdapter(prisma),
+  session: { strategy: "jwt" },
+  providers,
+  callbacks: {
+    ...authConfig.callbacks,
+    // Runs on Node. Hydrates roles/isAdmin into the token at sign-in and on a
+    // session update() (e.g. after creating a first listing), avoiding a DB hit
+    // on every request.
+    async jwt({ token, user, trigger }) {
+      const needsRefresh = !!user || trigger === "update";
+      const userId = (user?.id as string | undefined) ?? (token.sub as string);
+      if (needsRefresh && userId) {
+        const dbUser = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { roles: true, isAdmin: true, firstName: true, name: true, phone: true },
+        });
+        token.sub = userId;
+        token.roles = dbUser?.roles ?? ["GUEST"];
+        token.isAdmin = dbUser?.isAdmin ?? false;
+        token.firstName = dbUser?.firstName ?? dbUser?.name ?? null;
+        token.name = dbUser?.name ?? null;
+        token.phone = dbUser?.phone ?? null;
+      }
+      return token;
+    },
+  },
+});
+
+export function isHost(roles: string[] | undefined): boolean {
+  return !!roles?.includes("HOST");
+}
