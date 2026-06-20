@@ -21,6 +21,11 @@ export const authConfig = {
   // (e.g. `next start` locally, or self-hosting); without it production builds
   // throw UntrustedHost on every auth/session call. Safe behind a known host.
   trustHost: true,
+  // Explicit JWT sessions so the EDGE middleware (which has no Prisma adapter)
+  // decodes the session from the cookie itself. Without this, on Vercel's Edge
+  // runtime the middleware can fail to resolve the session and bounce a
+  // logged-in user back to /sign-in (e.g. on /admin).
+  session: { strategy: "jwt" as const },
   pages: { signIn: "/sign-in" },
   providers: googleProviders,
   callbacks: {
