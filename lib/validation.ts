@@ -54,7 +54,7 @@ export const listingInputSchema = z.object({
         )
     )
     .min(1, "Add at least one photo")
-    .max(20),
+    .max(40, "You can add up to 40 photos"),
 });
 
 export type ListingInput = z.infer<typeof listingInputSchema>;

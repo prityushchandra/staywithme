@@ -16,11 +16,11 @@ describe("computePricing", () => {
     expect(r.platformFeePercent).toBe(10);
   });
 
-  it("rounds the fee to the nearest minor unit", () => {
-    // base 12345 paise * 10% = 1234.5 -> rounds to 1235
-    const r = computePricing(12345, { platformFeePercent: 10 });
-    expect(r.platformFee).toBe(1235);
-    expect(r.total).toBe(13580);
+  it("rounds the platform fee to the nearest whole rupee", () => {
+    // ₹1099 base, 10% = ₹109.90 -> rounds up to ₹110 so the total is a clean ₹1209
+    const r = computePricing(109900, { platformFeePercent: 10 });
+    expect(r.platformFee).toBe(11000); // ₹110
+    expect(r.total).toBe(120900); // ₹1209
   });
 
   it("respects a configurable fee percent", () => {

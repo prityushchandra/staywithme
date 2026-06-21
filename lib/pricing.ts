@@ -12,7 +12,7 @@ export interface PricingSettings {
 export interface PricingBreakdown {
   /** base price in minor units */
   base: number;
-  /** platform fee in minor units = round(base * percent / 100) */
+  /** platform fee in minor units, rounded to the nearest whole rupee */
   platformFee: number;
   /** total in minor units = base + platformFee */
   total: number;
@@ -30,7 +30,9 @@ export function computePricing(
   settings: Pick<PricingSettings, "platformFeePercent">
 ): PricingBreakdown {
   const base = Math.max(0, Math.round(basePrice));
-  const platformFee = Math.round((base * settings.platformFeePercent) / 100);
+  // Round the fee to the nearest whole rupee (100 paise) so the guest-facing
+  // total is always a clean rupee figure (e.g. ₹1,209, never ₹1,208.90).
+  const platformFee = Math.round((base * settings.platformFeePercent) / 100 / 100) * 100;
   return {
     base,
     platformFee,

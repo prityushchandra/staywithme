@@ -6,6 +6,9 @@ import { ImagePlus, Star, Loader2, ChevronLeft, ChevronRight } from "lucide-reac
 import { Button } from "@/components/ui/button";
 import { SmartImage } from "@/components/smart-image";
 
+// Hosts can attach up to this many photos per listing.
+const MAX_PHOTOS = 40;
+
 // Reads a local image file, resizes it to a sensible max dimension, and returns
 // a compressed JPEG data URL — so photos can be uploaded with NO external
 // service. (Cloudinary is still used when configured.)
@@ -48,15 +51,19 @@ export function ImageUploader({
   onChange: (urls: string[]) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
   const preset =
     process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET ?? "mybnb_listings";
 
+  const full = value.length >= MAX_PHOTOS;
+
   function add(url: string) {
     const u = url.trim();
-    if (u && !value.includes(u)) onChange([...value, u]);
+    if (u && !value.includes(u) && value.length < MAX_PHOTOS) onChange([...value, u]);
   }
 
   function remove(url: string) {
@@ -72,17 +79,29 @@ export function ImageUploader({
     onChange(next);
   }
 
+  // Drag-and-drop reorder: pull the dragged photo out and drop it at `to`.
+  function reorder(from: number, to: number) {
+    if (from === to || from < 0 || to < 0 || from >= value.length || to >= value.length) {
+      return;
+    }
+    const next = [...value];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    onChange(next);
+  }
+
   async function onFilesPicked(files: FileList | null) {
     if (!files?.length) return;
     setBusy(true);
     try {
       const next = [...value];
       for (const file of Array.from(files)) {
+        if (next.length >= MAX_PHOTOS) break;
         if (!file.type.startsWith("image/")) continue;
         const dataUrl = await fileToCompressedDataUrl(file);
         if (!next.includes(dataUrl)) next.push(dataUrl);
       }
-      onChange(next);
+      onChange(next.slice(0, MAX_PHOTOS));
     } finally {
       setBusy(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -104,7 +123,7 @@ export function ImageUploader({
         <Button
           type="button"
           variant="outline"
-          disabled={busy}
+          disabled={busy || full}
           onClick={() => fileInputRef.current?.click()}
         >
           {busy ? (
@@ -119,7 +138,7 @@ export function ImageUploader({
         {cloudName && (
           <CldUploadWidget
             uploadPreset={preset}
-            options={{ multiple: true, maxFiles: 20, sources: ["local"] }}
+            options={{ multiple: true, maxFiles: MAX_PHOTOS, sources: ["local"] }}
             onSuccess={(result) => {
               const info = result.info;
               if (info && typeof info === "object" && "secure_url" in info) {
@@ -128,32 +147,69 @@ export function ImageUploader({
             }}
           >
             {({ open }) => (
-              <Button type="button" variant="secondary" onClick={() => open()}>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={full}
+                onClick={() => open()}
+              >
                 Upload via Cloudinary
               </Button>
             )}
           </CldUploadWidget>
         )}
+
+        <span className="text-xs text-muted-foreground">
+          {value.length}/{MAX_PHOTOS} photos
+        </span>
       </div>
 
       {value.length > 0 && (
         <>
           <p className="text-xs text-muted-foreground">
-            The first photo is your cover. Use the arrows to reorder how photos
-            appear to guests; hover a photo to remove it.
+            The first photo is your cover. Drag photos to rearrange them (or use
+            the arrows); hover a photo to remove it.
           </p>
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
             {value.map((url, idx) => (
               <div
                 key={url}
-                className="group relative aspect-square overflow-hidden rounded-lg bg-muted"
+                draggable
+                onDragStart={(e) => {
+                  setDragIndex(idx);
+                  e.dataTransfer.effectAllowed = "move";
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  if (overIndex !== idx) setOverIndex(idx);
+                }}
+                onDragLeave={() => {
+                  if (overIndex === idx) setOverIndex(null);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (dragIndex !== null) reorder(dragIndex, idx);
+                  setDragIndex(null);
+                  setOverIndex(null);
+                }}
+                onDragEnd={() => {
+                  setDragIndex(null);
+                  setOverIndex(null);
+                }}
+                className={`group relative aspect-square cursor-grab select-none overflow-hidden rounded-lg bg-muted active:cursor-grabbing ${
+                  overIndex === idx && dragIndex !== idx
+                    ? "ring-2 ring-brand ring-offset-1"
+                    : ""
+                } ${dragIndex === idx ? "opacity-50" : ""}`}
               >
                 <SmartImage
                   src={url}
                   alt={`Photo ${idx + 1}`}
                   fill
                   sizes="120px"
-                  className="object-cover"
+                  draggable={false}
+                  className="pointer-events-none object-cover"
                 />
                 {idx === 0 && (
                   <span className="absolute left-1 top-1 z-10 flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white">

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, X, Star, EyeOff } from "lucide-react";
+import { Check, X, Star, EyeOff, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -18,6 +18,7 @@ export function AdminListingActions({
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [reason, setReason] = useState("");
 
   async function act(action: string, extra?: Record<string, unknown>) {
@@ -29,6 +30,14 @@ export function AdminListingActions({
     });
     setLoading(null);
     setRejecting(false);
+    if (res.ok) router.refresh();
+  }
+
+  async function destroy() {
+    setLoading("delete");
+    const res = await fetch(`/api/admin/listings/${listingId}`, { method: "DELETE" });
+    setLoading(null);
+    setConfirmingDelete(false);
     if (res.ok) router.refresh();
   }
 
@@ -45,6 +54,20 @@ export function AdminListingActions({
           Confirm reject
         </Button>
         <Button size="sm" variant="ghost" onClick={() => setRejecting(false)}>Cancel</Button>
+      </div>
+    );
+  }
+
+  if (confirmingDelete) {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm text-muted-foreground">
+          Delete this listing permanently?
+        </span>
+        <Button size="sm" variant="destructive" disabled={loading === "delete"} onClick={destroy}>
+          <Trash2 className="h-4 w-4" /> Confirm delete
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => setConfirmingDelete(false)}>Cancel</Button>
       </div>
     );
   }
@@ -80,6 +103,14 @@ export function AdminListingActions({
           {featured ? "Featured" : "Feature"}
         </Button>
       )}
+      <Button
+        size="sm"
+        variant="ghost"
+        className="text-red-600 hover:bg-red-50 hover:text-red-700"
+        onClick={() => setConfirmingDelete(true)}
+      >
+        <Trash2 className="h-4 w-4" /> Delete
+      </Button>
     </div>
   );
 }

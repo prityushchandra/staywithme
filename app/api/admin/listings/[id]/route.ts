@@ -81,3 +81,26 @@ export async function PATCH(
   clearMemo();
   return NextResponse.json({ ok: true });
 }
+
+// Permanently delete a listing (admin only). Cascades to its images, amenities,
+// reviews, etc. via the schema relations.
+export async function DELETE(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth();
+  if (!session?.user?.isAdmin) {
+    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  }
+
+  const { id } = await params;
+  const listing = await prisma.listing.findUnique({ where: { id } });
+  if (!listing) {
+    return NextResponse.json({ error: "Listing not found" }, { status: 404 });
+  }
+
+  await prisma.listing.delete({ where: { id } });
+  revalidateTag("listings");
+  clearMemo();
+  return NextResponse.json({ ok: true });
+}
