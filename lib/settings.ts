@@ -1,5 +1,5 @@
+import { unstable_cache } from "next/cache";
 import { prisma } from "./db";
-import { memo } from "./memo";
 import type { PlatformSettings } from "@prisma/client";
 
 const DEFAULTS = {
@@ -23,15 +23,20 @@ async function readPlatformSettings(): Promise<PlatformSettings> {
   });
 }
 
+// Tagged with "settings" so the admin save (revalidateTag("settings")) busts it
+// across EVERY page — including statically-rendered ones like the navbar/sign-in
+// — not just the request that happened to be warm. revalidate is a safety net.
+const getCachedSettings = unstable_cache(readPlatformSettings, ["platform-settings"], {
+  tags: ["settings"],
+  revalidate: 60,
+});
+
 /**
  * Read the single PlatformSettings row, creating it with defaults if missing.
- * This is the ONLY home for the WhatsApp number, platform fee, and suggested
- * price range. Hosts have no access; only admin endpoints may update it.
- *
- * Cached across requests (settings change rarely and only via admin); the admin
- * settings route calls revalidateTag("settings") on save. This spares every page
- * a round-trip to the remote database.
+ * This is the ONLY home for the WhatsApp number, platform fee, suggested price
+ * range, and branding toggles. Hosts have no access; only admin endpoints update
+ * it. The admin settings route calls revalidateTag("settings") on save.
  */
 export function getPlatformSettings(): Promise<PlatformSettings> {
-  return memo("platform-settings", 60_000, readPlatformSettings);
+  return getCachedSettings();
 }

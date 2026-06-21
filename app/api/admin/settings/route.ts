@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { revalidateTag } from "next/cache";
+import { revalidateTag, revalidatePath } from "next/cache";
 import { clearMemo } from "@/lib/memo";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
@@ -73,6 +73,9 @@ export async function PATCH(req: Request) {
 
   revalidateTag("settings");
   revalidateTag("listings");
+  // The signature toggle lives in the navbar (root layout), so regenerate every
+  // page that shares it — not just data-tagged routes.
+  revalidatePath("/", "layout");
   clearMemo();
   return NextResponse.json({ ok: true });
 }

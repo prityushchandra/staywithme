@@ -126,8 +126,8 @@ function SignInForm() {
                 Sign in with one tap
               </h1>
               <p className="mx-auto max-w-xs text-sm text-muted-foreground">
-                StayWithMe runs on WhatsApp. No passwords, no codes to type — just
-                confirm once from your number and you&apos;re in.
+                No passwords, no codes to type — just confirm once from your
+                number and you&apos;re in.
               </p>
             </div>
 
@@ -153,9 +153,9 @@ function SignInForm() {
               </Button>
             )}
 
-            <p className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-              <ShieldCheck className="h-3.5 w-3.5" />
-              Verified by your WhatsApp number — private &amp; secure.
+            <p className="flex items-start justify-center gap-1.5 text-xs text-muted-foreground">
+              <ShieldCheck className="mt-px h-3.5 w-3.5 shrink-0" />
+              <span>Verified by your WhatsApp number — private &amp; secure.</span>
             </p>
           </div>
         )}
