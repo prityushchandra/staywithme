@@ -232,10 +232,6 @@ export default async function ListingPage({
                     {policyText?.description ??
                       "Cancellation terms are confirmed with the platform over WhatsApp."}
                   </p>
-                  <p className="mt-2 text-sm font-medium text-foreground">
-                    The Platform Fee is non-refundable, regardless of the
-                    cancellation policy.
-                  </p>
                 </div>
               </div>
             </section>
