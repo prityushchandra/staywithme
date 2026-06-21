@@ -181,10 +181,7 @@ export function DateRangePicker({
           "flex items-center gap-2.5 text-left transition-colors",
           card
             ? "w-full rounded-xl border px-4 py-3 hover:border-foreground"
-            : cn(
-                "min-w-0 flex-1 rounded-full px-4 py-1",
-                open ? "bg-muted ring-1 ring-border" : "hover:bg-muted/60"
-              )
+            : "min-w-0 flex-1 rounded-full px-4 py-1"
         )}
       >
         <CalendarDays className="h-5 w-5 shrink-0 text-brand" />

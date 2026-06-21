@@ -81,16 +81,17 @@
     animation: banner-drift 7s ease-in-out infinite;
   }
   @keyframes banner-sheen {
-    0% {
-      transform: translateX(-160%) skewX(-12deg);
+    from {
+      transform: translateX(-200%) skewX(-12deg);
     }
-    55%,
-    100% {
-      transform: translateX(320%) skewX(-12deg);
+    to {
+      transform: translateX(500%) skewX(-12deg);
     }
   }
   .animate-banner-sheen {
-    animation: banner-sheen 3.6s ease-in-out infinite;
+    /* Constant speed, no hold at the ends — the reset happens fully offscreen so
+       the sweep reads as continuous rather than stopping and jumping back. */
+    animation: banner-sheen 4s linear infinite;
   }
 }
 
