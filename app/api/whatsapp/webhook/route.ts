@@ -19,6 +19,7 @@ import { addBlock, toUtcDate } from "@/lib/availability";
 import { getPlatformSettings } from "@/lib/settings";
 import { formatINR } from "@/lib/pricing";
 import { computeBookingMoneyFromTotal, perNightFromBase } from "@/lib/payouts";
+import { parseWaLoginCode, verifyWaLogin } from "@/lib/wa-login";
 
 // WhatsApp bot — ADMIN ONLY. Hosts/guests are pointed back to the admin.
 // Reserve = forward the guest's enquiry → "how much received?". Listings are
@@ -461,6 +462,16 @@ async function advanceCancel(flow: Extract<Convo, { kind: "cancel" }>, text: str
 async function handle(fromRaw: string, body: string): Promise<string | null> {
   const phone = normalizePhone(fromRaw);
   if (!phone) return null;
+
+  // WhatsApp tap-to-verify login — handled for ANY sender (not just the admin),
+  // and before the admin gate. The account is bound to THIS verified sender.
+  const loginCode = parseWaLoginCode(body);
+  if (loginCode) {
+    const ok = await verifyWaLogin(loginCode, phone);
+    return ok
+      ? "✅ Verified! Head back to the StayWithMe tab — you're being logged in now."
+      : "That login request has expired or was already used. Please start again from the StayWithMe sign-in screen.";
+  }
 
   const user = await prisma.user.findUnique({ where: { phone }, select: { isAdmin: true } });
   const adminPhone = process.env.ADMIN_PHONE ? normalizePhone(process.env.ADMIN_PHONE) : null;

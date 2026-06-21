@@ -131,6 +131,26 @@ model OtpCode {
   @@index([phone])
 }
 
+// WhatsApp "tap-to-verify" login. The browser starts a login (gets a secret
+// `token` it polls with, plus a short human `code`); the user sends that code
+// to the business number from their own WhatsApp; the webhook stamps the row
+// VERIFIED with the message's *verified sender* phone. The session is then
+// minted by the "wa" credentials provider for THAT phone — identity can never
+// come from anything typed in the browser. Single-use + short TTL.
+model WhatsAppLogin {
+  id         String    @id @default(cuid())
+  token      String    @unique // browser secret (polled, used to mint the session)
+  code       String // short human code, sent in the WhatsApp message, matched server-side
+  phone      String? // verified sender's E.164 — set only when the WA message arrives
+  status     String    @default("PENDING") // PENDING | VERIFIED | CONSUMED
+  verifiedAt DateTime?
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+
+  @@index([code, status])
+  @@index([status])
+}
+
 // ---------------------------------------------------------------------------
 // Listings
 // ---------------------------------------------------------------------------

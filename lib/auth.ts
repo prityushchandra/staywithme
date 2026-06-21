@@ -6,6 +6,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "./db";
 import { authConfig } from "@/auth.config";
 import { normalizePhone, consumeVerifiedOtp } from "./otp";
+import { consumeWaLogin } from "./wa-login";
 
 // Node-runtime providers. Sign-in is by phone + a one-time code: the OTP is
 // generated/verified by the /api/auth/otp/* routes, and this provider trusts a
@@ -33,6 +34,39 @@ const providers: Provider[] = [
       }
 
       if (!user || user.suspended) return null; // unknown or suspended → no session
+      return { id: user.id, name: user.name, email: user.email, image: user.image };
+    },
+  }),
+  // WhatsApp "tap-to-verify": the user proved possession of their number by
+  // sending a code from it (the webhook stamped the login VERIFIED with that
+  // verified sender). We consume that single-use record and mint the session for
+  // THAT phone. A brand-new number gets an account created on the spot.
+  Credentials({
+    id: "wa",
+    name: "WhatsApp",
+    credentials: { token: { label: "Token", type: "text" } },
+    async authorize(raw) {
+      const token = String(raw?.token ?? "");
+      if (!token) return null;
+
+      const phone = await consumeWaLogin(token); // single-use; null unless VERIFIED
+      if (!phone) return null;
+
+      let user = await prisma.user.findUnique({ where: { phone } });
+      if (!user) {
+        const isAdmin =
+          !!process.env.ADMIN_PHONE && phone === normalizePhone(process.env.ADMIN_PHONE);
+        user = await prisma.user.create({
+          data: {
+            phone,
+            name: isAdmin ? "Platform Admin" : "Guest",
+            roles: ["GUEST"],
+            isAdmin,
+          },
+        });
+      }
+
+      if (user.suspended) return null;
       return { id: user.id, name: user.name, email: user.email, image: user.image };
     },
   }),
