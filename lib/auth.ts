@@ -44,22 +44,35 @@ const providers: Provider[] = [
   Credentials({
     id: "wa",
     name: "WhatsApp",
-    credentials: { token: { label: "Token", type: "text" } },
+    credentials: {
+      token: { label: "Token", type: "text" },
+      firstName: { label: "First name", type: "text" },
+      lastName: { label: "Last name", type: "text" },
+    },
     async authorize(raw) {
       const token = String(raw?.token ?? "");
       if (!token) return null;
+      const firstName = String(raw?.firstName ?? "").trim();
+      const lastName = String(raw?.lastName ?? "").trim();
 
       const phone = await consumeWaLogin(token); // single-use; null unless VERIFIED
       if (!phone) return null;
 
       let user = await prisma.user.findUnique({ where: { phone } });
       if (!user) {
+        // First-ever login for this number: create the account. Names come from
+        // the post-verify step; admin number is bootstrapped with admin rights.
         const isAdmin =
           !!process.env.ADMIN_PHONE && phone === normalizePhone(process.env.ADMIN_PHONE);
+        const fullName =
+          [firstName, lastName].filter(Boolean).join(" ") ||
+          (isAdmin ? "Platform Admin" : "Guest");
         user = await prisma.user.create({
           data: {
             phone,
-            name: isAdmin ? "Platform Admin" : "Guest",
+            firstName: firstName || null,
+            lastName: lastName || null,
+            name: fullName,
             roles: ["GUEST"],
             isAdmin,
           },

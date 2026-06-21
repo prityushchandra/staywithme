@@ -74,14 +74,31 @@ export async function verifyWaLogin(code: string, senderPhone: string): Promise<
 
 export type WaLoginStatus = "pending" | "verified" | "expired" | "unknown";
 
-/** Poll a login's status by its token (no phone is ever returned to the client). */
-export async function waLoginStatus(token: string): Promise<WaLoginStatus> {
+/**
+ * Poll a login by its token. Returns the status and, once verified, whether the
+ * sender is a brand-new user (so the UI can collect their name). No phone is ever
+ * returned to the client — only this boolean, and only to the token holder.
+ */
+export async function waLoginInfo(
+  token: string
+): Promise<{ status: WaLoginStatus; needsProfile: boolean }> {
   const row = await prisma.whatsAppLogin.findUnique({ where: { token } });
-  if (!row) return "unknown";
-  if (row.status === "VERIFIED") return "verified";
-  if (row.status === "CONSUMED") return "verified"; // already used by this browser
-  if (row.expiresAt.getTime() < Date.now()) return "expired";
-  return "pending";
+  if (!row) return { status: "unknown", needsProfile: false };
+
+  let status: WaLoginStatus;
+  if (row.status === "VERIFIED" || row.status === "CONSUMED") status = "verified";
+  else if (row.expiresAt.getTime() < Date.now()) status = "expired";
+  else status = "pending";
+
+  let needsProfile = false;
+  if (status === "verified" && row.phone) {
+    const user = await prisma.user.findUnique({
+      where: { phone: row.phone },
+      select: { id: true },
+    });
+    needsProfile = !user; // first-ever login for this number
+  }
+  return { status, needsProfile };
 }
 
 /**
