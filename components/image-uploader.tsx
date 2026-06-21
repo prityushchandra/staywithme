@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { CldUploadWidget } from "next-cloudinary";
-import { ImagePlus, Star, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import { ImagePlus, Star, Loader2, GripVertical, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SmartImage } from "@/components/smart-image";
 
@@ -70,16 +70,9 @@ export function ImageUploader({
     onChange(value.filter((u) => u !== url));
   }
 
-  // Reorder: swap a photo with its neighbour. Index 0 is the cover.
-  function move(idx: number, dir: -1 | 1) {
-    const j = idx + dir;
-    if (j < 0 || j >= value.length) return;
-    const next = [...value];
-    [next[idx], next[j]] = [next[j], next[idx]];
-    onChange(next);
-  }
-
   // Drag-and-drop reorder: pull the dragged photo out and drop it at `to`.
+  // Driven by Pointer Events (below) so it works with both touch and a mouse —
+  // the HTML5 drag-and-drop API does not fire from touch gestures on mobile.
   function reorder(from: number, to: number) {
     if (from === to || from < 0 || to < 0 || from >= value.length || to >= value.length) {
       return;
@@ -88,6 +81,40 @@ export function ImageUploader({
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved);
     onChange(next);
+  }
+
+  // Drag handle: capture the pointer so we keep getting move/up events even when
+  // the finger leaves the handle; figure out which tile is under the finger via
+  // hit-testing, then reorder on release.
+  function startDrag(e: React.PointerEvent, idx: number) {
+    e.preventDefault();
+    setDragIndex(idx);
+    setOverIndex(idx);
+    try {
+      (e.currentTarget as Element).setPointerCapture(e.pointerId);
+    } catch {
+      /* capture not supported — drag still works while over the handle */
+    }
+  }
+
+  function onHandleMove(e: React.PointerEvent) {
+    if (dragIndex === null) return;
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const tile = el?.closest<HTMLElement>("[data-photo-index]");
+    if (!tile) return;
+    const to = Number(tile.dataset.photoIndex);
+    if (!Number.isNaN(to) && to !== overIndex) setOverIndex(to);
+  }
+
+  function endDrag(e: React.PointerEvent) {
+    if (dragIndex !== null && overIndex !== null) reorder(dragIndex, overIndex);
+    setDragIndex(null);
+    setOverIndex(null);
+    try {
+      (e.currentTarget as Element).releasePointerCapture(e.pointerId);
+    } catch {
+      /* nothing to release */
+    }
   }
 
   async function onFilesPicked(files: FileList | null) {
@@ -167,41 +194,20 @@ export function ImageUploader({
       {value.length > 0 && (
         <>
           <p className="text-xs text-muted-foreground">
-            The first photo is your cover. Drag photos to rearrange them (or use
-            the arrows); hover a photo to remove it.
+            The first photo is your cover. Drag the{" "}
+            <GripVertical className="inline h-3.5 w-3.5 align-text-bottom" /> handle
+            to rearrange photos; tap ✕ to remove one.
           </p>
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
             {value.map((url, idx) => (
               <div
                 key={url}
-                draggable
-                onDragStart={(e) => {
-                  setDragIndex(idx);
-                  e.dataTransfer.effectAllowed = "move";
-                }}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = "move";
-                  if (overIndex !== idx) setOverIndex(idx);
-                }}
-                onDragLeave={() => {
-                  if (overIndex === idx) setOverIndex(null);
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  if (dragIndex !== null) reorder(dragIndex, idx);
-                  setDragIndex(null);
-                  setOverIndex(null);
-                }}
-                onDragEnd={() => {
-                  setDragIndex(null);
-                  setOverIndex(null);
-                }}
-                className={`group relative aspect-square cursor-grab select-none overflow-hidden rounded-lg bg-muted active:cursor-grabbing ${
-                  overIndex === idx && dragIndex !== idx
+                data-photo-index={idx}
+                className={`relative aspect-square select-none overflow-hidden rounded-lg bg-muted transition-opacity ${
+                  overIndex === idx && dragIndex !== null && dragIndex !== idx
                     ? "ring-2 ring-brand ring-offset-1"
                     : ""
-                } ${dragIndex === idx ? "opacity-50" : ""}`}
+                } ${dragIndex === idx ? "opacity-40" : ""}`}
               >
                 <SmartImage
                   src={url}
@@ -217,35 +223,29 @@ export function ImageUploader({
                   </span>
                 )}
 
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      aria-label="Move earlier"
-                      disabled={idx === 0}
-                      onClick={() => move(idx, -1)}
-                      className="rounded bg-white/90 p-1 text-black hover:bg-white disabled:opacity-40"
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Move later"
-                      disabled={idx === value.length - 1}
-                      onClick={() => move(idx, 1)}
-                      className="rounded bg-white/90 p-1 text-black hover:bg-white disabled:opacity-40"
-                    >
-                      <ChevronRight className="h-4 w-4" />
-                    </button>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => remove(url)}
-                    className="rounded bg-white/90 px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-white"
-                  >
-                    Remove
-                  </button>
-                </div>
+                {/* Remove — always visible (touch devices have no hover) */}
+                <button
+                  type="button"
+                  aria-label={`Remove photo ${idx + 1}`}
+                  onClick={() => remove(url)}
+                  className="absolute right-1 top-1 z-20 grid h-6 w-6 place-items-center rounded-full bg-black/60 text-white transition-colors hover:bg-red-600"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+
+                {/* Drag handle — Pointer Events so it works on touch and mouse.
+                    touch-none keeps the gesture a drag (not a page scroll). */}
+                <button
+                  type="button"
+                  aria-label={`Drag photo ${idx + 1} to reorder`}
+                  onPointerDown={(e) => startDrag(e, idx)}
+                  onPointerMove={onHandleMove}
+                  onPointerUp={endDrag}
+                  onPointerCancel={endDrag}
+                  className="absolute bottom-1 right-1 z-20 grid h-7 w-7 cursor-grab touch-none place-items-center rounded-md bg-black/60 text-white active:cursor-grabbing"
+                >
+                  <GripVertical className="h-4 w-4" />
+                </button>
               </div>
             ))}
           </div>
