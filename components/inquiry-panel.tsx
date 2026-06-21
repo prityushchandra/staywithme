@@ -105,7 +105,6 @@ export function InquiryPanel({
         <div className="space-y-3 rounded-xl border px-4 py-3">
           <GuestStepper
             label="Adults"
-            hint="Ages 2 or above"
             value={guests}
             min={1}
             max={maxGuests}
@@ -116,7 +115,6 @@ export function InquiryPanel({
               <div className="border-t" />
               <GuestStepper
                 label="Infants"
-                hint="Under 2"
                 value={infants}
                 min={0}
                 max={maxInfants}
@@ -200,14 +198,12 @@ export function InquiryPanel({
 // −/value/+ row used for the Adults / Infants selectors in the booking card.
 function GuestStepper({
   label,
-  hint,
   value,
   min,
   max,
   onChange,
 }: {
   label: string;
-  hint: string;
   value: number;
   min: number;
   max: number;
@@ -215,10 +211,7 @@ function GuestStepper({
 }) {
   return (
     <div className="flex items-center justify-between gap-4">
-      <div>
-        <p className="text-sm font-medium">{label}</p>
-        <p className="text-xs text-muted-foreground">{hint}</p>
-      </div>
+      <p className="text-sm font-medium">{label}</p>
       <div className="flex items-center gap-3">
         <button
           type="button"

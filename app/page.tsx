@@ -40,9 +40,13 @@ export default async function HomePage() {
         />
         <div className="container relative py-14 sm:py-20">
           <div className="mb-4 flex justify-center">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-brand/30 bg-brand/5 px-4 py-1.5 font-mono text-xs uppercase tracking-[0.18em] text-brand shadow-sm backdrop-blur">
-              ✦ Your community, your stays
-            </span>
+            <div className="animate-banner-drift relative overflow-hidden rounded-md border border-brand/25 bg-gradient-to-r from-brand-accent/10 via-brand/20 to-brand-accent/10 px-5 py-2 shadow-sm">
+              <span className="animate-banner-sheen pointer-events-none absolute inset-y-0 left-0 w-1/4 bg-gradient-to-r from-transparent via-white/50 to-transparent" />
+              <span className="relative flex items-center gap-2 font-mono text-xs uppercase tracking-[0.18em] text-brand">
+                <span className="animate-pulse">✦</span>
+                Your community, your stays
+              </span>
+            </div>
           </div>
           <h1 className="text-center text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
             Book a{" "}

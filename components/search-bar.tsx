@@ -171,15 +171,18 @@ function GuestsField({
         type="button"
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          "flex w-full items-center text-left",
+          "flex w-full items-center gap-2.5 text-left",
           compact ? "px-4 py-0" : "px-4 py-3"
         )}
       >
-        <span className="flex items-center gap-1.5 text-sm">
-          {compact && <Users className="h-4 w-4 text-muted-foreground" />}
-          <span className={cn(hasGuests ? "font-medium text-foreground" : "text-muted-foreground")}>
-            {hasGuests ? summary : "Add Guests"}
-          </span>
+        <Users className="h-5 w-5 shrink-0 text-brand" />
+        <span
+          className={cn(
+            "truncate text-sm",
+            hasGuests ? "font-medium text-foreground" : "text-muted-foreground"
+          )}
+        >
+          {hasGuests ? summary : "Add Guests"}
         </span>
       </button>
 
@@ -187,7 +190,6 @@ function GuestsField({
         <div className="absolute right-0 top-full z-30 mt-3 w-[19rem] max-w-[calc(100vw-2rem)] space-y-1 rounded-2xl border bg-white p-4 shadow-xl duration-150 animate-in fade-in zoom-in-95">
           <StepperRow
             label="Adults"
-            hint="Ages 2 or above"
             value={adults}
             min={1}
             max={16}
@@ -196,7 +198,6 @@ function GuestsField({
           <div className="border-t" />
           <StepperRow
             label="Infants"
-            hint="Under 2"
             value={infants}
             min={0}
             max={10}
@@ -211,14 +212,12 @@ function GuestsField({
 // Reusable −/value/+ row used inside the guests popover.
 function StepperRow({
   label,
-  hint,
   value,
   min,
   max,
   onChange,
 }: {
   label: string;
-  hint: string;
   value: number;
   min: number;
   max: number;
@@ -226,10 +225,7 @@ function StepperRow({
 }) {
   return (
     <div className="flex items-center justify-between gap-4 py-2">
-      <div>
-        <p className="text-sm font-medium">{label}</p>
-        <p className="text-xs text-muted-foreground">{hint}</p>
-      </div>
+      <p className="text-sm font-medium">{label}</p>
       <div className="flex items-center gap-3">
         <button
           type="button"

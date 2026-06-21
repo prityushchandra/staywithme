@@ -188,24 +188,19 @@ export function DateRangePicker({
         )}
       >
         <CalendarDays className="h-5 w-5 shrink-0 text-brand" />
-        <span className="flex min-w-0 flex-col">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {card ? "Dates" : "When"}
-          </span>
-          <span
-            className={cn(
-              "truncate text-sm",
-              checkIn ? "font-medium text-foreground" : "text-muted-foreground"
-            )}
-          >
-            {label}
-            {nights > 0 && (
-              <span className="font-normal text-muted-foreground">
-                {"  ·  "}
-                {nights} night{nights > 1 ? "s" : ""}
-              </span>
-            )}
-          </span>
+        <span
+          className={cn(
+            "truncate text-sm",
+            checkIn ? "font-medium text-foreground" : "text-muted-foreground"
+          )}
+        >
+          {label}
+          {nights > 0 && (
+            <span className="font-normal text-muted-foreground">
+              {"  ·  "}
+              {nights} night{nights > 1 ? "s" : ""}
+            </span>
+          )}
         </span>
       </button>
 
