@@ -11,7 +11,7 @@ import { toUtcDate } from "./dates";
 import { sendWhatsApp, sendNotification } from "./wa-send";
 import { formatINR } from "./pricing";
 import { getPlatformSettings } from "./settings";
-import { computeBookingMoney, computeRefund } from "./payouts";
+import { computeBookingMoney, computeBookingMoneyFromTotal, perNightFromBase, computeRefund } from "./payouts";
 
 function fmt(d: Date): string {
   return d.toLocaleDateString("en-US", {
@@ -52,6 +52,12 @@ export async function reserveForGuest(input: {
   checkOut: Date;
   guests: number;
   amountPaid?: number; // paise received so far
+  /**
+   * Negotiated, fee-inclusive total (paise). When set, the whole money split —
+   * host payout, platform fee, per-night — is derived from THIS total instead of
+   * the listing's DB price (the guest haggled the headline rate down/up).
+   */
+  guestTotal?: number;
 }): Promise<{ ok: true; summary: string } | { ok: false; error: string }> {
   const { listingId, guestId, checkIn, checkOut, guests } = input;
   if (nightsBetween(checkIn, checkOut) <= 0)
@@ -69,7 +75,12 @@ export async function reserveForGuest(input: {
 
   const settings = await getPlatformSettings();
   const nights = nightsBetween(checkIn, checkOut);
-  const money = computeBookingMoney(listing.basePrice, nights, settings.platformFeePercent, listing.monthlyPrice);
+  // A negotiated total overrides the listing price; otherwise compute from the DB.
+  const negotiated = input.guestTotal && input.guestTotal > 0;
+  const money = negotiated
+    ? computeBookingMoneyFromTotal(input.guestTotal!, nights, settings.platformFeePercent)
+    : computeBookingMoney(listing.basePrice, nights, settings.platformFeePercent, listing.monthlyPrice);
+  const perNight = perNightFromBase(money.baseTotal, nights);
   const paid = Math.max(0, Math.min(input.amountPaid ?? 0, money.guestTotal));
   const due = money.guestTotal - paid;
   // The due is paid by the guest DIRECTLY to the host at check-in, so the admin
@@ -141,9 +152,10 @@ export async function reserveForGuest(input: {
     after(() => sendNotification(guest.phone!, "bookingGuest", guestParams, guestBody));
   }
 
+  const priceLine = `${formatINR(perNight)}/night × ${nights} = ${formatINR(money.baseTotal)}${negotiated ? " (negotiated)" : ""}`;
   return {
     ok: true,
-    summary: `*Reserved*\n*${listing.title}* (${unitBlock(listing)})\n${r}\n\nGuest: ${guest.name ?? guest.phone}\n\nReceived: ${formatINR(paid)} · Due (guest pays host): *${formatINR(due)}*\nHost payout: ${formatINR(hostFromAdmin)} · Your earning: *${formatINR(adminEarning)}*`,
+    summary: `*Reserved*\n*${listing.title}* (${unitBlock(listing)})\n${r}\n\nGuest: ${guest.name ?? guest.phone}\n\n${priceLine}\nTotal (with fee): *${formatINR(money.guestTotal)}*\n\nReceived: ${formatINR(paid)} · Due (guest pays host): *${formatINR(due)}*\nHost payout: ${formatINR(hostFromAdmin)} · Your earning: *${formatINR(adminEarning)}*`,
   };
 }
 
@@ -215,6 +227,9 @@ export async function confirmBooking(
     checkIn: booking.checkIn,
     checkOut: booking.checkOut,
     guests: booking.guests,
+    amountPaid: booking.amountPaid,
+    // Preserve a negotiated total already captured on the pending stub.
+    guestTotal: booking.totalAmount > 0 ? booking.totalAmount : undefined,
   });
   if (!res.ok) return res;
   // reserveForGuest created a fresh CONFIRMED booking; drop the old PENDING stub.

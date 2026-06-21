@@ -18,6 +18,7 @@ import {
 import { addBlock, toUtcDate } from "@/lib/availability";
 import { getPlatformSettings } from "@/lib/settings";
 import { formatINR } from "@/lib/pricing";
+import { computeBookingMoneyFromTotal, perNightFromBase } from "@/lib/payouts";
 
 // WhatsApp bot — ADMIN ONLY. Hosts/guests are pointed back to the admin.
 // Reserve = forward the guest's enquiry → "how much received?". Listings are
@@ -152,14 +153,26 @@ function parseEnquiry(text: string) {
   const co = /Check[\s-]*out:\s*(\d{4}-\d{2}-\d{2})/i.exec(text);
   if (!ref || !ci || !co) return null;
   const ph = /(?:contact|guest|phone|number)\s*[:\-]?\s*(\+?\d[\d\s-]{8,})/i.exec(text);
-  return { ref: ref[1], checkIn: ci[1], checkOut: co[1], guestPhone: ph ? normalizePhone(ph[1]) : null };
+  // The "Total: ₹X" line (fee-inclusive). The admin/guest may have edited it to
+  // the negotiated figure; if present we book against THIS amount, not the DB
+  // price. Paise = rupees × 100.
+  const tot = /Total:\s*\*?\s*₹?\s*([\d,]+)/i.exec(text);
+  const totalRupees = tot ? parseInt(tot[1].replace(/,/g, ""), 10) : NaN;
+  const totalPaise = Number.isFinite(totalRupees) && totalRupees > 0 ? totalRupees * 100 : null;
+  return {
+    ref: ref[1],
+    checkIn: ci[1],
+    checkOut: co[1],
+    guestPhone: ph ? normalizePhone(ph[1]) : null,
+    total: totalPaise,
+  };
 }
 
 // ---------- conversation state (DB-backed; survives serverless invocations) ----------
 // One CONFIRMED booking the admin can choose from when cancelling.
 type Candidate = { bookingId: string; unit: string; block: string; guest: string };
 type Convo =
-  | { kind: "reserveFwd"; step: "enquiry" | "guestPhone" | "amount"; listingId?: string; checkIn?: string; checkOut?: string; guestPhone?: string }
+  | { kind: "reserveFwd"; step: "enquiry" | "guestPhone" | "amount"; listingId?: string; checkIn?: string; checkOut?: string; guestPhone?: string; total?: number }
   | { kind: "cancel"; step: "dates" | "pick"; start?: string; end?: string; candidates?: Candidate[] }
   | { kind: "block"; cmd: "block" | "unblock"; step: "dates" | "flat"; start?: string; end?: string }
   | { kind: "unblockConfirm"; bookingId: string; listingId: string; start: string; end: string };
@@ -193,6 +206,26 @@ const KEYWORDS = [
   "earnings", "help", "hi", "hello", "menu", "start", "stop", "reset", "yes", "no",
 ];
 const ASK_AMOUNT = "How much have you received? (₹ amount, or 0 if nothing yet)";
+
+// The amount prompt — when a (negotiated) total is on the enquiry, show how it
+// splits into per-night / host payout / your fee so the admin can sanity-check
+// before recording what was received.
+async function amountPrompt(flow: Extract<Convo, { kind: "reserveFwd" }>): Promise<string> {
+  if (!flow.total || !flow.checkIn || !flow.checkOut) return ASK_AMOUNT;
+  const nights = Math.max(
+    1,
+    Math.round((Date.parse(flow.checkOut) - Date.parse(flow.checkIn)) / 86_400_000)
+  );
+  const { platformFeePercent } = await getPlatformSettings();
+  const money = computeBookingMoneyFromTotal(flow.total, nights, platformFeePercent);
+  const perNight = perNightFromBase(money.baseTotal, nights);
+  return (
+    `Booking total: *${formatINR(money.guestTotal)}*\n` +
+    `≈ ${formatINR(perNight)}/night × ${nights} = ${formatINR(money.baseTotal)} → host\n` +
+    `Platform fee: ${formatINR(money.platformFee)} → you\n\n` +
+    ASK_AMOUNT
+  );
+}
 
 async function overlappingBookings(listingId: string, start: Date, end: Date) {
   return prisma.booking.findMany({
@@ -290,11 +323,12 @@ async function handleReserveFwd(flow: Extract<Convo, { kind: "reserveFwd" }>, te
     flow.listingId = listing.id;
     flow.checkIn = parsed.checkIn;
     flow.checkOut = parsed.checkOut;
+    flow.total = parsed.total ?? undefined; // negotiated, fee-inclusive (paise)
     if (parsed.guestPhone) {
       flow.guestPhone = parsed.guestPhone;
       flow.step = "amount";
       await setConvo(phone, flow);
-      return ASK_AMOUNT;
+      return amountPrompt(flow);
     }
     flow.step = "guestPhone";
     await setConvo(phone, flow);
@@ -306,7 +340,7 @@ async function handleReserveFwd(flow: Extract<Convo, { kind: "reserveFwd" }>, te
     flow.guestPhone = p;
     flow.step = "amount";
     await setConvo(phone, flow);
-    return ASK_AMOUNT;
+    return amountPrompt(flow);
   }
   // amount
   await delConvo(phone);
@@ -320,6 +354,7 @@ async function handleReserveFwd(flow: Extract<Convo, { kind: "reserveFwd" }>, te
     checkOut: toUtcDate(flow.checkOut!),
     guests: 1,
     amountPaid: rupees * 100,
+    guestTotal: flow.total, // book against the negotiated total when present
   });
   return res.ok ? res.summary : res.error;
 }

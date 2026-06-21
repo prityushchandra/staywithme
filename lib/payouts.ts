@@ -33,6 +33,32 @@ export function computeBookingMoney(
   return { nights, baseTotal, platformFee, guestTotal, hostPayout: baseTotal };
 }
 
+/**
+ * Derive the money split from a NEGOTIATED, fee-inclusive total (paise) instead
+ * of the listing's DB price — e.g. the guest haggled ₹2,500/night down to ₹2,400,
+ * so the agreed total is ₹2,400 × 3 + 10% = ₹7,920. From that total we recover:
+ *   base (host payout) = total ÷ (1 + fee%),  fee (admin) = total − base.
+ * Base is rounded to the nearest whole rupee and the fee takes the remainder, so
+ * base + fee === total exactly and both are clean integer-rupee figures.
+ */
+export function computeBookingMoneyFromTotal(
+  guestTotal: number,
+  nights: number,
+  feePercent: number
+): BookingMoney {
+  const total = Math.max(0, Math.round(guestTotal));
+  // Back out the base from the fee-inclusive total, rounded to a whole rupee.
+  const rawBase = total / (1 + feePercent / 100);
+  const base = Math.min(total, Math.round(rawBase / 100) * 100);
+  const platformFee = total - base;
+  return { nights, baseTotal: base, platformFee, guestTotal: total, hostPayout: base };
+}
+
+/** Effective per-night host charge (whole rupees, paise), for display. */
+export function perNightFromBase(baseTotal: number, nights: number): number {
+  return Math.round(baseTotal / Math.max(1, nights) / 100) * 100;
+}
+
 export interface RefundResult {
   guestRefund: number; // back to the guest (platform fee never included)
   hostPayout: number; // forfeited nightly amount kept by the host
