@@ -16,6 +16,7 @@ export interface SearchParams {
   checkIn?: string;
   checkOut?: string;
   guests?: number;
+  infants?: number;
   /** total price per night in RUPEES (what guests see: base + platform fee) */
   minPrice?: number;
   maxPrice?: number;
@@ -64,6 +65,10 @@ export function buildListingWhere(
 
   if (params.guests && params.guests > 0) {
     where.maxGuests = { gte: params.guests };
+  }
+
+  if (params.infants && params.infants > 0) {
+    where.maxInfants = { gte: params.infants };
   }
 
   const price: Prisma.IntFilter = {};

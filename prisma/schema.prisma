@@ -167,6 +167,7 @@ model Listing {
   bathrooms   Int           @default(1)
   beds        Int           @default(1)
   maxGuests   Int           @default(2)
+  maxInfants  Int           @default(0)
 
   basePrice   Int // minor units (paise), INR
   // Optional monthly rate (paise). When set, stays of 30+ nights are charged at

@@ -61,6 +61,7 @@ export async function PATCH(
         bathrooms: d.bathrooms,
         beds: d.beds,
         maxGuests: d.maxGuests,
+        maxInfants: d.maxInfants,
         basePrice: d.basePriceRupees * 100,
         monthlyPrice: d.monthlyPriceRupees > 0 ? d.monthlyPriceRupees * 100 : null,
         cancellationPolicy: d.cancellationPolicy,

@@ -36,6 +36,7 @@ export default async function SearchPage({
     checkIn: asString(sp.checkIn),
     checkOut: asString(sp.checkOut),
     guests: asNumber(sp.guests),
+    infants: asNumber(sp.infants),
     minPrice: asNumber(sp.minPrice),
     maxPrice: asNumber(sp.maxPrice),
     roomType: asArray(sp.roomType),

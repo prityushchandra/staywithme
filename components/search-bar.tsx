@@ -15,7 +15,7 @@ export function SearchBar({
   initial,
 }: {
   variant?: "hero" | "compact";
-  initial?: { destination?: string; checkIn?: string; checkOut?: string; guests?: number };
+  initial?: { destination?: string; checkIn?: string; checkOut?: string; guests?: number; infants?: number };
 }) {
   const router = useRouter();
   const searchDates = useSearchDates();
@@ -23,11 +23,15 @@ export function SearchBar({
   const [checkIn, setCheckIn] = useState(initial?.checkIn ?? "");
   const [checkOut, setCheckOut] = useState(initial?.checkOut ?? "");
   const [guests, setGuests] = useState(initial?.guests ?? 1);
+  const [infants, setInfants] = useState(initial?.infants ?? 0);
 
   function changeGuests(n: number) {
     const g = Math.max(1, Math.min(16, n));
     setGuests(g);
     searchDates?.setGuests(g);
+  }
+  function changeInfants(n: number) {
+    setInfants(Math.max(0, Math.min(10, n)));
   }
 
   function submit(e: React.FormEvent) {
@@ -37,6 +41,7 @@ export function SearchBar({
     if (checkIn) params.set("checkIn", checkIn);
     if (checkOut) params.set("checkOut", checkOut);
     if (guests > 1) params.set("guests", String(guests));
+    if (infants > 0) params.set("infants", String(infants));
     router.push(`/search?${params.toString()}`);
   }
 
@@ -95,7 +100,13 @@ export function SearchBar({
       )}
       <Divider compact={compact} />
 
-      <GuestsField guests={guests} onChange={changeGuests} compact={compact} />
+      <GuestsField
+        adults={guests}
+        infants={infants}
+        onChangeAdults={changeGuests}
+        onChangeInfants={changeInfants}
+        compact={compact}
+      />
 
       <button
         type="submit"
@@ -112,14 +123,19 @@ export function SearchBar({
   );
 }
 
-// Clean guests selector: shows a summary; opens a small panel with a stepper.
+// Guests selector: shows "Add Guests" (no "Who" label); opens a panel with
+// separate Adults and Infants steppers.
 function GuestsField({
-  guests,
-  onChange,
+  adults,
+  infants,
+  onChangeAdults,
+  onChangeInfants,
   compact,
 }: {
-  guests: number;
-  onChange: (n: number) => void;
+  adults: number;
+  infants: number;
+  onChangeAdults: (n: number) => void;
+  onChangeInfants: (n: number) => void;
   compact: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -141,7 +157,13 @@ function GuestsField({
     };
   }, [open]);
 
-  const label = `${guests} guest${guests === 1 ? "" : "s"}`;
+  const hasGuests = adults > 1 || infants > 0;
+  const summary = [
+    `${adults} adult${adults === 1 ? "" : "s"}`,
+    infants > 0 ? `${infants} infant${infants === 1 ? "" : "s"}` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
 
   return (
     <div ref={ref} className="relative min-w-0 flex-1">
@@ -149,56 +171,86 @@ function GuestsField({
         type="button"
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          "flex w-full flex-col justify-center text-left",
-          compact ? "px-4 py-0" : "px-4 py-1"
+          "flex w-full items-center text-left",
+          compact ? "px-4 py-0" : "px-4 py-3"
         )}
       >
-        {!compact && (
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Who
-          </span>
-        )}
         <span className="flex items-center gap-1.5 text-sm">
           {compact && <Users className="h-4 w-4 text-muted-foreground" />}
-          <span className={cn(guests > 1 ? "text-foreground" : "text-muted-foreground")}>
-            {guests > 1 ? label : "Add guests"}
+          <span className={cn(hasGuests ? "font-medium text-foreground" : "text-muted-foreground")}>
+            {hasGuests ? summary : "Add Guests"}
           </span>
         </span>
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-3 w-[18rem] max-w-[calc(100vw-2rem)] rounded-2xl border bg-white p-4 shadow-xl duration-150 animate-in fade-in zoom-in-95">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium">Guests</p>
-              <p className="text-xs text-muted-foreground">How many are staying?</p>
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                aria-label="Fewer guests"
-                onClick={() => onChange(guests - 1)}
-                disabled={guests <= 1}
-                className="grid h-9 w-9 place-items-center rounded-full border text-muted-foreground transition hover:border-foreground hover:text-foreground disabled:opacity-30 disabled:hover:border-border"
-              >
-                <Minus className="h-4 w-4" />
-              </button>
-              <span className="w-6 text-center text-base font-medium tabular-nums">
-                {guests}
-              </span>
-              <button
-                type="button"
-                aria-label="More guests"
-                onClick={() => onChange(guests + 1)}
-                disabled={guests >= 16}
-                className="grid h-9 w-9 place-items-center rounded-full border text-muted-foreground transition hover:border-foreground hover:text-foreground disabled:opacity-30 disabled:hover:border-border"
-              >
-                <Plus className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
+        <div className="absolute right-0 top-full z-30 mt-3 w-[19rem] max-w-[calc(100vw-2rem)] space-y-1 rounded-2xl border bg-white p-4 shadow-xl duration-150 animate-in fade-in zoom-in-95">
+          <StepperRow
+            label="Adults"
+            hint="Ages 2 or above"
+            value={adults}
+            min={1}
+            max={16}
+            onChange={onChangeAdults}
+          />
+          <div className="border-t" />
+          <StepperRow
+            label="Infants"
+            hint="Under 2"
+            value={infants}
+            min={0}
+            max={10}
+            onChange={onChangeInfants}
+          />
         </div>
       )}
+    </div>
+  );
+}
+
+// Reusable −/value/+ row used inside the guests popover.
+function StepperRow({
+  label,
+  hint,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (n: number) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-2">
+      <div>
+        <p className="text-sm font-medium">{label}</p>
+        <p className="text-xs text-muted-foreground">{hint}</p>
+      </div>
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          aria-label={`Fewer ${label.toLowerCase()}`}
+          onClick={() => onChange(value - 1)}
+          disabled={value <= min}
+          className="grid h-9 w-9 place-items-center rounded-full border text-muted-foreground transition hover:border-foreground hover:text-foreground disabled:opacity-30 disabled:hover:border-border"
+        >
+          <Minus className="h-4 w-4" />
+        </button>
+        <span className="w-6 text-center text-base font-medium tabular-nums">{value}</span>
+        <button
+          type="button"
+          aria-label={`More ${label.toLowerCase()}`}
+          onClick={() => onChange(value + 1)}
+          disabled={value >= max}
+          className="grid h-9 w-9 place-items-center rounded-full border text-muted-foreground transition hover:border-foreground hover:text-foreground disabled:opacity-30 disabled:hover:border-border"
+        >
+          <Plus className="h-4 w-4" />
+        </button>
+      </div>
     </div>
   );
 }

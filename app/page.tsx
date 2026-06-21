@@ -39,9 +39,11 @@ export default async function HomePage() {
           }}
         />
         <div className="container relative py-14 sm:py-20">
-          <p className="mb-3 text-center font-mono text-xs uppercase tracking-[0.18em] text-brand">
-            ✦ Your community, your stays
-          </p>
+          <div className="mb-4 flex justify-center">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-brand/30 bg-brand/5 px-4 py-1.5 font-mono text-xs uppercase tracking-[0.18em] text-brand shadow-sm backdrop-blur">
+              ✦ Your community, your stays
+            </span>
+          </div>
           <h1 className="text-center text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
             Book a{" "}
             <span className="font-bold text-[#C2410C]">homestay</span> in{" "}

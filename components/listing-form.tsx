@@ -54,6 +54,7 @@ export interface ListingFormInitial {
   bathrooms: number;
   beds: number;
   maxGuests: number;
+  maxInfants?: number;
   basePriceRupees: number;
   monthlyPriceRupees?: number;
   cancellationPolicy: string;
@@ -102,6 +103,7 @@ export function ListingForm({
     bathrooms: initial?.bathrooms ?? 1,
     beds: initial?.beds ?? 1,
     maxGuests: initial?.maxGuests ?? 2,
+    maxInfants: initial?.maxInfants ?? 0,
     basePriceRupees: initial?.basePriceRupees ?? 0,
     monthlyPriceRupees: initial?.monthlyPriceRupees ?? 0,
     cancellationPolicy: initial?.cancellationPolicy ?? policies[0]?.policy ?? "FLEXIBLE",
@@ -166,7 +168,7 @@ export function ListingForm({
 
   // Airbnb-style counter row (− value +), with hard min/max bounds.
   const counter = (
-    key: "bedrooms" | "bathrooms" | "beds" | "maxGuests",
+    key: "bedrooms" | "bathrooms" | "beds" | "maxGuests" | "maxInfants",
     label: string,
     min: number,
     max: number
@@ -263,6 +265,7 @@ export function ListingForm({
           {counter("beds", "Beds", 1, 4)}
           {counter("bathrooms", "Bathrooms", 1, 4)}
           {counter("maxGuests", "Max guests", 1, 20)}
+          {counter("maxInfants", "Max infants", 0, 10)}
         </div>
       </section>
 

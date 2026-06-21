@@ -33,6 +33,7 @@ export const listingInputSchema = z.object({
   bathrooms: z.coerce.number().int().min(1).max(4),
   beds: z.coerce.number().int().min(1).max(4),
   maxGuests: z.coerce.number().int().min(1).max(20),
+  maxInfants: z.coerce.number().int().min(0).max(10).default(0),
   // basePrice is entered in RUPEES in the form, converted to paise server-side.
   basePriceRupees: z.coerce.number().int().min(1, "Enter a price").max(10_000_000),
   // Optional monthly rate (rupees); 0/empty = not offered. Applies to 30+ night stays.

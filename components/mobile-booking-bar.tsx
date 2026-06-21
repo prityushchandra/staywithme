@@ -19,7 +19,7 @@ export function MobileBookingBar({
   platformFeePercent: number;
   blockedRanges?: { startDate: string; endDate: string }[];
 }) {
-  const { checkIn, checkOut, guests } = useBooking();
+  const { checkIn, checkOut, guests, infants } = useBooking();
   const hasDates =
     Boolean(checkIn && checkOut) &&
     new Date(checkOut).getTime() > new Date(checkIn).getTime();
@@ -66,8 +66,9 @@ export function MobileBookingBar({
                 <span className="font-normal text-muted-foreground">total</span>
               </div>
               <div className="text-xs text-muted-foreground">
-                {nights} night{nights > 1 ? "s" : ""} · {guests} guest
+                {nights} night{nights > 1 ? "s" : ""} · {guests} adult
                 {guests > 1 ? "s" : ""}
+                {infants > 0 ? ` · ${infants} infant${infants > 1 ? "s" : ""}` : ""}
                 {monthly ? " · monthly rate" : ""}
               </div>
             </>

@@ -8,9 +8,11 @@ import { createContext, useContext, useState } from "react";
 type BookingState = {
   checkIn: string;
   checkOut: string;
-  guests: number;
+  guests: number; // adults
+  infants: number;
   setRange: (checkIn: string, checkOut: string) => void;
   setGuests: (n: number) => void;
+  setInfants: (n: number) => void;
   /** Range-aware single-date click used by the calendar (start, then end). */
   pickDate: (ymd: string) => void;
 };
@@ -31,6 +33,7 @@ export function BookingProvider({
   const [checkIn, setCheckIn] = useState(initialCheckIn);
   const [checkOut, setCheckOut] = useState(initialCheckOut);
   const [guests, setGuests] = useState(initialGuests);
+  const [infants, setInfants] = useState(0);
 
   function setRange(ci: string, co: string) {
     setCheckIn(ci);
@@ -55,7 +58,7 @@ export function BookingProvider({
 
   return (
     <BookingCtx.Provider
-      value={{ checkIn, checkOut, guests, setRange, setGuests, pickDate }}
+      value={{ checkIn, checkOut, guests, infants, setRange, setGuests, setInfants, pickDate }}
     >
       {children}
     </BookingCtx.Provider>

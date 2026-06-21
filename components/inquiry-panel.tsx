@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { PricingBreakdown } from "@/components/pricing-breakdown";
@@ -24,6 +23,7 @@ export function InquiryPanel({
   monthlyPrice,
   platformFeePercent,
   maxGuests,
+  maxInfants = 0,
   whatsappNumber,
   guestName,
   guestPhone,
@@ -39,6 +39,7 @@ export function InquiryPanel({
   monthlyPrice?: number | null;
   platformFeePercent: number;
   maxGuests: number;
+  maxInfants?: number;
   whatsappNumber: string;
   guestName?: string;
   guestPhone?: string;
@@ -47,7 +48,7 @@ export function InquiryPanel({
   blockedRanges?: { startDate: string; endDate: string }[];
   isAuthenticated?: boolean;
 }) {
-  const { checkIn, checkOut, guests, setRange, setGuests } = useBooking();
+  const { checkIn, checkOut, guests, infants, setRange, setGuests, setInfants } = useBooking();
   const [pickerOpen, setPickerOpen] = useState(false);
   const loginHref = `/sign-in?callbackUrl=${encodeURIComponent(`/listings/${propertyId}`)}`;
 
@@ -101,35 +102,28 @@ export function InquiryPanel({
           onOpenChange={setPickerOpen}
         />
 
-        <div className="space-y-1">
-          <Label className="text-xs">Guests</Label>
-          <div className="flex items-center justify-between rounded-xl border px-4 py-3">
-            <span className="text-sm">
-              {guests} guest{guests > 1 ? "s" : ""}
-            </span>
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                aria-label="Fewer guests"
-                onClick={() => setGuests(Math.max(1, guests - 1))}
-                disabled={guests <= 1}
-                className="grid h-8 w-8 place-items-center rounded-full border text-lg disabled:opacity-40"
-              >
-                −
-              </button>
-              <span className="w-4 text-center text-sm tabular-nums">{guests}</span>
-              <button
-                type="button"
-                aria-label="More guests"
-                onClick={() => setGuests(Math.min(maxGuests, guests + 1))}
-                disabled={guests >= maxGuests}
-                className="grid h-8 w-8 place-items-center rounded-full border text-lg disabled:opacity-40"
-              >
-                +
-              </button>
-            </div>
-          </div>
-          <p className="text-xs text-muted-foreground">Up to {maxGuests} guests</p>
+        <div className="space-y-3 rounded-xl border px-4 py-3">
+          <GuestStepper
+            label="Adults"
+            hint="Ages 2 or above"
+            value={guests}
+            min={1}
+            max={maxGuests}
+            onChange={(n) => setGuests(Math.max(1, Math.min(maxGuests, n)))}
+          />
+          {maxInfants > 0 && (
+            <>
+              <div className="border-t" />
+              <GuestStepper
+                label="Infants"
+                hint="Under 2"
+                value={infants}
+                min={0}
+                max={maxInfants}
+                onChange={(n) => setInfants(Math.max(0, Math.min(maxInfants, n)))}
+              />
+            </>
+          )}
         </div>
 
         {hasDates && (
@@ -187,6 +181,7 @@ export function InquiryPanel({
               checkOutTime,
               nights,
               guests,
+              infants,
               totalMinorUnits: total,
             }}
           />
@@ -199,5 +194,52 @@ export function InquiryPanel({
         </p>
       </CardContent>
     </Card>
+  );
+}
+
+// −/value/+ row used for the Adults / Infants selectors in the booking card.
+function GuestStepper({
+  label,
+  hint,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (n: number) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div>
+        <p className="text-sm font-medium">{label}</p>
+        <p className="text-xs text-muted-foreground">{hint}</p>
+      </div>
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          aria-label={`Fewer ${label.toLowerCase()}`}
+          onClick={() => onChange(value - 1)}
+          disabled={value <= min}
+          className="grid h-8 w-8 place-items-center rounded-full border text-lg disabled:opacity-40"
+        >
+          −
+        </button>
+        <span className="w-4 text-center text-sm tabular-nums">{value}</span>
+        <button
+          type="button"
+          aria-label={`More ${label.toLowerCase()}`}
+          onClick={() => onChange(value + 1)}
+          disabled={value >= max}
+          className="grid h-8 w-8 place-items-center rounded-full border text-lg disabled:opacity-40"
+        >
+          +
+        </button>
+      </div>
+    </div>
   );
 }

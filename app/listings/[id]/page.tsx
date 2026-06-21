@@ -247,6 +247,7 @@ export default async function ListingPage({
               monthlyPrice={listing.monthlyPrice}
               platformFeePercent={settings.platformFeePercent}
               maxGuests={listing.maxGuests}
+              maxInfants={listing.maxInfants}
               whatsappNumber={settings.whatsappNumber}
               guestName={guestName}
               guestPhone={guestPhone}
