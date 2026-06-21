@@ -44,10 +44,8 @@ export default async function HomePage() {
           </p>
           <h1 className="text-center text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
             Book a{" "}
-            <span className="bg-gradient-to-r from-emerald-500 to-teal-600 bg-clip-text font-bold text-transparent">
-              homestay
-            </span>{" "}
-            in <span className="italic text-brand">your society</span>
+            <span className="font-bold text-[#C2410C]">homestay</span> in{" "}
+            <span className="italic text-brand">your society</span>
           </h1>
           <p className="mx-auto mt-3 max-w-2xl text-center text-base text-muted-foreground sm:text-lg">
             Curated stays hosted by your neighbours — the easiest way to put up
