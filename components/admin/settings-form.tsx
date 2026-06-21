@@ -18,6 +18,7 @@ export function SettingsForm({
     rankWeightSave: number;
     rankWeightClick: number;
     reviewsOpenToAll: boolean;
+    showSignature: boolean;
   };
 }) {
   const router = useRouter();
@@ -162,6 +163,25 @@ export function SettingsForm({
             <span className="block text-xs text-muted-foreground">
               Off (default): only guests who completed a stay at a listing can
               review it; everyone else can still read reviews.
+            </span>
+          </span>
+        </label>
+      </div>
+
+      <div className="space-y-1">
+        <Label>Branding</Label>
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-4 w-4"
+            checked={form.showSignature}
+            onChange={(e) => set("showSignature", e.target.checked)}
+          />
+          <span>
+            Show the <strong>“by chandra”</strong> signature under the logo.
+            <span className="block text-xs text-muted-foreground">
+              Off: the StayWithMe wordmark is centred against the logo across all
+              pages.
             </span>
           </span>
         </label>

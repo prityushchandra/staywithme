@@ -34,6 +34,7 @@ export default async function AdminSettingsPage() {
             rankWeightSave: settings.rankWeightSave,
             rankWeightClick: settings.rankWeightClick,
             reviewsOpenToAll: settings.reviewsOpenToAll,
+            showSignature: settings.showSignature,
           }}
         />
       </section>

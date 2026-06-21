@@ -15,7 +15,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-export function Navbar() {
+export function Navbar({ showSignature = true }: { showSignature?: boolean }) {
   const { data: session } = useSession();
   const router = useRouter();
   const user = session?.user;
@@ -58,22 +58,27 @@ export function Navbar() {
       <div className="container flex h-16 items-center justify-between gap-4">
         <Link href="/" className="flex items-center gap-2 font-bold text-brand">
           <Home className="h-6 w-6 shrink-0" />
-          <span className="flex flex-col leading-none">
-            <span className="text-lg">StayWithMe</span>
-            {/* A playful signature in mirror writing — readable only in a mirror. */}
-            <span
-              className="mt-0.5 text-[13px] font-normal text-brand/70"
-              style={{
-                fontFamily: "'Segoe Script','Brush Script MT',cursive",
-                transform: "scaleX(-1)",
-                display: "inline-block",
-              }}
-              aria-hidden="true"
-              title="by chandra"
-            >
-              by chandra
+          {showSignature ? (
+            <span className="flex flex-col leading-none">
+              <span className="text-lg">StayWithMe</span>
+              {/* A playful signature in mirror writing — readable only in a mirror. */}
+              <span
+                className="mt-0.5 text-[13px] font-normal text-brand/70"
+                style={{
+                  fontFamily: "'Segoe Script','Brush Script MT',cursive",
+                  transform: "scaleX(-1)",
+                  display: "inline-block",
+                }}
+                aria-hidden="true"
+                title="by chandra"
+              >
+                by chandra
+              </span>
             </span>
-          </span>
+          ) : (
+            // Signature off: wordmark sits centred against the logo.
+            <span className="text-lg leading-none">StayWithMe</span>
+          )}
         </Link>
 
         {/* Logged out: a single entry point — sign-in figures out log in vs sign up. */}

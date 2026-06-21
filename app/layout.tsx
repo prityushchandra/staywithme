@@ -4,6 +4,7 @@ import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { Navbar } from "@/components/navbar";
+import { getPlatformSettings } from "@/lib/settings";
 
 export const metadata: Metadata = {
   title: {
@@ -20,16 +21,17 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const settings = await getPlatformSettings();
   return (
     <html lang="en" className="scroll-smooth">
       <body>
         <Providers>
-          <Navbar />
+          <Navbar showSignature={settings.showSignature} />
           <main className="min-h-[calc(100vh-4rem)]">{children}</main>
           <footer className="border-t py-8 text-center text-sm text-muted-foreground">
             © {new Date().getFullYear()} StayWithMe

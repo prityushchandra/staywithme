@@ -267,6 +267,10 @@ model PlatformSettings {
   // review it; everyone else can read reviews but not write one. Admin can flip
   // this to open reviews to any signed-in guest.
   reviewsOpenToAll Boolean @default(false)
+  // When true (default), the playful "by chandra" signature shows under the
+  // StayWithMe wordmark in the navbar. Admin can switch it off, which also
+  // centres the wordmark against the logo.
+  showSignature    Boolean @default(true)
   updatedAt          DateTime @updatedAt
 }
 

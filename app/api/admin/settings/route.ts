@@ -15,6 +15,7 @@ const schema = z.object({
   rankWeightSave: z.coerce.number().int().min(0).max(100),
   rankWeightClick: z.coerce.number().int().min(0).max(100),
   reviewsOpenToAll: z.boolean(),
+  showSignature: z.boolean(),
 });
 
 export async function PATCH(req: Request) {
@@ -54,6 +55,7 @@ export async function PATCH(req: Request) {
       rankWeightSave: d.rankWeightSave,
       rankWeightClick: d.rankWeightClick,
       reviewsOpenToAll: d.reviewsOpenToAll,
+      showSignature: d.showSignature,
     },
     create: {
       id: "singleton",
@@ -65,6 +67,7 @@ export async function PATCH(req: Request) {
       rankWeightSave: d.rankWeightSave,
       rankWeightClick: d.rankWeightClick,
       reviewsOpenToAll: d.reviewsOpenToAll,
+      showSignature: d.showSignature,
     },
   });
 
