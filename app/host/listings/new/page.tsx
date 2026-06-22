@@ -1,13 +1,14 @@
 import { getPlatformSettings } from "@/lib/settings";
-import { getFormAmenities, getCancellationPolicies } from "@/lib/data-access";
+import { getFormAmenities, getFormBlocks, getCancellationPolicies } from "@/lib/data-access";
 import { ListingForm } from "@/components/listing-form";
 
 export const metadata = { title: "Create a listing" };
 export const dynamic = "force-dynamic";
 
 export default async function NewListingPage() {
-  const [amenities, policies, settings] = await Promise.all([
+  const [amenities, blocks, policies, settings] = await Promise.all([
     getFormAmenities(),
+    getFormBlocks(),
     getCancellationPolicies(),
     getPlatformSettings(),
   ]);
@@ -30,6 +31,7 @@ export default async function NewListingPage() {
       <div className="mt-8">
         <ListingForm
           amenities={amenities.map((a) => ({ key: a.key, label: a.label }))}
+          blocks={blocks}
           policies={sortedPolicies.map((p) => ({
             policy: p.policy,
             title: p.title,

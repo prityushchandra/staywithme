@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getPlatformSettings } from "@/lib/settings";
-import { getFormAmenities, getCancellationPolicies } from "@/lib/data-access";
+import { getFormAmenities, getFormBlocks, getCancellationPolicies } from "@/lib/data-access";
 import { ListingForm } from "@/components/listing-form";
 
 export const metadata = { title: "Edit listing" };
@@ -24,8 +24,9 @@ export default async function EditListingPage({
   if (!listing) notFound();
   if (listing.hostId !== session.user.id && !session.user.isAdmin) redirect("/host");
 
-  const [amenities, policies, settings] = await Promise.all([
+  const [amenities, blocks, policies, settings] = await Promise.all([
     getFormAmenities(),
+    getFormBlocks(),
     getCancellationPolicies(),
     getPlatformSettings(),
   ]);
@@ -51,6 +52,7 @@ export default async function EditListingPage({
         <ListingForm
           listingId={listing.id}
           amenities={amenities.map((a) => ({ key: a.key, label: a.label }))}
+          blocks={blocks}
           policies={sortedPolicies.map((p) => ({
             policy: p.policy,
             title: p.title,

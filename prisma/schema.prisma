@@ -261,6 +261,15 @@ model Amenity {
   listings  ListingAmenity[]
 }
 
+// Society blocks / towers (e.g. "Paradise"). Admin-managed so the host listing
+// form offers a consistent dropdown and the WhatsApp bot can resolve a flat by
+// unit + block reliably.
+model Block {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+}
+
 model ListingAmenity {
   listingId String
   amenityId String

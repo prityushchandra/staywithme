@@ -33,9 +33,6 @@ const CHECK_IN_TIMES = [
 ];
 const CHECK_OUT_TIMES = ["9:00 AM", "10:00 AM", "11:00 AM", "12:00 PM", "Flexible"];
 
-// The society's blocks/towers — fixed list (guests never see these).
-const BLOCK_NAMES = ["Paradise", "Halcyon", "Tranquil", "Eden", "Serene"];
-
 type Amenity = { key: string; label: string };
 type Policy = { policy: string; title: string; description: string };
 
@@ -67,6 +64,7 @@ export interface ListingFormInitial {
 
 export function ListingForm({
   amenities,
+  blocks,
   policies,
   suggestedMinPaise,
   suggestedMaxPaise,
@@ -74,6 +72,7 @@ export function ListingForm({
   listingId,
 }: {
   amenities: Amenity[];
+  blocks: string[];
   policies: Policy[];
   suggestedMinPaise: number;
   suggestedMaxPaise: number;
@@ -300,7 +299,12 @@ export function ListingForm({
               className="h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
             >
               <option value="">Select block</option>
-              {BLOCK_NAMES.map((b) => (
+              {/* Keep a previously-saved block selectable even if an admin later
+                  removed it from the catalog. */}
+              {form.block && !blocks.includes(form.block) && (
+                <option value={form.block}>{form.block}</option>
+              )}
+              {blocks.map((b) => (
                 <option key={b} value={b}>
                   {b}
                 </option>

@@ -155,6 +155,20 @@ export function getFormAmenities(): Promise<Amenity[]> {
   return memo("form-amenities", 300_000, () => cachedFormAmenities());
 }
 
+const cachedFormBlocks = unstable_cache(
+  async (): Promise<string[]> => {
+    const rows = await prisma.block.findMany({ orderBy: { name: "asc" }, select: { name: true } });
+    return rows.map((b) => b.name);
+  },
+  ["form-blocks"],
+  { tags: ["blocks"], revalidate: 3600 }
+);
+
+/** Admin-managed society block names for the listing form, cached. */
+export function getFormBlocks(): Promise<string[]> {
+  return memo("form-blocks", 300_000, () => cachedFormBlocks());
+}
+
 const cachedCancellationPolicies = unstable_cache(
   async (): Promise<CancellationPolicyText[]> =>
     prisma.cancellationPolicyText.findMany(),

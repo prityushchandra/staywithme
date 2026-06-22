@@ -8,6 +8,7 @@ import {
   CalendarCheck,
   Star,
   Users,
+  Tags,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -27,6 +28,7 @@ const NAV: NavItem[] = [
   { href: "/admin/bookings", label: "Bookings", Icon: CalendarCheck },
   { href: "/admin/reviews", label: "Reviews", Icon: Star, badge: "reviews" },
   { href: "/admin/users", label: "Users", Icon: Users },
+  { href: "/admin/catalog", label: "Catalog", Icon: Tags },
   { href: "/admin/settings", label: "Settings", Icon: Settings },
 ];
 
