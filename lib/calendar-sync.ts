@@ -4,13 +4,61 @@
 // Re-syncing fully replaces the prior ICAL blocks (so a freed Airbnb date frees
 // up here too) without touching our own MANUAL/BOOKING blocks.
 
+import dns from "node:dns/promises";
 import { revalidateTag } from "next/cache";
 import { prisma } from "./db";
 import { clearMemo } from "./memo";
-import { isSafeIcalUrl, parseIcalBusyRanges } from "./ical";
+import { isSafeIcalUrl, isPrivateIp, parseIcalBusyRanges } from "./ical";
 
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_BYTES = 2_000_000;
+const MAX_REDIRECTS = 4;
+
+// Reject a host that resolves to any loopback/private/link-local address. Run
+// immediately before each fetch hop so an encoded IP, a domain pointing at an
+// internal IP, or a redirect to one is caught (narrows DNS-rebinding to a tiny
+// window — re-resolved on every hop).
+async function assertHostResolvesPublic(host: string): Promise<void> {
+  const records = await dns.lookup(host, { all: true, verbatim: true });
+  if (!records.length) throw new Error("could not resolve host");
+  for (const r of records) {
+    if (isPrivateIp(r.address)) throw new Error("host resolves to a private address");
+  }
+}
+
+// SSRF-safe fetch: validate the URL + resolved IPs on every hop, following
+// redirects manually (max MAX_REDIRECTS) so a 3xx can't bounce us to an internal
+// address. Throws on any unsafe URL / private resolution / redirect loop.
+async function safeFetchIcal(initialUrl: string): Promise<Response> {
+  let url = initialUrl;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    if (!isSafeIcalUrl(url)) throw new Error("unsafe url");
+    const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
+    await assertHostResolvesPublic(host);
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        signal: controller.signal,
+        redirect: "manual",
+        headers: { "User-Agent": "StayWithMe-Calendar/1.0", Accept: "text/calendar, text/plain" },
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get("location");
+      if (!location) return res;
+      url = new URL(location, url).toString(); // re-validated at the top of the loop
+      continue;
+    }
+    return res;
+  }
+  throw new Error("too many redirects");
+}
 
 type SyncResult =
   | { ok: true; count: number }
@@ -35,14 +83,7 @@ export async function syncListingCalendar(listingId: string): Promise<SyncResult
 
   let text: string;
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-    const res = await fetch(listing.icalUrl, {
-      signal: controller.signal,
-      redirect: "follow",
-      headers: { "User-Agent": "StayWithMe-Calendar/1.0", Accept: "text/calendar, text/plain" },
-    });
-    clearTimeout(timer);
+    const res = await safeFetchIcal(listing.icalUrl);
     if (!res.ok) return fail(listingId, `Couldn't fetch the calendar (HTTP ${res.status}).`);
     text = (await res.text()).slice(0, MAX_BYTES);
   } catch {
