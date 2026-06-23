@@ -1,5 +1,4 @@
 import { notFound } from "next/navigation";
-import { after } from "next/server";
 import type { Metadata } from "next";
 import { Star } from "lucide-react";
 import { getPublishedListingById, getListingByIdAnyStatus } from "@/lib/data-access";
@@ -75,9 +74,10 @@ export default async function ListingPage({
   if (!canView) notFound();
   const isPreview = !isPublished;
 
-  // Refresh the Airbnb calendar in the background (if stale) so the guest-facing
-  // availability converges without slowing this page. Runs after the response.
-  after(() => syncListingCalendarIfStale(id, 120_000));
+  // Refresh the Airbnb calendar before reading blocks so a page refresh reflects
+  // dates just changed on Airbnb. Throttled (30s) so normal browsing doesn't
+  // re-fetch every view; the feed is tiny so this adds little latency.
+  await syncListingCalendarIfStale(id, 30_000);
 
   const [policyText, blocks, reviews, ratingSummary] = await Promise.all([
     prisma.cancellationPolicyText.findUnique({
