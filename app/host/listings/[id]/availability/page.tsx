@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getBlocks } from "@/lib/availability";
+import { syncListingCalendarIfStale } from "@/lib/calendar-sync";
 import { AvailabilityEditor } from "@/components/availability-editor";
 
 export const metadata = { title: "Manage availability" };
@@ -25,6 +26,9 @@ export default async function AvailabilityPage({
   if (!listing) notFound();
   if (listing.hostId !== session.user.id && !session.user.isAdmin) redirect("/host");
 
+  // Pull the latest Airbnb calendar (if it's been a minute) so a refresh here
+  // reflects dates you just blocked/unblocked on Airbnb.
+  await syncListingCalendarIfStale(id, 60_000);
   const blocks = await getBlocks(id);
 
   return (

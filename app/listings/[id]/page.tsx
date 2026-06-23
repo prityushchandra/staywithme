@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { after } from "next/server";
 import type { Metadata } from "next";
 import { Star } from "lucide-react";
 import { getPublishedListingById, getListingByIdAnyStatus } from "@/lib/data-access";
@@ -10,6 +11,7 @@ import { Gallery } from "@/components/gallery";
 import { WishlistButton } from "@/components/wishlist-button";
 import { TrackView } from "@/components/track-view";
 import { getActiveBlocks } from "@/lib/availability";
+import { syncListingCalendarIfStale } from "@/lib/calendar-sync";
 import { getApprovedReviews, getRatingSummary, hasCompletedStay } from "@/lib/reviews";
 import { ReviewList } from "@/components/review-list";
 import { ReviewForm } from "@/components/review-form";
@@ -72,6 +74,10 @@ export default async function ListingPage({
     listing.host.id === session?.user?.id;
   if (!canView) notFound();
   const isPreview = !isPublished;
+
+  // Refresh the Airbnb calendar in the background (if stale) so the guest-facing
+  // availability converges without slowing this page. Runs after the response.
+  after(() => syncListingCalendarIfStale(id, 120_000));
 
   const [policyText, blocks, reviews, ratingSummary] = await Promise.all([
     prisma.cancellationPolicyText.findUnique({

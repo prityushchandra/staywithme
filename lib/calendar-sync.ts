@@ -122,6 +122,26 @@ export async function syncListingCalendar(listingId: string): Promise<SyncResult
   return { ok: true, count: ranges.length };
 }
 
+/**
+ * Sync only if the listing's calendar is older than `maxAgeMs` (or never synced).
+ * Lets pages refresh external availability on view without re-fetching Airbnb on
+ * every single request. Never throws — a failed sync leaves the last data in
+ * place and records icalError.
+ */
+export async function syncListingCalendarIfStale(
+  listingId: string,
+  maxAgeMs: number
+): Promise<void> {
+  const l = await prisma.listing.findUnique({
+    where: { id: listingId },
+    select: { icalUrl: true, icalSyncedAt: true },
+  });
+  if (!l?.icalUrl) return;
+  const fresh = l.icalSyncedAt && Date.now() - l.icalSyncedAt.getTime() < maxAgeMs;
+  if (fresh) return;
+  await syncListingCalendar(listingId).catch(() => {});
+}
+
 /** Sync every listing that has a calendar link (used by the daily cron). */
 export async function runAllCalendarSync(): Promise<{ synced: number; failed: number }> {
   const listings = await prisma.listing.findMany({
