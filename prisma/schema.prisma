@@ -205,6 +205,12 @@ model Listing {
   rejectionReason String?
   featured       Boolean       @default(false) // admin homepage curation
 
+  // External calendar import (e.g. the host's Airbnb iCal export URL). Synced
+  // dates land as AvailabilityBlock rows of kind "ICAL" so we never double-book.
+  icalUrl      String?
+  icalSyncedAt DateTime?
+  icalError    String?
+
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
@@ -229,7 +235,7 @@ model AvailabilityBlock {
   listing     Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
   startDate   DateTime // check-in, inclusive (UTC midnight)
   endDate     DateTime // check-out, exclusive
-  kind        String   @default("MANUAL") // BOOKING | MANUAL
+  kind        String   @default("MANUAL") // BOOKING | MANUAL | ICAL (imported)
   guestName   String?
   guests      Int?
   note        String?

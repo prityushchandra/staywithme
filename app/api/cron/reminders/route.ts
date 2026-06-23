@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createHash, timingSafeEqual } from "crypto";
 import { runCheckinReminders } from "@/lib/bookings";
+import { runAllCalendarSync } from "@/lib/calendar-sync";
 
 function safeEqual(a: string, b: string): boolean {
   const ah = createHash("sha256").update(a).digest();
@@ -33,7 +34,9 @@ async function run(req: Request) {
     return NextResponse.json({ error: "not configured" }, { status: 503 });
   }
   const sent = await runCheckinReminders();
-  return NextResponse.json({ ok: true, sent });
+  // Also refresh external (Airbnb) calendars so imported blocks stay current.
+  const calendars = await runAllCalendarSync();
+  return NextResponse.json({ ok: true, sent, calendars });
 }
 
 export const POST = run;

@@ -134,7 +134,11 @@ export function AvailabilityManager({
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <Badge variant={b.kind === "BOOKING" ? "default" : "secondary"}>
-                        {b.kind === "BOOKING" ? "Booking" : "Blocked"}
+                        {b.kind === "BOOKING"
+                          ? "Booking"
+                          : b.kind === "ICAL"
+                            ? "Airbnb"
+                            : "Blocked"}
                       </Badge>
                       <span className="font-medium">
                         {fmt(b.startDate)} → {fmt(b.endDate)}

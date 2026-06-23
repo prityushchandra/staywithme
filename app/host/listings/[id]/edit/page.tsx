@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { getPlatformSettings } from "@/lib/settings";
 import { getFormAmenities, getFormBlocks, getCancellationPolicies } from "@/lib/data-access";
 import { ListingForm } from "@/components/listing-form";
+import { CalendarSyncCard } from "@/components/calendar-sync-card";
 
 export const metadata = { title: "Edit listing" };
 export const dynamic = "force-dynamic";
@@ -86,6 +87,15 @@ export default async function EditListingPage({
             imageUrls: listing.images.map((i) => i.url),
           }}
         />
+
+        <div className="mt-8">
+          <CalendarSyncCard
+            listingId={listing.id}
+            initialUrl={listing.icalUrl}
+            initialSyncedAt={listing.icalSyncedAt?.toISOString() ?? null}
+            initialError={listing.icalError}
+          />
+        </div>
       </div>
     </div>
   );
