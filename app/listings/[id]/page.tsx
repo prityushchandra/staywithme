@@ -75,9 +75,10 @@ export default async function ListingPage({
   const isPreview = !isPublished;
 
   // Refresh the Airbnb calendar before reading blocks so a page refresh reflects
-  // dates just changed on Airbnb. Throttled (30s) so normal browsing doesn't
-  // re-fetch every view; the feed is tiny so this adds little latency.
-  await syncListingCalendarIfStale(id, 30_000);
+  // dates just changed on Airbnb. For the owner/admin (managing the listing) we
+  // sync on EVERY refresh; for guests we throttle (60s) to keep browsing fast.
+  const isManager = !!session?.user?.isAdmin || listing.host.id === session?.user?.id;
+  await syncListingCalendarIfStale(id, isManager ? 0 : 60_000);
 
   const [policyText, blocks, reviews, ratingSummary] = await Promise.all([
     prisma.cancellationPolicyText.findUnique({

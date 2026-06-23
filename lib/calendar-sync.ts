@@ -118,7 +118,9 @@ export async function syncListingCalendar(listingId: string): Promise<SyncResult
   ]);
 
   revalidateTag("listings");
-  clearMemo();
+  // Invalidate only THIS listing's cached blocks — syncing on every owner view
+  // shouldn't wipe the whole in-process cache.
+  clearMemo(`active-blocks:${listingId}`);
   return { ok: true, count: ranges.length };
 }
 

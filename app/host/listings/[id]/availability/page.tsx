@@ -26,9 +26,9 @@ export default async function AvailabilityPage({
   if (!listing) notFound();
   if (listing.hostId !== session.user.id && !session.user.isAdmin) redirect("/host");
 
-  // Pull the latest Airbnb calendar (if it's been a minute) so a refresh here
-  // reflects dates you just blocked/unblocked on Airbnb.
-  await syncListingCalendarIfStale(id, 60_000);
+  // Pull the latest Airbnb calendar on every refresh so this management view
+  // always reflects dates you just blocked/unblocked on Airbnb.
+  await syncListingCalendarIfStale(id, 0);
   const blocks = await getBlocks(id);
 
   return (
