@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { after } from "next/server";
 import type { Metadata } from "next";
 import { Star } from "lucide-react";
 import { getPublishedListingById, getListingByIdAnyStatus } from "@/lib/data-access";
@@ -10,7 +11,7 @@ import { Gallery } from "@/components/gallery";
 import { WishlistButton } from "@/components/wishlist-button";
 import { TrackView } from "@/components/track-view";
 import { getActiveBlocks } from "@/lib/availability";
-import { syncListingCalendarIfStale } from "@/lib/calendar-sync";
+import { syncListingCalendar } from "@/lib/calendar-sync";
 import { getApprovedReviews, getRatingSummary, hasCompletedStay } from "@/lib/reviews";
 import { ReviewList } from "@/components/review-list";
 import { ReviewForm } from "@/components/review-form";
@@ -74,11 +75,26 @@ export default async function ListingPage({
   if (!canView) notFound();
   const isPreview = !isPublished;
 
-  // Refresh the Airbnb calendar before reading blocks so a page refresh reflects
-  // dates just changed on Airbnb. For the owner/admin (managing the listing) we
-  // sync on EVERY refresh; for guests we throttle (60s) to keep browsing fast.
+  // Refresh the Airbnb calendar before reading blocks. We already loaded the
+  // listing row (which carries icalUrl/icalSyncedAt), so deciding this needs no
+  // extra query. Managers get an immediate awaited sync; guests never block first
+  // paint — the external fetch runs via after() and appears on the next load.
   const isManager = !!session?.user?.isAdmin || listing.host.id === session?.user?.id;
-  await syncListingCalendarIfStale(id, isManager ? 0 : 60_000);
+  if (listing.icalUrl) {
+    const maxAgeMs = isManager ? 0 : 60_000;
+    const stale =
+      !listing.icalSyncedAt ||
+      Date.now() - listing.icalSyncedAt.getTime() >= maxAgeMs;
+    if (stale) {
+      if (isManager) {
+        await syncListingCalendar(id).catch(() => {});
+      } else {
+        after(() => {
+          syncListingCalendar(id).catch(() => {});
+        });
+      }
+    }
+  }
 
   const [policyText, blocks, reviews, ratingSummary] = await Promise.all([
     prisma.cancellationPolicyText.findUnique({
