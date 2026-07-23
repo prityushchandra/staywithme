@@ -393,14 +393,20 @@ model Booking {
 
 model AnalyticsEvent {
   id        String   @id @default(cuid())
-  type      String // VIEW | WISHLIST_ADD | SEARCH_IMPRESSION | WHATSAPP_CLICK | ...
+  type      String // VIEW | WISHLIST_ADD | SEARCH_IMPRESSION | WHATSAPP_CLICK | PAGE_VIEW | ...
   listingId String?
   userId    String?
+  // Anonymous first-party browser id (the httpOnly `swm_vid` cookie set in
+  // middleware). Lets us count real visitors who land and browse without ever
+  // signing up. Null for older/server events that predate visitor tracking.
+  visitorId String?
   metadata  Json?
   createdAt DateTime @default(now())
 
   @@index([type])
   @@index([listingId])
+  @@index([visitorId])
+  @@index([createdAt])
 }
 
 // The WhatsApp bot's in-flight conversation with the admin, keyed by phone.

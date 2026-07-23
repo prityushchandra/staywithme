@@ -117,6 +117,73 @@ async function _getTopListings(limit: number): Promise<TopListing[]> {
     .filter((x): x is TopListing => x !== null);
 }
 
+export interface TrafficMetrics {
+  uniqueVisitors: number;
+  visits: number;
+  unique24h: number;
+  unique7d: number;
+  unique30d: number;
+  registeredUsers: number;
+  /** % of unique visitors who became registered users (landed → signed up). */
+  signupConversion: number;
+}
+
+export function getTrafficMetrics(): Promise<TrafficMetrics> {
+  return memo("admin-traffic", TTL, _getTrafficMetrics);
+}
+async function _getTrafficMetrics(): Promise<TrafficMetrics> {
+  // One round-trip for all-time + rolling windows. ::int keeps COUNT() as a JS
+  // number (not BigInt), which serialises cleanly to the client component.
+  const [rows, registeredUsers] = await Promise.all([
+    prisma.$queryRaw<Array<{ scope: string; uniques: number; visits: number }>>`
+      SELECT 'all' AS scope,
+             COUNT(DISTINCT "visitorId")::int AS uniques,
+             COUNT(*)::int AS visits
+        FROM "AnalyticsEvent"
+       WHERE type = 'PAGE_VIEW' AND "visitorId" IS NOT NULL
+      UNION ALL
+      SELECT '24h',
+             COUNT(DISTINCT "visitorId")::int,
+             COUNT(*)::int
+        FROM "AnalyticsEvent"
+       WHERE type = 'PAGE_VIEW' AND "visitorId" IS NOT NULL
+         AND "createdAt" >= NOW() - INTERVAL '24 hours'
+      UNION ALL
+      SELECT '7d',
+             COUNT(DISTINCT "visitorId")::int,
+             COUNT(*)::int
+        FROM "AnalyticsEvent"
+       WHERE type = 'PAGE_VIEW' AND "visitorId" IS NOT NULL
+         AND "createdAt" >= NOW() - INTERVAL '7 days'
+      UNION ALL
+      SELECT '30d',
+             COUNT(DISTINCT "visitorId")::int,
+             COUNT(*)::int
+        FROM "AnalyticsEvent"
+       WHERE type = 'PAGE_VIEW' AND "visitorId" IS NOT NULL
+         AND "createdAt" >= NOW() - INTERVAL '30 days'
+    `,
+    prisma.user.count(),
+  ]);
+
+  const by = (scope: string) => rows.find((r) => r.scope === scope);
+  const uniqueVisitors = by("all")?.uniques ?? 0;
+  const signupConversion =
+    uniqueVisitors > 0
+      ? Math.round((registeredUsers / uniqueVisitors) * 1000) / 10
+      : 0;
+
+  return {
+    uniqueVisitors,
+    visits: by("all")?.visits ?? 0,
+    unique24h: by("24h")?.uniques ?? 0,
+    unique7d: by("7d")?.uniques ?? 0,
+    unique30d: by("30d")?.uniques ?? 0,
+    registeredUsers,
+    signupConversion,
+  };
+}
+
 export function getTopHosts(limit = 5): Promise<TopHost[]> {
   return memo(`admin-top-hosts:${limit}`, TTL, () => _getTopHosts(limit));
 }

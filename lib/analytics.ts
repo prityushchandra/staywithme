@@ -9,7 +9,8 @@ export type EventType =
   | "VIEW"
   | "WHATSAPP_CLICK"
   | "WISHLIST_ADD"
-  | "SEARCH_IMPRESSION";
+  | "SEARCH_IMPRESSION"
+  | "PAGE_VIEW";
 
 const TRACKABLE: EventType[] = ["VIEW", "WHATSAPP_CLICK", "WISHLIST_ADD"];
 
@@ -19,7 +20,12 @@ export function isTrackableClientEvent(t: string): t is EventType {
 
 export async function recordEvent(
   type: EventType,
-  opts: { listingId?: string; userId?: string; metadata?: Record<string, unknown> } = {}
+  opts: {
+    listingId?: string;
+    userId?: string;
+    visitorId?: string;
+    metadata?: Record<string, unknown>;
+  } = {}
 ) {
   try {
     await prisma.analyticsEvent.create({
@@ -27,6 +33,7 @@ export async function recordEvent(
         type,
         listingId: opts.listingId ?? null,
         userId: opts.userId ?? null,
+        visitorId: opts.visitorId ?? null,
         metadata: opts.metadata ? (opts.metadata as object) : undefined,
       },
     });

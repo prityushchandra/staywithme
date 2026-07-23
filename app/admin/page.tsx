@@ -8,11 +8,15 @@ import {
   ClipboardCheck,
   Star,
   CheckCircle2,
+  Globe,
+  Footprints,
+  UserPlus,
 } from "lucide-react";
 import {
   getPlatformOverview,
   getTopListings,
   getTopHosts,
+  getTrafficMetrics,
 } from "@/lib/admin-analytics";
 import { prisma } from "@/lib/db";
 import { Badge } from "@/components/ui/badge";
@@ -21,10 +25,11 @@ export const metadata = { title: "Admin · Dashboard" };
 export const dynamic = "force-dynamic";
 
 export default async function AdminDashboard() {
-  const [overview, topListings, topHosts, pendingReviews] = await Promise.all([
+  const [overview, topListings, topHosts, traffic, pendingReviews] = await Promise.all([
     getPlatformOverview(),
     getTopListings(5),
     getTopHosts(5),
+    getTrafficMetrics(),
     prisma.review.count({ where: { status: "PENDING" } }),
   ]);
 
@@ -38,6 +43,19 @@ export default async function AdminDashboard() {
     { label: "Views", value: overview.views, Icon: Eye },
     { label: "Inquiries", value: overview.whatsappClicks, Icon: MessageCircle },
     { label: "Wishlist saves", value: overview.saves, Icon: Heart },
+  ];
+
+  const trafficCards = [
+    { label: "Unique visitors", value: traffic.uniqueVisitors, sub: "all time", Icon: Globe },
+    { label: "Total visits", value: traffic.visits, sub: "browsing sessions", Icon: Footprints },
+    { label: "Visitors · 24h", value: traffic.unique24h, sub: "last 24 hours", Icon: Globe },
+    { label: "Visitors · 7d", value: traffic.unique7d, sub: "last 7 days", Icon: Globe },
+    {
+      label: "Signup conversion",
+      value: `${traffic.signupConversion}%`,
+      sub: `${traffic.registeredUsers} of ${traffic.uniqueVisitors} landed`,
+      Icon: UserPlus,
+    },
   ];
 
   return (
@@ -110,6 +128,28 @@ export default async function AdminDashboard() {
             </div>
           ))}
         </div>
+      </section>
+
+      {/* Traffic — includes anonymous visitors who never sign up */}
+      <section>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Traffic — visitors who landed
+        </h2>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
+          {trafficCards.map((k) => (
+            <div key={k.label} className="min-w-0 rounded-xl border p-4">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <k.Icon className="h-4 w-4 shrink-0" /> <span className="truncate">{k.label}</span>
+              </div>
+              <div className="mt-1 text-2xl font-bold">{k.value}</div>
+              {k.sub && <div className="text-xs text-muted-foreground">{k.sub}</div>}
+            </div>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Counts every browser that lands on the site — not just people who click
+          “Get started”. Unique visitors are de-duplicated by an anonymous cookie.
+        </p>
       </section>
 
       {/* Top lists */}

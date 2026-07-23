@@ -4,6 +4,7 @@ import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { Navbar } from "@/components/navbar";
+import { TrackVisit } from "@/components/track-visit";
 import { getPlatformSettings } from "@/lib/settings";
 
 export const metadata: Metadata = {
@@ -39,6 +40,7 @@ export default async function RootLayout({
         </Providers>
         <SpeedInsights />
         <Analytics />
+        <TrackVisit />
       </body>
     </html>
   );
