@@ -170,6 +170,8 @@ const LISTINGS: Array<{
   },
 ];
 
+const BLOCKS = ["Paradise", "Zircon"];
+
 async function main() {
   const adminEmail = process.env.ADMIN_EMAIL ?? "admin@mybnb.local";
   const adminPassword = process.env.ADMIN_PASSWORD ?? "admin12345";
@@ -199,6 +201,14 @@ async function main() {
       create: a,
     });
     amenityByKey[a.key] = row.id;
+  }
+
+  // Society blocks / towers shown in the listing form's "Block / tower"
+  // dropdown. Admin-managed at runtime (Admin → Catalog); seeded here so a fresh
+  // database isn't empty (which would leave hosts unable to pick a block).
+  // Idempotent by unique name.
+  for (const name of BLOCKS) {
+    await prisma.block.upsert({ where: { name }, update: {}, create: { name } });
   }
 
   // Admin user. Signs in by phone OTP like everyone else (ADMIN_PHONE).

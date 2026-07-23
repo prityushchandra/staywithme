@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Loader2 } from "lucide-react";
+import { Plus, Trash2, Loader2, Pencil, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,6 +31,12 @@ export function CatalogManager({
   const [bName, setBName] = useState("");
   const [bError, setBError] = useState("");
   const [bBusy, setBBusy] = useState(false);
+
+  // Inline block rename
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState("");
 
   const [deleting, setDeleting] = useState<string | null>(null);
 
@@ -88,6 +94,44 @@ export function CatalogManager({
       if (res.ok) router.refresh();
     } finally {
       setDeleting(null);
+    }
+  }
+
+  function startRename(b: BlockRow) {
+    setEditingId(b.id);
+    setEditName(b.name);
+    setEditError("");
+  }
+
+  function cancelRename() {
+    setEditingId(null);
+    setEditName("");
+    setEditError("");
+  }
+
+  async function saveRename(id: string) {
+    const name = editName.trim();
+    if (!name) {
+      setEditError("Enter a block name.");
+      return;
+    }
+    setEditBusy(true);
+    setEditError("");
+    try {
+      const res = await fetch("/api/admin/blocks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, name }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setEditError(data.error ?? "Could not rename block.");
+        return;
+      }
+      cancelRename();
+      router.refresh();
+    } finally {
+      setEditBusy(false);
     }
   }
 
@@ -190,19 +234,76 @@ export function CatalogManager({
             )}
             {blocks.map((b) => (
               <li key={b.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
-                <span className="text-sm">{b.name}</span>
-                <button
-                  type="button"
-                  aria-label={`Delete ${b.name}`}
-                  disabled={deleting === b.id}
-                  onClick={() => remove("blocks", b.id)}
-                  className="text-muted-foreground transition-colors hover:text-red-600 disabled:opacity-40"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                {editingId === b.id ? (
+                  <>
+                    <Input
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="h-8"
+                      autoFocus
+                      maxLength={40}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          saveRename(b.id);
+                        }
+                        if (e.key === "Escape") cancelRename();
+                      }}
+                    />
+                    <div className="flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        aria-label={`Save ${b.name}`}
+                        disabled={editBusy}
+                        onClick={() => saveRename(b.id)}
+                        className="text-muted-foreground transition-colors hover:text-green-600 disabled:opacity-40"
+                      >
+                        {editBusy ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Check className="h-4 w-4" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Cancel rename"
+                        onClick={cancelRename}
+                        className="text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-sm">{b.name}</span>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button
+                        type="button"
+                        aria-label={`Rename ${b.name}`}
+                        onClick={() => startRename(b)}
+                        className="text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Delete ${b.name}`}
+                        disabled={deleting === b.id}
+                        onClick={() => remove("blocks", b.id)}
+                        className="text-muted-foreground transition-colors hover:text-red-600 disabled:opacity-40"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </>
+                )}
               </li>
             ))}
           </ul>
+          {editError && editingId && (
+            <p className="text-sm text-destructive">{editError}</p>
+          )}
         </CardContent>
       </Card>
     </div>

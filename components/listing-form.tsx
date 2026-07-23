@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
@@ -85,7 +85,7 @@ export function ListingForm({
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const [form, setForm] = useState({
+  const makeInitialForm = () => ({
     title: initial?.title ?? "",
     description: initial?.description ?? "",
     hostDisplayName: initial?.hostDisplayName ?? "",
@@ -110,8 +110,69 @@ export function ListingForm({
     checkOutTime: initial?.checkOutTime ?? "",
     houseRules: initial?.houseRules ?? "",
   });
+  const [form, setForm] = useState(makeInitialForm);
   const [amenityKeys, setAmenityKeys] = useState<string[]>(initial?.amenityKeys ?? []);
   const [imageUrls, setImageUrls] = useState<string[]>(initial?.imageUrls ?? []);
+
+  // --- Draft auto-save (new listings only) -----------------------------------
+  // Persist the in-progress "create listing" form to localStorage so a reload,
+  // accidental back-navigation, or closed tab doesn't lose the host's work. An
+  // existing listing (edit mode) is never drafted — it already has a saved row.
+  const DRAFT_KEY = "swm:listing-draft:v1";
+  const [draftRestored, setDraftRestored] = useState(false);
+  const hydratedRef = useRef(false);
+
+  // Restore a saved draft once, on mount.
+  useEffect(() => {
+    if (isEdit) return;
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (raw) {
+        const d = JSON.parse(raw);
+        if (d?.form) setForm((f) => ({ ...f, ...d.form }));
+        if (Array.isArray(d?.amenityKeys)) setAmenityKeys(d.amenityKeys);
+        if (Array.isArray(d?.imageUrls)) setImageUrls(d.imageUrls);
+        const meaningful =
+          (d?.form && (d.form.title || d.form.description || d.form.flatNumber)) ||
+          (Array.isArray(d?.imageUrls) && d.imageUrls.length > 0);
+        if (meaningful) setDraftRestored(true);
+      }
+    } catch {
+      // ignore a corrupt draft
+    }
+    hydratedRef.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Save on every change, but only after the initial restore has run (so we
+  // never overwrite a saved draft with the empty defaults on first paint).
+  useEffect(() => {
+    if (isEdit || !hydratedRef.current) return;
+    try {
+      localStorage.setItem(
+        DRAFT_KEY,
+        JSON.stringify({ form, amenityKeys, imageUrls, savedAt: Date.now() })
+      );
+    } catch {
+      // ignore storage quota / private-mode errors
+    }
+  }, [isEdit, form, amenityKeys, imageUrls]);
+
+  function clearDraft() {
+    try {
+      localStorage.removeItem(DRAFT_KEY);
+    } catch {
+      // ignore
+    }
+  }
+
+  function discardDraft() {
+    clearDraft();
+    setForm(makeInitialForm());
+    setAmenityKeys([]);
+    setImageUrls([]);
+    setDraftRestored(false);
+  }
 
   function set<K extends keyof typeof form>(key: K, val: (typeof form)[K]) {
     setForm((f) => ({ ...f, [key]: val }));
@@ -156,6 +217,7 @@ export function ListingForm({
       // moderating a listing return to the admin list; hosts go to their own.
       // Refresh the session in the background (so the navbar picks up the new
       // HOST role) instead of blocking the redirect on it.
+      clearDraft();
       void update();
       router.push(session?.user?.isAdmin ? "/admin/listings" : "/host");
       router.refresh();
@@ -200,6 +262,18 @@ export function ListingForm({
 
   return (
     <form onSubmit={onSubmit} className="space-y-8">
+      {draftRestored && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          <span>We restored your unsaved draft, so you can pick up where you left off.</span>
+          <button
+            type="button"
+            onClick={discardDraft}
+            className="shrink-0 font-medium underline hover:no-underline"
+          >
+            Discard &amp; start over
+          </button>
+        </div>
+      )}
       {/* Basics */}
       <section className="space-y-4">
         <h2 className="text-lg font-semibold">Tell us about your place</h2>
@@ -491,6 +565,12 @@ export function ListingForm({
             : "Your listing goes to admin moderation before it's published."}
         </p>
       </div>
+      {!isEdit && (
+        <p className="text-xs text-muted-foreground">
+          Your progress is saved automatically on this device — you can safely
+          reload and continue later.
+        </p>
+      )}
     </form>
   );
 }
