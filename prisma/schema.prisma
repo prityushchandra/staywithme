@@ -11,8 +11,12 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // directUrl is used by `prisma db push` / `prisma migrate` (DDL). On Supabase
+  // this is the session pooler (port 5432); the runtime `url` is the transaction
+  // pooler (port 6543, pgbouncer) which doesn't support schema migrations.
+  directUrl = env("DIRECT_URL")
 }
 
 // ---------------------------------------------------------------------------

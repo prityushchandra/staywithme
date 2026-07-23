@@ -288,7 +288,12 @@ async function main() {
           })),
         },
         amenities: {
-          create: l.amenityKeys.map((k) => ({ amenityId: amenityByKey[k] })),
+          // Only connect amenity keys that exist in AMENITIES (skip stale keys
+          // such as "kitchen", which the taxonomy later split into stove/oven/etc.).
+          create: l.amenityKeys
+            .map((k) => amenityByKey[k])
+            .filter((id): id is string => Boolean(id))
+            .map((amenityId) => ({ amenityId })),
         },
       },
     });
