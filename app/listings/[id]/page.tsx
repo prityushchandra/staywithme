@@ -181,6 +181,7 @@ export default async function ListingPage({
         initialCheckIn={sp.checkIn ?? ""}
         initialCheckOut={sp.checkOut ?? ""}
         initialGuests={initialGuests}
+        blockedRanges={serializedBlocks}
       >
         <div className="mt-8 grid grid-cols-1 gap-x-12 gap-y-10 lg:grid-cols-3">
           {/* Left: details */}

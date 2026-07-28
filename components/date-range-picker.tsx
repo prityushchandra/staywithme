@@ -3,6 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  isBlockedNight,
+  isSelectableCheckout,
+  nextRangeSelection,
+  type DateRange,
+} from "@/lib/dates";
 
 // Airbnb-style "When" range picker: a single trigger that opens a calendar
 // popover. Click a start date, then an end date; the range highlights and the
@@ -77,26 +83,46 @@ export function DateRangePicker({
   const today = startOfToday();
   const nights = nightsBetween(checkIn, checkOut);
 
-  const blocked = useMemo(
+  // Booked ranges as date-only DateRanges (half-open [start, end)). Built once
+  // from the "yyyy-mm-dd" prefixes so the picker and the server's booking
+  // validation reason about exactly the same nights.
+  const blockDates = useMemo<DateRange[]>(
     () =>
-      blockedRanges.map((b) => ({
-        start: b.startDate.slice(0, 10),
-        end: b.endDate.slice(0, 10),
-      })),
+      blockedRanges
+        .map((b) => ({
+          startDate: parseYmd(b.startDate.slice(0, 10)),
+          endDate: parseYmd(b.endDate.slice(0, 10)),
+        }))
+        .filter((b): b is DateRange => b.startDate !== null && b.endDate !== null),
     [blockedRanges]
   );
-  const isBlocked = (d: Date) => {
-    const ymd = toYmd(d);
-    return blocked.some((b) => ymd >= b.start && ymd < b.end);
-  };
-  // True if any night in [s, e) is booked (so the range can't be selected).
-  function rangeHasBlocked(s: Date, e: Date) {
-    const t = new Date(s);
-    while (t < e) {
-      if (isBlocked(t)) return true;
-      t.setDate(t.getDate() + 1);
+  const isBlocked = (d: Date) => isBlockedNight(d, blockDates);
+
+  // Availability of a single day given the current selection phase. While
+  // choosing a checkout (a start is set, no end yet) the FIRST booked night
+  // after the start is a valid "checkout-only" date — you check out that
+  // morning, exactly like Airbnb allows same-day turnover. Otherwise a booked
+  // night can't be picked (you can't check IN on an occupied night).
+  function dayStatus(day: Date): { disabled: boolean; checkoutOnly: boolean } {
+    const t = day.getTime();
+    const isPast = t < today.getTime();
+    const choosingCheckout = !!start && !end;
+
+    if (choosingCheckout && start) {
+      if (t <= start.getTime()) {
+        // Clicking on/before the start restarts selection as a new check-in.
+        return { disabled: isPast || isBlocked(day), checkoutOnly: false };
+      }
+      if (!isSelectableCheckout(start, day, blockDates)) {
+        // The stay would span an occupied night → not a reachable checkout.
+        return { disabled: true, checkoutOnly: false };
+      }
+      // Reachable checkout. It's "checkout-only" when the day is itself booked.
+      return { disabled: isPast, checkoutOnly: isBlocked(day) };
     }
-    return false;
+
+    // Choosing a check-in (nothing selected yet, or a full range → start over).
+    return { disabled: isPast || isBlocked(day), checkoutOnly: false };
   }
 
   const [view, setView] = useState(() => {
@@ -137,23 +163,18 @@ export function DateRangePicker({
   }, [open]);
 
   function pick(day: Date) {
-    if (isBlocked(day)) return;
-    if (!start || (start && end)) {
-      onChange(toYmd(day), "");
-      return;
+    if (dayStatus(day).disabled) return;
+    // Shared, tested transition — identical to the on-page calendar & server.
+    const next = nextRangeSelection({ checkIn: start, checkOut: end }, day, blockDates);
+    if (!next) return;
+    onChange(
+      next.checkIn ? toYmd(next.checkIn) : "",
+      next.checkOut ? toYmd(next.checkOut) : ""
+    );
+    if (next.checkOut) {
+      setHovered(null);
+      setOpen(false); // auto-apply once a full range is chosen
     }
-    if (day.getTime() <= start.getTime()) {
-      onChange(toYmd(day), "");
-      return;
-    }
-    // Choosing the end: reject a range that spans a booked night — restart instead.
-    if (rangeHasBlocked(start, day)) {
-      onChange(toYmd(day), "");
-      return;
-    }
-    onChange(checkIn, toYmd(day));
-    setHovered(null);
-    setOpen(false); // auto-apply once a full range is chosen
   }
 
   function shift(delta: number) {
@@ -236,6 +257,7 @@ export function DateRangePicker({
                 hovered={hovered}
                 today={today}
                 isBlocked={isBlocked}
+                dayStatus={dayStatus}
                 onPick={pick}
                 onHover={setHovered}
               />
@@ -248,6 +270,7 @@ export function DateRangePicker({
                   hovered={hovered}
                   today={today}
                   isBlocked={isBlocked}
+                  dayStatus={dayStatus}
                   onPick={pick}
                   onHover={setHovered}
                 />
@@ -286,6 +309,7 @@ function Month({
   hovered,
   today,
   isBlocked,
+  dayStatus,
   onPick,
   onHover,
 }: {
@@ -296,6 +320,7 @@ function Month({
   hovered: Date | null;
   today: Date;
   isBlocked: (d: Date) => boolean;
+  dayStatus: (d: Date) => { disabled: boolean; checkoutOnly: boolean };
   onPick: (d: Date) => void;
   onHover: (d: Date | null) => void;
 }) {
@@ -331,8 +356,8 @@ function Month({
         {cells.map((day) => {
           const t = day.getTime();
           const isPast = t < today.getTime();
-          const blockedDay = isBlocked(day);
-          const disabled = isPast || blockedDay;
+          const blockedNight = isBlocked(day);
+          const { disabled, checkoutOnly } = dayStatus(day);
           const isStart = start && t === start.getTime();
           const isEnd = rangeEnd && t === rangeEnd.getTime();
           const inRange = start && rangeEnd && t > start.getTime() && t < rangeEnd.getTime();
@@ -350,15 +375,21 @@ function Month({
             >
               <button
                 type="button"
-                disabled={!!disabled}
+                disabled={disabled}
                 onClick={() => onPick(day)}
-                onMouseEnter={() => onHover(day)}
+                onMouseEnter={() => {
+                  if (!disabled) onHover(day);
+                }}
+                title={checkoutOnly && !isEndpoint ? "Checkout only" : undefined}
                 className={cn(
                   "flex h-full w-full items-center justify-center rounded-full text-sm transition-colors",
                   isEndpoint && "bg-brand font-semibold text-white",
                   !disabled && !isEndpoint && "hover:border hover:border-foreground",
-                  blockedDay && "text-muted-foreground/40 line-through",
-                  isPast && !blockedDay && "cursor-default text-muted-foreground/30"
+                  // Truly unavailable booked night → struck through.
+                  blockedNight && disabled && "text-muted-foreground/40 line-through",
+                  // Booked night that's still valid as a checkout (same-day turnover).
+                  checkoutOnly && !isEndpoint && "text-foreground underline decoration-dotted underline-offset-4",
+                  isPast && !blockedNight && "cursor-default text-muted-foreground/30"
                 )}
               >
                 {day.getDate()}

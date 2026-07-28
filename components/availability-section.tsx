@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useBooking } from "@/components/booking-context";
+import { isBlockedNight, isSelectableCheckout, type DateRange } from "@/lib/dates";
 
 // Airbnb-style availability calendar: two months, booked & past dates disabled
 // (struck through), and the selected range highlighted. Clicking dates drives
@@ -19,6 +20,12 @@ function toYmd(d: Date) {
 }
 function todayYmd() {
   return toYmd(new Date());
+}
+function parseYmd(s: string): Date | null {
+  if (!s) return null;
+  const [y, m, d] = s.split("-").map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d);
 }
 function fmt(s: string) {
   const [y, m, d] = s.split("-").map(Number);
@@ -50,16 +57,44 @@ export function AvailabilitySection({
   });
 
   // Date-only blocked ranges (start inclusive, end exclusive).
-  const blocked = useMemo(
+  const blockDates = useMemo<DateRange[]>(
     () =>
-      blockedRanges.map((b) => ({
-        start: b.startDate.slice(0, 10),
-        end: b.endDate.slice(0, 10),
-      })),
+      blockedRanges
+        .map((b) => ({
+          startDate: parseYmd(b.startDate.slice(0, 10)),
+          endDate: parseYmd(b.endDate.slice(0, 10)),
+        }))
+        .filter((b): b is DateRange => b.startDate !== null && b.endDate !== null),
     [blockedRanges]
   );
-  const isBlocked = (ymd: string) =>
-    blocked.some((b) => ymd >= b.start && ymd < b.end);
+  const isBlocked = (ymd: string) => {
+    const day = parseYmd(ymd);
+    return day ? isBlockedNight(day, blockDates) : false;
+  };
+
+  // Availability of a day given the current selection phase (mirrors the booking
+  // card, via the same shared helpers). While choosing a checkout, the first
+  // booked night after check-in is a valid "checkout-only" date — same-day
+  // turnover, exactly like Airbnb.
+  const dayStatus = (ymd: string): { disabled: boolean; checkoutOnly: boolean } => {
+    const day = parseYmd(ymd);
+    if (!day) return { disabled: true, checkoutOnly: false };
+    const isPast = ymd < today;
+    const blockedNight = isBlockedNight(day, blockDates);
+    const ci = parseYmd(checkIn);
+    const choosingCheckout = !!ci && !checkOut;
+
+    if (choosingCheckout && ci) {
+      if (day.getTime() <= ci.getTime()) {
+        return { disabled: isPast || blockedNight, checkoutOnly: false };
+      }
+      if (!isSelectableCheckout(ci, day, blockDates)) {
+        return { disabled: true, checkoutOnly: false };
+      }
+      return { disabled: isPast, checkoutOnly: blockedNight };
+    }
+    return { disabled: isPast || blockedNight, checkoutOnly: false };
+  };
 
   const n = nights(checkIn, checkOut);
   const canGoBack =
@@ -115,6 +150,7 @@ export function AvailabilitySection({
             checkIn={checkIn}
             rangeEnd={rangeEnd}
             isBlocked={isBlocked}
+            dayStatus={dayStatus}
             onPick={pickDate}
             onHover={setHovered}
           />
@@ -125,6 +161,7 @@ export function AvailabilitySection({
             checkIn={checkIn}
             rangeEnd={rangeEnd}
             isBlocked={isBlocked}
+            dayStatus={dayStatus}
             onPick={pickDate}
             onHover={setHovered}
           />
@@ -141,6 +178,7 @@ function MonthGrid({
   checkIn,
   rangeEnd,
   isBlocked,
+  dayStatus,
   onPick,
   onHover,
 }: {
@@ -150,6 +188,7 @@ function MonthGrid({
   checkIn: string;
   rangeEnd: string;
   isBlocked: (ymd: string) => boolean;
+  dayStatus: (ymd: string) => { disabled: boolean; checkoutOnly: boolean };
   onPick: (ymd: string) => void;
   onHover: (ymd: string | null) => void;
 }) {
@@ -178,7 +217,7 @@ function MonthGrid({
           const ymd = `${year}-${pad(month + 1)}-${pad(i + 1)}`;
           const isPast = ymd < today;
           const blockedDay = isBlocked(ymd);
-          const disabled = isPast || blockedDay;
+          const { disabled, checkoutOnly } = dayStatus(ymd);
           const isStart = checkIn && ymd === checkIn;
           const isEnd = rangeEnd && ymd === rangeEnd;
           const inRange =
@@ -197,15 +236,19 @@ function MonthGrid({
             >
               <button
                 type="button"
-                disabled={!!disabled}
+                disabled={disabled}
                 onClick={() => onPick(ymd)}
-                onMouseEnter={() => onHover(ymd)}
+                onMouseEnter={() => {
+                  if (!disabled) onHover(ymd);
+                }}
                 onMouseLeave={() => onHover(null)}
+                title={checkoutOnly && !isEndpoint ? "Checkout only" : undefined}
                 className={cn(
                   "flex h-full w-full items-center justify-center rounded-full text-sm transition-colors",
                   isEndpoint && "bg-foreground font-semibold text-background",
                   !isEndpoint && !disabled && "hover:border hover:border-foreground",
-                  blockedDay && "text-muted-foreground/40 line-through",
+                  blockedDay && disabled && "text-muted-foreground/40 line-through",
+                  checkoutOnly && !isEndpoint && "text-foreground underline decoration-dotted underline-offset-4",
                   isPast && !blockedDay && "text-muted-foreground/30"
                 )}
               >
