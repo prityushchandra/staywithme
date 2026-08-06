@@ -32,7 +32,7 @@ export default async function RootLayout({
     <html lang="en" className="scroll-smooth">
       <body>
         <Providers>
-          <Navbar showSignature={settings.showSignature} />
+          <Navbar showSignature={settings.showSignature} whatsappNumber={settings.whatsappNumber} />
           <main className="min-h-[calc(100vh-4rem)]">{children}</main>
           <footer className="border-t py-8 text-center text-sm text-muted-foreground">
             © {new Date().getFullYear()} StayWithMe

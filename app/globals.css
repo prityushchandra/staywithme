@@ -140,3 +140,63 @@ input[type="time"]::-webkit-calendar-picker-indicator {
   cursor: pointer;
   opacity: 0.6;
 }
+
+/* Futuristic "Book on WhatsApp" CTA — a rotating neon ring, a pulsing halo,
+   and a periodic light sweep across the pill. */
+@keyframes wa-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes wa-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 12px 1px rgba(37, 211, 102, 0.45), 0 0 3px 0 rgba(37, 211, 102, 0.65);
+  }
+  50% {
+    box-shadow: 0 0 26px 6px rgba(37, 211, 102, 0.7), 0 0 10px 2px rgba(52, 255, 157, 0.6);
+  }
+}
+@keyframes wa-shine {
+  0% {
+    transform: translateX(-160%) skewX(-20deg);
+  }
+  55%,
+  100% {
+    transform: translateX(320%) skewX(-20deg);
+  }
+}
+.wa-cta {
+  animation: wa-glow 2.6s ease-in-out infinite;
+}
+/* Rotating conic-gradient border, revealed as a thin ring via a mask. */
+.wa-cta::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  padding: 1.5px;
+  background: conic-gradient(from 0deg, #34ff9d, #25d366, #0b3d2e, #25d366, #34ff9d);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: wa-spin 2.8s linear infinite;
+  pointer-events: none;
+}
+.wa-cta .wa-shine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 38%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
+  animation: wa-shine 3s ease-in-out infinite;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wa-cta,
+  .wa-cta::before,
+  .wa-cta .wa-shine {
+    animation: none;
+  }
+}
