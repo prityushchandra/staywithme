@@ -15,7 +15,7 @@ import crypto from "node:crypto";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 
-export type SheetTab = "Bookings" | "Revenue" | "Receipts" | "StaffAttendance";
+export type SheetTab = "Bookings" | "Revenue" | "Receipts" | "StaffPayroll";
 
 function cfg() {
   const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
@@ -152,23 +152,31 @@ export async function syncOfflineBooking(b: OfflineBookingRow): Promise<void> {
   ]);
 }
 
-export interface StaffAttendanceRow {
-  date: Date | string;
+export interface StaffPayrollRow {
+  month: string;
   staffName: string;
   listingTitle: string;
   flat?: string | null;
-  amount: number; // paise
+  absences: number;
+  allowedHolidays: number;
+  monthlySalary: number; // paise
+  deductionPerDay: number; // paise
+  pay: number; // paise
   note?: string | null;
 }
 
-/** Mirror a staff attendance / cleaning payout to the StaffAttendance tab. */
-export async function syncStaffAttendance(a: StaffAttendanceRow): Promise<void> {
-  await appendRow("StaffAttendance", [
-    iso(a.date),
+/** Mirror a monthly staff payroll entry to the StaffPayroll tab. */
+export async function syncStaffPayroll(a: StaffPayrollRow): Promise<void> {
+  await appendRow("StaffPayroll", [
+    a.month,
     a.staffName,
     a.listingTitle,
     a.flat ?? "",
-    rupees(a.amount),
+    a.absences,
+    a.allowedHolidays,
+    rupees(a.monthlySalary),
+    rupees(a.deductionPerDay),
+    rupees(a.pay),
     a.note ?? "",
   ]);
 }

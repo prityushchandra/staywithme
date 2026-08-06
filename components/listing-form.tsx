@@ -58,6 +58,8 @@ export interface ListingFormInitial {
   checkInTime?: string;
   checkOutTime?: string;
   houseRules?: string;
+  wifiName?: string;
+  wifiPassword?: string;
   amenityKeys: string[];
   imageUrls: string[];
 }
@@ -109,6 +111,8 @@ export function ListingForm({
     checkInTime: initial?.checkInTime ?? "",
     checkOutTime: initial?.checkOutTime ?? "",
     houseRules: initial?.houseRules ?? "",
+    wifiName: initial?.wifiName ?? "",
+    wifiPassword: initial?.wifiPassword ?? "",
   });
   const [form, setForm] = useState(makeInitialForm);
   const [amenityKeys, setAmenityKeys] = useState<string[]>(initial?.amenityKeys ?? []);
@@ -436,6 +440,32 @@ export function ListingForm({
           />
           <p className="text-xs text-muted-foreground">
             Shown to guests under “Things to know”. One rule per line.
+          </p>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label htmlFor="wifiName">WiFi network (SSID)</Label>
+            <Input
+              id="wifiName"
+              value={form.wifiName}
+              onChange={(e) => set("wifiName", e.target.value)}
+              placeholder="e.g. StayWithMe_5G"
+              maxLength={80}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="wifiPassword">WiFi password</Label>
+            <Input
+              id="wifiPassword"
+              value={form.wifiPassword}
+              onChange={(e) => set("wifiPassword", e.target.value)}
+              placeholder="Shown on the booking receipt"
+              maxLength={80}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground sm:col-span-2">
+            Private — printed on booking receipts only, never shown on the public listing.
           </p>
         </div>
       </section>

@@ -7,11 +7,15 @@ async function requireAdmin() {
   return !!session?.user?.isAdmin;
 }
 
-export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+// Remove a monthly payroll entry.
+export async function DELETE(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
   if (!(await requireAdmin()))
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
 
   const { id } = await params;
-  await prisma.staffAttendance.delete({ where: { id } });
+  await prisma.staffPayroll.delete({ where: { id } }).catch(() => {});
   return NextResponse.json({ ok: true });
 }

@@ -217,7 +217,7 @@ export function SettingsForm({
         </p>
         <div className="mt-2 grid grid-cols-3 gap-4">
           <div className="space-y-1">
-            <Label htmlFor="sRate" className="text-xs">Per flat / day (₹)</Label>
+            <Label htmlFor="sRate" className="text-xs">Deduction / extra absent day (₹)</Label>
             <Input
               id="sRate"
               type="number"

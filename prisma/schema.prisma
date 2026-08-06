@@ -229,7 +229,7 @@ model Listing {
   availability AvailabilityBlock[]
   bookings    Booking[]
   offlineBookings OfflineBooking[]
-  staffAttendance StaffAttendance[]
+  staffPayroll StaffPayroll[]
 
   @@index([status])
   @@index([city])
@@ -487,27 +487,38 @@ model Staff {
   active     Boolean           @default(true)
   createdAt  DateTime          @default(now())
 
-  attendance StaffAttendance[]
+  payroll    StaffPayroll[]
 
   @@index([active])
 }
 
-// One "staff cleaned this flat on this day" record. `amount` is the pay for that
-// flat-day (defaults to PlatformSettings.staffDailyRate, ₹100).
-model StaffAttendance {
-  id        String   @id @default(cuid())
-  staffId   String
-  staff     Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
-  listingId String
-  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+// Monthly cleaning pay for one staff member and one flat. The base salary is a
+// FIXED monthly amount per flat (₹3,000), independent of whether the month has
+// 30 or 31 days. Each flat gets some free holidays (default 4); every absence
+// BEYOND that is docked at `deductionPerDay`. Snapshots keep past months stable
+// if the settings later change.
+//   pay = monthlySalary − max(0, absences − allowedHolidays) × deductionPerDay
+model StaffPayroll {
+  id              String   @id @default(cuid())
+  staffId         String
+  staff           Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  listingId       String
+  listing         Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
 
-  date      DateTime // UTC midnight — the cleaning day
-  amount    Int      // paise paid for this flat-day
-  note      String?
-  createdAt DateTime @default(now())
+  month           String   // "YYYY-MM"
+  absences        Int      @default(0)
 
-  @@unique([staffId, listingId, date])
-  @@index([date])
+  monthlySalary   Int      // paise — snapshot of the base monthly salary for the flat
+  allowedHolidays Int      // snapshot of the free holidays for the month
+  deductionPerDay Int      // paise — snapshot of the per-extra-absent-day dock
+  pay             Int      // paise — computed net pay
+  note            String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([staffId, listingId, month])
+  @@index([month])
   @@index([listingId])
   @@index([staffId])
 }

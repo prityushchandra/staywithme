@@ -36,6 +36,9 @@ export async function PATCH(
   }
   const d = parsed.data;
 
+  // A host edit re-enters moderation; an admin edit keeps the listing's current
+  // status so tweaking receipt details (WiFi etc.) never unpublishes a live one.
+  const newStatus = ctx.session.user.isAdmin ? ctx.listing.status : "PENDING";
   const amenityMap = await getAmenityIdByKey();
   const amenityIds = d.amenityKeys
     .map((k) => amenityMap[k])
@@ -68,9 +71,10 @@ export async function PATCH(
         checkInTime: d.checkInTime || null,
         checkOutTime: d.checkOutTime || null,
         houseRules: d.houseRules || null,
-        // Any edit re-enters moderation; clears a prior rejection reason.
-        status: "PENDING",
-        rejectionReason: null,
+        wifiName: d.wifiName || null,
+        wifiPassword: d.wifiPassword || null,
+        status: newStatus,
+        rejectionReason: ctx.session.user.isAdmin ? ctx.listing.rejectionReason : null,
         images: {
           create: d.imageUrls.map((url, idx) => ({
             url,
@@ -88,7 +92,7 @@ export async function PATCH(
   // Tell the admin a host edited their listing (so it gets re-reviewed). Skip
   // when the admin is the one editing — no point notifying yourself.
   if (!ctx.session.user.isAdmin) notifyAdminListingUpdated(id);
-  return NextResponse.json({ id, status: "PENDING" });
+  return NextResponse.json({ id, status: newStatus });
 }
 
 export async function DELETE(

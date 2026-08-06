@@ -25,7 +25,7 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
     checkIn: "",
     checkOut: "",
     totalPrice: "",
-    amountPaid: "0",
+    amountPaid: "",
     source: "OFFLINE",
     note: "",
   });
@@ -58,7 +58,7 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
         return;
       }
       setSuccess({ receiptNumber: data.receiptNumber, receiptUrl: data.receiptUrl });
-      setForm((current) => ({ ...current, guestName: "", guestPhone: "", guests: 1, checkIn: "", checkOut: "", totalPrice: "", amountPaid: "0", note: "" }));
+      setForm((current) => ({ ...current, guestName: "", guestPhone: "", guests: 1, checkIn: "", checkOut: "", totalPrice: "", amountPaid: "", note: "" }));
       router.refresh();
     } catch {
       setError("Something went wrong.");
@@ -109,19 +109,42 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
           </div>
           <div className="space-y-2">
             <Label htmlFor="checkIn">Check-in</Label>
-            <Input id="checkIn" type="date" value={form.checkIn} onChange={(e) => setField("checkIn", e.target.value)} required />
+            <Input
+              id="checkIn"
+              type="date"
+              className="w-full"
+              value={form.checkIn}
+              onChange={(e) => {
+                const checkIn = e.target.value;
+                setForm((c) => ({
+                  ...c,
+                  checkIn,
+                  // Drop an out-of-range checkout so it can never be before check-in.
+                  checkOut: c.checkOut && c.checkOut <= checkIn ? "" : c.checkOut,
+                }));
+              }}
+              required
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor="checkOut">Check-out</Label>
-            <Input id="checkOut" type="date" value={form.checkOut} onChange={(e) => setField("checkOut", e.target.value)} required />
+            <Input
+              id="checkOut"
+              type="date"
+              className="w-full"
+              min={form.checkIn || undefined}
+              value={form.checkOut}
+              onChange={(e) => setField("checkOut", e.target.value)}
+              required
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor="totalPrice">Total price (₹)</Label>
-            <Input id="totalPrice" type="number" min={0} step="0.01" value={form.totalPrice} onChange={(e) => setField("totalPrice", e.target.value)} required />
+            <Input id="totalPrice" type="number" inputMode="decimal" min={0} step="0.01" placeholder="0" value={form.totalPrice} onChange={(e) => setField("totalPrice", e.target.value)} required />
           </div>
           <div className="space-y-2">
             <Label htmlFor="amountPaid">Amount paid (₹)</Label>
-            <Input id="amountPaid" type="number" min={0} step="0.01" value={form.amountPaid} onChange={(e) => setField("amountPaid", e.target.value)} />
+            <Input id="amountPaid" type="number" inputMode="decimal" min={0} step="0.01" placeholder="0" value={form.amountPaid} onChange={(e) => setField("amountPaid", e.target.value)} />
           </div>
           <div className="space-y-2 md:col-span-2">
             <Label htmlFor="note">Note</Label>
@@ -137,8 +160,13 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
         <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-900">
           <p className="font-semibold">Booking recorded · {success.receiptNumber}</p>
           <div className="mt-3 flex flex-wrap gap-2">
-            <Button asChild size="sm"><a href={success.receiptUrl} target="_blank" rel="noreferrer">Open receipt</a></Button>
-            <Button type="button" size="sm" variant="outline" onClick={copyReceiptLink}>Copy receipt link</Button>
+            <Button asChild size="sm">
+              <a href={`${success.receiptUrl}?download=1`} download>Download receipt</a>
+            </Button>
+            <Button asChild size="sm" variant="outline">
+              <a href={success.receiptUrl} target="_blank" rel="noreferrer">Open</a>
+            </Button>
+            <Button type="button" size="sm" variant="outline" onClick={copyReceiptLink}>Copy link</Button>
           </div>
         </div>
       )}

@@ -83,6 +83,8 @@ export default async function EditListingPage({
             checkInTime: listing.checkInTime ?? "",
             checkOutTime: listing.checkOutTime ?? "",
             houseRules: listing.houseRules ?? "",
+            wifiName: listing.wifiName ?? "",
+            wifiPassword: listing.wifiPassword ?? "",
             amenityKeys: selectedAmenityKeys,
             imageUrls: listing.images.map((i) => i.url),
           }}

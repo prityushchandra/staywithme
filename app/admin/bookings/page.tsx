@@ -104,13 +104,21 @@ export default async function AdminBookingsPage({
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <Link
-                        href={`/api/receipts/booking/${b.id}`}
-                        target="_blank"
+                      <a
+                        href={`/api/receipts/booking/${b.id}?download=1`}
+                        download
                         className="rounded-lg border px-3 py-1.5 text-sm font-medium transition hover:border-foreground"
                       >
-                        Receipt
-                      </Link>
+                        Download receipt
+                      </a>
+                      <a
+                        href={`/api/receipts/booking/${b.id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-lg border px-3 py-1.5 text-sm font-medium transition hover:border-foreground"
+                      >
+                        Open
+                      </a>
                       <OfflineBookingActions bookingId={b.id} status={b.status} />
                     </div>
                   </div>

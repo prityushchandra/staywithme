@@ -58,6 +58,8 @@ export async function POST(req: Request) {
       checkInTime: d.checkInTime || null,
       checkOutTime: d.checkOutTime || null,
       houseRules: d.houseRules || null,
+      wifiName: d.wifiName || null,
+      wifiPassword: d.wifiPassword || null,
       status: "PENDING", // submitted for admin approval
       images: {
         create: d.imageUrls.map((url, idx) => ({

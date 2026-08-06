@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { formatINR } from "@/lib/pricing";
 import { getPlatformSettings } from "@/lib/settings";
+import { getReceiptFonts } from "@/lib/receipt-fonts";
 
 export const runtime = "nodejs";
 
@@ -60,13 +61,14 @@ function Pair({ label, value, strong, danger }: { label: string; value: string; 
 }
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   if (!(await requireAdmin())) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
+  const download = new URL(req.url).searchParams.has("download");
   const { id } = await params;
   const booking = await prisma.offlineBooking.findUnique({
     where: { id },
@@ -97,9 +99,18 @@ export async function GET(
   const receipt = booking.receipts[0];
   const stayNights = nights(booking.checkIn, booking.checkOut);
 
+  const policyTitle = policy?.title ?? String(booking.listing.cancellationPolicy);
+  const policyDesc = (policy?.description ?? "Please contact StayWithMe for cancellation details.").slice(0, 600);
+  const note = settings.smartLockNote ?? "Check-in details will be shared before arrival.";
+  const hasWifi = !!booking.listing.wifiName;
+  // Size the image to its content so a long cancellation policy is never cropped.
+  const height =
+    1000 + (hasWifi ? 150 : 0) + Math.ceil(policyDesc.length / 52) * 30 + Math.ceil(note.length / 58) * 26;
+  const fonts = await getReceiptFonts();
+
   return new ImageResponse(
     (
-      <div style={{ display: "flex", width: "100%", height: "100%", flexDirection: "column", background: "#f3f4f6", padding: 34, fontFamily: "Arial, Helvetica, sans-serif", color: colors.ink }}>
+      <div style={{ display: "flex", width: "100%", height: "100%", flexDirection: "column", background: "#f3f4f6", padding: 34, fontFamily: "'Noto Sans', Arial, Helvetica, sans-serif", color: colors.ink }}>
         <div style={{ display: "flex", flexDirection: "column", overflow: "hidden", borderRadius: 34, background: "white", boxShadow: "0 18px 45px rgba(17,24,39,0.12)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", background: colors.ink, padding: "34px 38px", color: "white" }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -167,19 +178,26 @@ export async function GET(
 
             <Section title="Cancellation policy">
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <div style={{ display: "flex", fontSize: 25, fontWeight: 800 }}>{policy?.title ?? booking.listing.cancellationPolicy}</div>
-                <div style={{ display: "flex", color: colors.muted, fontSize: 21, lineHeight: 1.35 }}>{policy?.description ?? "Please contact StayWithMe for cancellation details."}</div>
+                <div style={{ display: "flex", fontSize: 25, fontWeight: 800 }}>{policyTitle}</div>
+                <div style={{ display: "flex", color: colors.muted, fontSize: 21, lineHeight: 1.35 }}>{policyDesc}</div>
               </div>
             </Section>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: 22, borderRadius: 24, background: "#fff7ed", color: "#7c2d12", fontSize: 21, lineHeight: 1.35 }}>
-              <div style={{ display: "flex" }}>{settings.smartLockNote ?? "Check-in details will be shared before arrival."}</div>
+              <div style={{ display: "flex" }}>{note}</div>
               <div style={{ display: "flex", fontWeight: 800 }}>Questions? WhatsApp {settings.whatsappNumber}</div>
             </div>
           </div>
         </div>
       </div>
     ),
-    { width: 820, height: 1160 }
+    {
+      width: 820,
+      height,
+      fonts: fonts.length ? fonts : undefined,
+      headers: download
+        ? { "Content-Disposition": `attachment; filename="StayWithMe-${receipt?.number ?? booking.id.slice(-6)}.png"` }
+        : undefined,
+    }
   );
 }

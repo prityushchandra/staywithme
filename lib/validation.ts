@@ -43,6 +43,9 @@ export const listingInputSchema = z.object({
   checkInTime: z.string().trim().max(40).optional(),
   checkOutTime: z.string().trim().max(40).optional(),
   houseRules: z.string().trim().max(2000).optional(),
+  // WiFi shown on booking receipts only (never on the public listing page).
+  wifiName: z.string().trim().max(80).optional(),
+  wifiPassword: z.string().trim().max(80).optional(),
   amenityKeys: z.array(z.string()).default([]),
   imageUrls: z
     .array(

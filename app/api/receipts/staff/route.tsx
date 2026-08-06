@@ -4,6 +4,8 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { formatINR } from "@/lib/pricing";
 import { getPlatformSettings } from "@/lib/settings";
+import { monthLabel } from "@/lib/staff";
+import { getReceiptFonts } from "@/lib/receipt-fonts";
 
 export const runtime = "nodejs";
 
@@ -12,21 +14,11 @@ async function requireAdmin() {
   return !!session?.user?.isAdmin;
 }
 
-function monthBounds(input: string) {
-  const [year, month] = input.split("-").map(Number);
-  return {
-    start: new Date(Date.UTC(year, month - 1, 1)),
-    next: new Date(Date.UTC(year, month, 1)),
-  };
+function flatLabel(l: { title: string; flatNumber: string | null; block: string | null }) {
+  return l.flatNumber ? `${l.flatNumber}${l.block ? `, ${l.block}` : ""}` : l.title;
 }
 
-function formatDate(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function flatLabel(listing: { title: string; flatNumber: string | null; block: string | null }) {
-  return [listing.flatNumber || listing.title, listing.block].filter(Boolean).join(", ");
-}
+const colors = { brand: "#C8705E", ink: "#111827", muted: "#6b7280", line: "#e5e7eb", soft: "#f9fafb" };
 
 export async function GET(req: Request) {
   if (!(await requireAdmin()))
@@ -35,94 +27,98 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const staffId = searchParams.get("staffId");
   const month = searchParams.get("month");
+  const download = searchParams.has("download");
   if (!staffId || !month?.match(/^\d{4}-\d{2}$/)) {
     return NextResponse.json({ error: "Missing staffId or month" }, { status: 400 });
   }
 
-  const { start, next } = monthBounds(month);
   const [staff, settings] = await Promise.all([
     prisma.staff.findUnique({
       where: { id: staffId },
       include: {
-        attendance: {
-          where: { date: { gte: start, lt: next } },
+        payroll: {
+          where: { month },
           include: { listing: { select: { title: true, flatNumber: true, block: true } } },
-          orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+          orderBy: { createdAt: "asc" },
         },
       },
     }),
     getPlatformSettings(),
   ]);
-
   if (!staff) return NextResponse.json({ error: "Staff not found" }, { status: 404 });
 
-  const total = staff.attendance.reduce((sum, row) => sum + row.amount, 0);
+  const rows = staff.payroll;
+  const total = rows.reduce((s, r) => s + r.pay, 0);
+  const height = 560 + Math.max(1, rows.length) * 46;
+  const fonts = await getReceiptFonts();
 
   return new ImageResponse(
     (
-      <div
-        style={{
-          width: "100%",
-          height: "100%",
-          display: "flex",
-          flexDirection: "column",
-          background: "#f9fafb",
-          color: "#111827",
-          fontFamily: "Arial, sans-serif",
-          padding: 40,
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <div style={{ color: "#C8705E", fontSize: 30, fontWeight: 700 }}>StayWithMe — Staff Payout</div>
-            <div style={{ color: "#6b7280", fontSize: 18, marginTop: 8 }}>Month: {month}</div>
+      <div style={{ display: "flex", width: "100%", height: "100%", flexDirection: "column", background: "#f3f4f6", padding: 36, fontFamily: "'Noto Sans', Arial, sans-serif", color: colors.ink }}>
+        <div style={{ display: "flex", flexDirection: "column", overflow: "hidden", borderRadius: 30, background: "white", boxShadow: "0 16px 40px rgba(17,24,39,0.12)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", background: colors.ink, color: "white", padding: "30px 34px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", color: colors.brand, fontSize: 34, fontWeight: 900 }}>StayWithMe</div>
+              <div style={{ display: "flex", fontSize: 24, fontWeight: 700 }}>Staff Payout</div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+              <div style={{ display: "flex", fontSize: 22, fontWeight: 800 }}>{monthLabel(month)}</div>
+              <div style={{ display: "flex", color: "#d1d5db", fontSize: 17 }}>{new Date().toISOString().slice(0, 10)}</div>
+            </div>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", fontSize: 16, color: "#6b7280" }}>
-            <div>Generated receipt</div>
-            <div>{formatDate(new Date())}</div>
-          </div>
-        </div>
 
-        <div style={{ display: "flex", gap: 16, marginTop: 28 }}>
-          <div style={{ display: "flex", flexDirection: "column", flex: 1, background: "white", border: "1px solid #e5e7eb", borderRadius: 18, padding: 22 }}>
-            <div style={{ color: "#6b7280", fontSize: 15 }}>Staff</div>
-            <div style={{ fontSize: 26, fontWeight: 700, marginTop: 6 }}>{staff.name}</div>
-            <div style={{ color: "#6b7280", fontSize: 17, marginTop: 6 }}>{staff.phone || "No phone"}</div>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", width: 240, background: "#C8705E", color: "white", borderRadius: 18, padding: 22 }}>
-            <div style={{ fontSize: 15, opacity: 0.9 }}>TOTAL</div>
-            <div style={{ fontSize: 34, fontWeight: 800, marginTop: 8 }}>{formatINR(total)}</div>
-            <div style={{ fontSize: 15, opacity: 0.9, marginTop: 6 }}>{staff.attendance.length} flat-days</div>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", background: "white", border: "1px solid #e5e7eb", borderRadius: 18, marginTop: 24, padding: 22 }}>
-          <div style={{ display: "flex", color: "#6b7280", fontSize: 15, paddingBottom: 10, borderBottom: "1px solid #e5e7eb" }}>
-            <div style={{ width: 130 }}>Date</div>
-            <div style={{ flex: 1 }}>Flat</div>
-            <div style={{ width: 130, textAlign: "right" }}>Amount</div>
-          </div>
-          {staff.attendance.length === 0 ? (
-            <div style={{ display: "flex", color: "#6b7280", fontSize: 18, paddingTop: 18 }}>No cleaning attendance recorded for this month.</div>
-          ) : (
-            staff.attendance.map((row) => (
-              <div key={row.id} style={{ display: "flex", fontSize: 17, padding: "12px 0", borderBottom: "1px solid #f3f4f6" }}>
-                <div style={{ width: 130 }}>{formatDate(row.date)}</div>
-                <div style={{ flex: 1 }}>{flatLabel(row.listing)}</div>
-                <div style={{ width: 130, textAlign: "right", fontWeight: 700 }}>{formatINR(row.amount)}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 18, padding: 28 }}>
+            <div style={{ display: "flex", gap: 16 }}>
+              <div style={{ display: "flex", flexDirection: "column", flex: 1, gap: 6, padding: 20, border: `1px solid ${colors.line}`, borderRadius: 18 }}>
+                <div style={{ display: "flex", color: colors.muted, fontSize: 16 }}>STAFF</div>
+                <div style={{ display: "flex", fontSize: 28, fontWeight: 800 }}>{staff.name}</div>
+                <div style={{ display: "flex", color: colors.muted, fontSize: 19 }}>{staff.phone || "No phone"}</div>
               </div>
-            ))
-          )}
-        </div>
+              <div style={{ display: "flex", flexDirection: "column", width: 260, gap: 4, padding: 20, borderRadius: 18, background: colors.brand, color: "white" }}>
+                <div style={{ display: "flex", fontSize: 16, opacity: 0.9 }}>NET PAYOUT</div>
+                <div style={{ display: "flex", fontSize: 36, fontWeight: 900 }}>{formatINR(total)}</div>
+                <div style={{ display: "flex", fontSize: 16, opacity: 0.9 }}>{rows.length} flat{rows.length === 1 ? "" : "s"}</div>
+              </div>
+            </div>
 
-        <div style={{ display: "flex", flexDirection: "column", marginTop: 22, background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 16, padding: 18, color: "#6b7280", fontSize: 16 }}>
-          <div>
-            Reference monthly salary {formatINR(settings.staffMonthlySalary)}, {settings.staffMonthlyHolidays} holidays, rate {formatINR(settings.staffDailyRate)}/flat/day.
+            <div style={{ display: "flex", flexDirection: "column", border: `1px solid ${colors.line}`, borderRadius: 18, overflow: "hidden" }}>
+              <div style={{ display: "flex", color: colors.muted, fontSize: 16, padding: "14px 18px", background: colors.soft }}>
+                <div style={{ display: "flex", flex: 1 }}>Flat</div>
+                <div style={{ display: "flex", width: 120, justifyContent: "center" }}>Absent</div>
+                <div style={{ display: "flex", width: 150, justifyContent: "flex-end" }}>Pay</div>
+              </div>
+              {rows.length === 0 ? (
+                <div style={{ display: "flex", color: colors.muted, fontSize: 19, padding: 20 }}>No payroll recorded for this month.</div>
+              ) : (
+                rows.map((r) => (
+                  <div key={r.id} style={{ display: "flex", alignItems: "center", fontSize: 20, padding: "14px 18px", borderTop: `1px solid ${colors.line}` }}>
+                    <div style={{ display: "flex", flex: 1, fontWeight: 700 }}>{flatLabel(r.listing)}</div>
+                    <div style={{ display: "flex", width: 120, justifyContent: "center", color: r.absences > r.allowedHolidays ? "#b91c1c" : colors.muted }}>
+                      {r.absences} / {r.allowedHolidays}
+                    </div>
+                    <div style={{ display: "flex", width: 150, justifyContent: "flex-end", fontWeight: 800 }}>{formatINR(r.pay)}</div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: 20, borderRadius: 18, background: "#fff7ed", color: "#7c2d12", fontSize: 18 }}>
+              <div style={{ display: "flex" }}>
+                Base salary {formatINR(settings.staffMonthlySalary)}/flat · {settings.staffMonthlyHolidays} free holidays · then {formatINR(settings.staffDailyRate)}/extra absent day.
+              </div>
+              <div style={{ display: "flex", color: "#9a3412" }}>Fixed monthly salary — the same whether the month has 30 or 31 days.</div>
+            </div>
           </div>
-          <div style={{ marginTop: 6 }}>This receipt is generated from flat-wise attendance entries.</div>
         </div>
       </div>
     ),
-    { width: 820, height: 1160 }
+    {
+      width: 820,
+      height,
+      fonts: fonts.length ? fonts : undefined,
+      headers: download
+        ? { "Content-Disposition": `attachment; filename="StayWithMe-staff-${staff.name.replace(/\s+/g, "-")}-${month}.png"` }
+        : undefined,
+    }
   );
 }
