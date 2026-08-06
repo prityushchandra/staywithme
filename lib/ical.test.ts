@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isSafeIcalUrl, isPrivateIp, parseIcalBusyRanges } from "./ical";
+import { isSafeIcalUrl, isPrivateIp, parseIcalBusyRanges, buildIcalFeed } from "./ical";
 
 const ics = [
   "BEGIN:VCALENDAR",
@@ -79,5 +79,47 @@ describe("isPrivateIp", () => {
     expect(isPrivateIp("8.8.8.8")).toBe(false);
     expect(isPrivateIp("1.1.1.1")).toBe(false);
     expect(isPrivateIp("2606:4700:4700::1111")).toBe(false);
+  });
+});
+
+describe("buildIcalFeed", () => {
+  const feed = buildIcalFeed(
+    [
+      {
+        uid: "swm-abc@staywithme.co.in",
+        start: new Date(Date.UTC(2026, 6, 31)), // 31 Jul
+        end: new Date(Date.UTC(2026, 7, 2)), // 2 Aug (exclusive)
+        summary: "Reserved (StayWithMe)",
+      },
+    ],
+    "StayWithMe — Test, Flat"
+  );
+
+  it("round-trips through the parser to the same busy range", () => {
+    const r = parseIcalBusyRanges(feed);
+    expect(r).toHaveLength(1);
+    expect(r[0].start.toISOString()).toBe("2026-07-31T00:00:00.000Z");
+    expect(r[0].end.toISOString()).toBe("2026-08-02T00:00:00.000Z");
+  });
+
+  it("emits all-day DATE values and required calendar scaffolding", () => {
+    expect(feed).toContain("BEGIN:VCALENDAR");
+    expect(feed).toContain("END:VCALENDAR");
+    expect(feed).toContain("DTSTART;VALUE=DATE:20260731");
+    expect(feed).toContain("DTEND;VALUE=DATE:20260802");
+    expect(feed).toContain("UID:swm-abc@staywithme.co.in");
+    expect(feed.endsWith("\r\n")).toBe(true);
+  });
+
+  it("escapes commas in the calendar name", () => {
+    expect(feed).toContain("X-WR-CALNAME:StayWithMe — Test\\, Flat");
+  });
+
+  it("produces an empty but valid calendar when there are no events", () => {
+    const empty = buildIcalFeed([], "Empty");
+    expect(empty).toContain("BEGIN:VCALENDAR");
+    expect(empty).toContain("END:VCALENDAR");
+    expect(empty).not.toContain("BEGIN:VEVENT");
+    expect(parseIcalBusyRanges(empty)).toHaveLength(0);
   });
 });

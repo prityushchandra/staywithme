@@ -507,6 +507,9 @@ model StaffPayroll {
 
   month           String   // "YYYY-MM"
   absences        Int      @default(0)
+  // The specific day-of-month numbers (1..31) marked absent, so the calendar UI
+  // can be reloaded and edited. `absences` mirrors this array's length.
+  absentDays      Int[]    @default([])
 
   monthlySalary   Int      // paise — snapshot of the base monthly salary for the flat
   allowedHolidays Int      // snapshot of the free holidays for the month

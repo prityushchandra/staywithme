@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { RefreshCw, CalendarDays, Loader2, Check, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,22 @@ export function CalendarSyncCard({
   const [error, setError] = useState(initialError ?? "");
   const [ok, setOk] = useState("");
   const [busy, setBusy] = useState<"save" | "remove" | null>(null);
+  const [exportUrl, setExportUrl] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    setExportUrl(`${window.location.origin}/api/listings/${listingId}/export.ics`);
+  }, [listingId]);
+
+  async function copyExport() {
+    try {
+      await navigator.clipboard.writeText(exportUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked — the field is selectable as a fallback */
+    }
+  }
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -139,6 +155,27 @@ export function CalendarSyncCard({
             )}
           </div>
         </form>
+
+        <div className="rounded-lg border bg-muted/30 p-3">
+          <p className="text-sm font-medium">Block your StayWithMe bookings on Airbnb</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Add this StayWithMe export link to Airbnb (Calendar → Availability →
+            Connect calendars → <strong>Import calendar</strong>). Every booking you
+            record here then blocks those dates on Airbnb too. Airbnb refreshes
+            imported calendars roughly hourly, so it&apos;s near-real-time.
+          </p>
+          <div className="mt-2 flex items-center gap-2">
+            <Input
+              readOnly
+              value={exportUrl}
+              className="text-xs"
+              onFocus={(e) => e.currentTarget.select()}
+            />
+            <Button type="button" variant="outline" size="sm" onClick={copyExport}>
+              {copied ? <Check className="h-4 w-4" /> : "Copy"}
+            </Button>
+          </div>
+        </div>
       </CardContent>
     </Card>
   );

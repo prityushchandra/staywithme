@@ -118,3 +118,25 @@
     font-size: 16px !important;
   }
 }
+
+/* Native date/month/time inputs: keep the value left-aligned and vertically
+   centred inside our fixed-height (h-10) styled inputs — otherwise WebKit
+   centres/offsets the value, which looks clipped/"glitchy". */
+input[type="date"]::-webkit-date-and-time-value,
+input[type="month"]::-webkit-date-and-time-value,
+input[type="time"]::-webkit-date-and-time-value {
+  text-align: left;
+  margin: 0;
+}
+input[type="date"],
+input[type="month"],
+input[type="time"] {
+  min-height: 2.5rem;
+  line-height: 1.5rem;
+}
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="month"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.6;
+}

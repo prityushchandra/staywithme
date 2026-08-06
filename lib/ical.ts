@@ -132,3 +132,51 @@ export function parseIcalBusyRanges(text: string): BusyRange[] {
   }
   return ranges;
 }
+
+// --- Export (StayWithMe → Airbnb/Vrbo/etc.) --------------------------------
+
+export interface BusyEvent {
+  uid: string;
+  start: Date; // check-in (inclusive, UTC date)
+  end: Date; // check-out (exclusive, UTC date)
+  summary: string;
+}
+
+function ymd(d: Date): string {
+  return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
+function icalEscape(text: string): string {
+  return text.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
+}
+
+/**
+ * Build a minimal RFC-5545 VCALENDAR of busy all-day ranges that other
+ * platforms (Airbnb, Vrbo, Booking.com) can import to block these dates. DTEND
+ * is exclusive (checkout morning), matching how we read their feeds.
+ */
+export function buildIcalFeed(events: BusyEvent[], calName: string): string {
+  const stamp = `${ymd(new Date())}T000000Z`;
+  const lines: string[] = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//StayWithMe//Availability//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    `X-WR-CALNAME:${icalEscape(calName)}`,
+  ];
+  for (const e of events) {
+    lines.push(
+      "BEGIN:VEVENT",
+      `UID:${e.uid}`,
+      `DTSTAMP:${stamp}`,
+      `DTSTART;VALUE=DATE:${ymd(e.start)}`,
+      `DTEND;VALUE=DATE:${ymd(e.end)}`,
+      `SUMMARY:${icalEscape(e.summary)}`,
+      "TRANSP:OPAQUE",
+      "END:VEVENT"
+    );
+  }
+  lines.push("END:VCALENDAR");
+  return lines.join("\r\n") + "\r\n";
+}
