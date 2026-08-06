@@ -10,6 +10,8 @@ import {
   Users,
   Tags,
   Settings,
+  IndianRupee,
+  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -26,6 +28,8 @@ const NAV: NavItem[] = [
   { href: "/admin", label: "Dashboard", Icon: LayoutDashboard, exact: true },
   { href: "/admin/listings", label: "Listings", Icon: ListChecks, badge: "listings" },
   { href: "/admin/bookings", label: "Bookings", Icon: CalendarCheck },
+  { href: "/admin/earnings", label: "Earnings", Icon: IndianRupee },
+  { href: "/admin/staff", label: "Staff", Icon: Sparkles },
   { href: "/admin/reviews", label: "Reviews", Icon: Star, badge: "reviews" },
   { href: "/admin/users", label: "Users", Icon: Users },
   { href: "/admin/catalog", label: "Catalog", Icon: Tags },

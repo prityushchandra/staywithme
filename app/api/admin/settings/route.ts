@@ -16,6 +16,10 @@ const schema = z.object({
   rankWeightClick: z.coerce.number().int().min(0).max(100),
   reviewsOpenToAll: z.boolean(),
   showSignature: z.boolean(),
+  smartLockNote: z.string().trim().max(500),
+  staffDailyRateRupees: z.coerce.number().int().min(0).max(1_000_000),
+  staffMonthlySalaryRupees: z.coerce.number().int().min(0).max(10_000_000),
+  staffMonthlyHolidays: z.coerce.number().int().min(0).max(31),
 });
 
 export async function PATCH(req: Request) {
@@ -56,6 +60,10 @@ export async function PATCH(req: Request) {
       rankWeightClick: d.rankWeightClick,
       reviewsOpenToAll: d.reviewsOpenToAll,
       showSignature: d.showSignature,
+      smartLockNote: d.smartLockNote,
+      staffDailyRate: d.staffDailyRateRupees * 100,
+      staffMonthlySalary: d.staffMonthlySalaryRupees * 100,
+      staffMonthlyHolidays: d.staffMonthlyHolidays,
     },
     create: {
       id: "singleton",
@@ -68,6 +76,10 @@ export async function PATCH(req: Request) {
       rankWeightClick: d.rankWeightClick,
       reviewsOpenToAll: d.reviewsOpenToAll,
       showSignature: d.showSignature,
+      smartLockNote: d.smartLockNote,
+      staffDailyRate: d.staffDailyRateRupees * 100,
+      staffMonthlySalary: d.staffMonthlySalaryRupees * 100,
+      staffMonthlyHolidays: d.staffMonthlyHolidays,
     },
   });
 

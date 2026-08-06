@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 
 export function SettingsForm({
   initial,
@@ -19,6 +20,10 @@ export function SettingsForm({
     rankWeightClick: number;
     reviewsOpenToAll: boolean;
     showSignature: boolean;
+    smartLockNote: string;
+    staffDailyRateRupees: number;
+    staffMonthlySalaryRupees: number;
+    staffMonthlyHolidays: number;
   };
 }) {
   const router = useRouter();
@@ -189,6 +194,61 @@ export function SettingsForm({
 
       {error && <p className="text-sm text-destructive">{error}</p>}
       {saved && <p className="text-sm text-green-700">Settings saved.</p>}
+
+      <div className="space-y-1 border-t pt-6">
+        <Label htmlFor="smartLock">Booking receipt footer note</Label>
+        <Textarea
+          id="smartLock"
+          rows={2}
+          value={form.smartLockNote}
+          onChange={(e) => set("smartLockNote", e.target.value)}
+          placeholder="We have a smart door lock — the door PIN will be shared on your check-in day."
+        />
+        <p className="text-xs text-muted-foreground">
+          Printed at the bottom of every booking receipt (e.g. smart-lock / door
+          PIN instructions).
+        </p>
+      </div>
+
+      <div className="space-y-1">
+        <Label>Cleaning staff</Label>
+        <p className="text-xs text-muted-foreground">
+          Defaults used by the Staff tracker to calculate cleaning pay.
+        </p>
+        <div className="mt-2 grid grid-cols-3 gap-4">
+          <div className="space-y-1">
+            <Label htmlFor="sRate" className="text-xs">Per flat / day (₹)</Label>
+            <Input
+              id="sRate"
+              type="number"
+              min={0}
+              value={form.staffDailyRateRupees}
+              onChange={(e) => set("staffDailyRateRupees", Number(e.target.value) || 0)}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="sSalary" className="text-xs">Monthly salary (₹)</Label>
+            <Input
+              id="sSalary"
+              type="number"
+              min={0}
+              value={form.staffMonthlySalaryRupees}
+              onChange={(e) => set("staffMonthlySalaryRupees", Number(e.target.value) || 0)}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="sHol" className="text-xs">Holidays / flat</Label>
+            <Input
+              id="sHol"
+              type="number"
+              min={0}
+              max={31}
+              value={form.staffMonthlyHolidays}
+              onChange={(e) => set("staffMonthlyHolidays", Number(e.target.value) || 0)}
+            />
+          </div>
+        </div>
+      </div>
 
       <Button type="submit" variant="brand" disabled={busy}>
         {busy ? "Saving…" : "Save settings"}

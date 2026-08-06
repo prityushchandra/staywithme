@@ -205,6 +205,10 @@ model Listing {
   checkOutTime String? // e.g. "11:00 AM"
   houseRules   String? @db.Text // one rule per line
 
+  // Shown on booking receipts (never on the public listing page).
+  wifiName     String?
+  wifiPassword String?
+
   status         ListingStatus @default(DRAFT)
   rejectionReason String?
   featured       Boolean       @default(false) // admin homepage curation
@@ -224,6 +228,8 @@ model Listing {
   reviews     Review[]
   availability AvailabilityBlock[]
   bookings    Booking[]
+  offlineBookings OfflineBooking[]
+  staffAttendance StaffAttendance[]
 
   @@index([status])
   @@index([city])
@@ -310,6 +316,13 @@ model PlatformSettings {
   // StayWithMe wordmark in the navbar. Admin can switch it off, which also
   // centres the wordmark against the logo.
   showSignature    Boolean @default(true)
+  // Booking-receipt footer instruction (smart lock / door PIN etc.).
+  smartLockNote    String  @default("We have a smart door lock — the door PIN will be shared with you on your check-in day.") @db.Text
+  // Staff cleaning economics (paise). Default: ₹100 per flat per day, ₹3,000
+  // monthly salary, 4 holidays/flat/month.
+  staffDailyRate     Int @default(10000)
+  staffMonthlySalary Int @default(300000)
+  staffMonthlyHolidays Int @default(4)
   updatedAt          DateTime @updatedAt
 }
 
@@ -420,4 +433,97 @@ model BotConversation {
   updatedAt DateTime @updatedAt
 
   @@index([expiresAt])
+}
+
+// ---------------------------------------------------------------------------
+// Offline / external bookings, staff attendance, and generated receipts.
+// (Admin-operated "book & block" flow + Airbnb earnings + cleaning staff.)
+// All money is in MINOR units (paise), like the rest of the platform.
+// ---------------------------------------------------------------------------
+
+// A booking the admin records directly (a walk-in / phone / WhatsApp deal, or an
+// Airbnb reservation whose payout we log manually since Airbnb's iCal never
+// carries the amount). Blocks its dates via a linked AvailabilityBlock.
+model OfflineBooking {
+  id          String   @id @default(cuid())
+  listingId   String
+  listing     Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  guestName   String
+  guestPhone  String?
+  guests      Int      @default(1)
+
+  checkIn     DateTime // UTC midnight, inclusive
+  checkOut    DateTime // UTC midnight, exclusive
+
+  totalPrice  Int      // paise — the agreed guest total
+  amountPaid  Int      @default(0) // paise received so far
+  due         Int      @default(0) // paise still owed (totalPrice - amountPaid)
+
+  source      String   @default("OFFLINE") // OFFLINE | AIRBNB
+  status      String   @default("CONFIRMED") // CONFIRMED | CANCELLED
+  note        String?
+
+  // The AvailabilityBlock created for these dates (so cancel can free them).
+  blockId     String?
+  createdById String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  receipts    Receipt[]
+
+  @@index([listingId])
+  @@index([source])
+  @@index([status])
+  @@index([checkIn])
+}
+
+// A cleaning-staff member.
+model Staff {
+  id         String            @id @default(cuid())
+  name       String
+  phone      String?
+  active     Boolean           @default(true)
+  createdAt  DateTime          @default(now())
+
+  attendance StaffAttendance[]
+
+  @@index([active])
+}
+
+// One "staff cleaned this flat on this day" record. `amount` is the pay for that
+// flat-day (defaults to PlatformSettings.staffDailyRate, ₹100).
+model StaffAttendance {
+  id        String   @id @default(cuid())
+  staffId   String
+  staff     Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  listingId String
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  date      DateTime // UTC midnight — the cleaning day
+  amount    Int      // paise paid for this flat-day
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@unique([staffId, listingId, date])
+  @@index([date])
+  @@index([listingId])
+  @@index([staffId])
+}
+
+// A generated receipt (booking or staff payout). Stores a snapshot so the image
+// can be re-rendered identically and mirrored to Google Sheets.
+model Receipt {
+  id               String          @id @default(cuid())
+  number           String          @unique // human-friendly, e.g. "SWM-2026-0001"
+  type             String          // BOOKING | STAFF
+  offlineBookingId String?
+  offlineBooking   OfflineBooking? @relation(fields: [offlineBookingId], references: [id], onDelete: SetNull)
+  refId            String?         // free-form ref for non-booking receipts (e.g. staff payout period)
+  data             Json            // snapshot used to render the receipt image
+  createdAt        DateTime        @default(now())
+
+  @@index([type])
+  @@index([createdAt])
 }

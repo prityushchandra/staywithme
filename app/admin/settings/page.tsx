@@ -35,6 +35,10 @@ export default async function AdminSettingsPage() {
             rankWeightClick: settings.rankWeightClick,
             reviewsOpenToAll: settings.reviewsOpenToAll,
             showSignature: settings.showSignature,
+            smartLockNote: settings.smartLockNote,
+            staffDailyRateRupees: Math.round(settings.staffDailyRate / 100),
+            staffMonthlySalaryRupees: Math.round(settings.staffMonthlySalary / 100),
+            staffMonthlyHolidays: settings.staffMonthlyHolidays,
           }}
         />
       </section>

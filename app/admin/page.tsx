@@ -11,6 +11,7 @@ import {
   Globe,
   Footprints,
   UserPlus,
+  IndianRupee,
 } from "lucide-react";
 import {
   getPlatformOverview,
@@ -18,6 +19,8 @@ import {
   getTopHosts,
   getTrafficMetrics,
 } from "@/lib/admin-analytics";
+import { getEarnings } from "@/lib/earnings";
+import { formatINR } from "@/lib/pricing";
 import { prisma } from "@/lib/db";
 import { Badge } from "@/components/ui/badge";
 
@@ -25,11 +28,12 @@ export const metadata = { title: "Admin · Dashboard" };
 export const dynamic = "force-dynamic";
 
 export default async function AdminDashboard() {
-  const [overview, topListings, topHosts, traffic, pendingReviews] = await Promise.all([
+  const [overview, topListings, topHosts, traffic, earnings, pendingReviews] = await Promise.all([
     getPlatformOverview(),
     getTopListings(5),
     getTopHosts(5),
     getTrafficMetrics(),
+    getEarnings(),
     prisma.review.count({ where: { status: "PENDING" } }),
   ]);
 
@@ -125,6 +129,34 @@ export default async function AdminDashboard() {
               </div>
               <div className="mt-1 text-2xl font-bold">{k.value}</div>
               {k.sub && <div className="text-xs text-muted-foreground">{k.sub}</div>}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Earnings snapshot */}
+      <section>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Earnings
+          </h2>
+          <Link href="/admin/earnings" className="text-sm font-medium text-brand hover:underline">
+            View charts →
+          </Link>
+        </div>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          {[
+            { label: "Total earnings", value: formatINR(earnings.totalPaise), sub: "confirmed revenue" },
+            { label: "This month", value: formatINR(earnings.thisMonthPaise), sub: "by check-in" },
+            { label: "This year", value: formatINR(earnings.thisYearPaise), sub: "year-to-date" },
+            { label: "Confirmed bookings", value: earnings.bookingsCount.toLocaleString("en-IN"), sub: "direct + offline + Airbnb" },
+          ].map((k) => (
+            <div key={k.label} className="min-w-0 rounded-xl border p-4">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <IndianRupee className="h-4 w-4 shrink-0" /> <span className="truncate">{k.label}</span>
+              </div>
+              <div className="mt-1 text-2xl font-bold">{k.value}</div>
+              <div className="text-xs text-muted-foreground">{k.sub}</div>
             </div>
           ))}
         </div>
