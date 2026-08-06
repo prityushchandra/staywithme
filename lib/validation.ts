@@ -38,6 +38,9 @@ export const listingInputSchema = z.object({
   basePriceRupees: z.coerce.number().int().min(1, "Enter a price").max(10_000_000),
   // Optional monthly rate (rupees); 0/empty = not offered. Applies to 30+ night stays.
   monthlyPriceRupees: z.coerce.number().int().min(0).max(100_000_000).default(0),
+  // Optional monthly RENT we pay the owner (rupees); 0/empty = none. OUR expense,
+  // used only in the admin Profit & Loss. Never shown to guests.
+  monthlyRentRupees: z.coerce.number().int().min(0).max(100_000_000).default(0),
   cancellationPolicy: z.enum(["FLEXIBLE", "MODERATE", "STRICT"]),
   // Host-set "things to know" details (all optional).
   checkInTime: z.string().trim().max(40).optional(),

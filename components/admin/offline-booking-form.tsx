@@ -1,12 +1,13 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DateRangePicker } from "@/components/date-range-picker";
 
 export type OfflineBookingListing = { id: string; label: string };
 
@@ -17,6 +18,8 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState<Success | null>(null);
+  const [blockedRanges, setBlockedRanges] = useState<{ startDate: string; endDate: string }[]>([]);
+  const [blocksVersion, setBlocksVersion] = useState(0);
   const [form, setForm] = useState({
     listingId: listings[0]?.id ?? "",
     guestName: "",
@@ -30,6 +33,27 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
     note: "",
   });
 
+  // Load the selected flat's booked/blocked dates so the picker greys them out
+  // (same availability the guest-facing calendar shows).
+  useEffect(() => {
+    if (!form.listingId) {
+      setBlockedRanges([]);
+      return;
+    }
+    let active = true;
+    fetch(`/api/listings/${form.listingId}/availability`)
+      .then((r) => (r.ok ? r.json() : { blocks: [] }))
+      .then((d) => {
+        if (active) setBlockedRanges(Array.isArray(d.blocks) ? d.blocks : []);
+      })
+      .catch(() => {
+        if (active) setBlockedRanges([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [form.listingId, blocksVersion]);
+
   function setField(name: string, value: string | number) {
     setForm((current) => ({ ...current, [name]: value }));
   }
@@ -38,6 +62,11 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
     e.preventDefault();
     setError("");
     setSuccess(null);
+
+    if (!form.checkIn || !form.checkOut) {
+      setError("Select check-in and check-out dates.");
+      return;
+    }
     setSubmitting(true);
 
     try {
@@ -59,6 +88,7 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
       }
       setSuccess({ receiptNumber: data.receiptNumber, receiptUrl: data.receiptUrl });
       setForm((current) => ({ ...current, guestName: "", guestPhone: "", guests: 1, checkIn: "", checkOut: "", totalPrice: "", amountPaid: "", note: "" }));
+      setBlocksVersion((v) => v + 1);
       router.refresh();
     } catch {
       setError("Something went wrong.");
@@ -107,36 +137,20 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="checkIn">Check-in</Label>
-            <Input
-              id="checkIn"
-              type="date"
-              className="w-full"
-              value={form.checkIn}
-              onChange={(e) => {
-                const checkIn = e.target.value;
-                setForm((c) => ({
-                  ...c,
-                  checkIn,
-                  // Drop an out-of-range checkout so it can never be before check-in.
-                  checkOut: c.checkOut && c.checkOut <= checkIn ? "" : c.checkOut,
-                }));
-              }}
-              required
+          <div className="space-y-2 md:col-span-2">
+            <Label>Dates</Label>
+            <DateRangePicker
+              variant="card"
+              checkIn={form.checkIn}
+              checkOut={form.checkOut}
+              blockedRanges={blockedRanges}
+              onChange={(checkIn, checkOut) =>
+                setForm((c) => ({ ...c, checkIn, checkOut }))
+              }
             />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="checkOut">Check-out</Label>
-            <Input
-              id="checkOut"
-              type="date"
-              className="w-full"
-              min={form.checkIn || undefined}
-              value={form.checkOut}
-              onChange={(e) => setField("checkOut", e.target.value)}
-              required
-            />
+            <p className="text-xs text-muted-foreground">
+              Booked dates are greyed out. Pick a check-in, then a check-out.
+            </p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="totalPrice">Total price (₹)</Label>
@@ -201,7 +215,35 @@ export function OfflineBookingActions({ bookingId, status }: { bookingId: string
     }
   }
 
-  if (status === "CANCELLED") return null;
+  async function remove() {
+    if (!confirm("Permanently delete this cancelled booking and its receipt? This cannot be undone.")) return;
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/offline-bookings/${bookingId}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error ?? "Could not delete booking.");
+        setBusy(false);
+        return;
+      }
+      router.refresh();
+    } catch {
+      setError("Something went wrong.");
+      setBusy(false);
+    }
+  }
+
+  if (status === "CANCELLED") {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" variant="destructive" size="sm" onClick={remove} disabled={busy}>
+          {busy ? "Deleting…" : "Delete"}
+        </Button>
+        {error && <span className="text-xs text-destructive">{error}</span>}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-wrap items-center gap-2">

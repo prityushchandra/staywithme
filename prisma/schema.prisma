@@ -197,6 +197,9 @@ model Listing {
   // Optional monthly rate (paise). When set, stays of 30+ nights are charged at
   // this rate pro-rated per night instead of the nightly basePrice.
   monthlyPrice Int?
+  // Optional monthly RENT we pay to the flat owner (paise). This is OUR expense
+  // (we sublet the flat) and feeds the Profit & Loss statement. Not guest-facing.
+  monthlyRent Int?
 
   cancellationPolicy CancellationPolicy
 
@@ -229,6 +232,7 @@ model Listing {
   availability AvailabilityBlock[]
   bookings    Booking[]
   offlineBookings OfflineBooking[]
+  onlineEarnings  OnlineEarning[]
   staffPayroll StaffPayroll[]
 
   @@index([status])
@@ -477,6 +481,28 @@ model OfflineBooking {
   @@index([source])
   @@index([status])
   @@index([checkIn])
+}
+
+// Manually-entered ONLINE channel earnings (Airbnb, Booking.com, etc.) for a
+// listing in a given month. We can't pull these amounts from Airbnb's API, so
+// the admin records a monthly total per flat. Feeds the Earnings graph and the
+// Profit & Loss statement as "online" revenue. One figure per flat per month.
+model OnlineEarning {
+  id          String   @id @default(cuid())
+  listingId   String
+  listing     Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  month       String   // "YYYY-MM"
+  amount      Int      // paise — total online earnings for the flat that month
+  note        String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([listingId, month])
+  @@index([month])
+  @@index([listingId])
 }
 
 // A cleaning-staff member.

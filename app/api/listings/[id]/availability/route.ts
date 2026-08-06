@@ -3,7 +3,7 @@ import { revalidateTag } from "next/cache";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { addBlock, removeBlock, toUtcDate } from "@/lib/availability";
+import { addBlock, removeBlock, toUtcDate, getActiveBlocks } from "@/lib/availability";
 import { clearMemo } from "@/lib/memo";
 
 const createSchema = z.object({
@@ -27,6 +27,25 @@ async function assertOwner(listingId: string) {
     return { error: "Not allowed", status: 403 as const };
   }
   return { session };
+}
+
+// Active blocks for a listing (admin/owner only) — powers the date picker in
+// the offline booking form so booked dates are visibly unavailable.
+export async function GET(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const ctx = await assertOwner(id);
+  if ("error" in ctx) return NextResponse.json({ error: ctx.error }, { status: ctx.status });
+
+  const blocks = await getActiveBlocks(id);
+  return NextResponse.json({
+    blocks: blocks.map((b) => ({
+      startDate: b.startDate.toISOString(),
+      endDate: b.endDate.toISOString(),
+    })),
+  });
 }
 
 // Add a block / confirmed booking.
