@@ -91,7 +91,7 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...form,
-          guests: Number(form.guests),
+          guests: Number(form.guests) || 1,
           totalPrice: Number(form.totalPrice),
           amountPaid: Number(form.amountPaid || 0),
           override,
@@ -147,7 +147,7 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
           </div>
           <div className="space-y-2">
             <Label htmlFor="guests">Guests</Label>
-            <Input id="guests" type="number" min={1} value={form.guests} onChange={(e) => setField("guests", Number(e.target.value))} required />
+            <Input id="guests" type="number" min={1} value={form.guests || ""} onChange={(e) => setField("guests", e.target.value === "" ? 0 : Number(e.target.value))} required />
           </div>
           <div className="space-y-2">
             <Label>Source</Label>

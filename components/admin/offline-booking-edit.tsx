@@ -97,7 +97,7 @@ export function OfflineBookingEdit({ booking }: { booking: OfflineBookingEditDat
         body: JSON.stringify({
           guestName: form.guestName,
           guestPhone: form.guestPhone.trim() || null,
-          guests: Number(form.guests),
+          guests: Number(form.guests) || 1,
           checkIn: form.checkIn,
           checkOut: form.checkOut,
           totalPrice: Number(form.totalPrice || 0),
@@ -145,7 +145,7 @@ export function OfflineBookingEdit({ booking }: { booking: OfflineBookingEditDat
         </div>
         <div className="space-y-1">
           <Label>Guests</Label>
-          <Input type="number" min={1} value={form.guests} onChange={(e) => set("guests", Number(e.target.value))} />
+          <Input type="number" min={1} value={form.guests || ""} onChange={(e) => set("guests", e.target.value === "" ? 0 : Number(e.target.value))} />
         </div>
         <div className="space-y-1">
           <Label>Source</Label>

@@ -3,14 +3,12 @@
 import { useMemo, useState } from "react";
 import {
   ResponsiveContainer,
-  ComposedChart,
+  BarChart,
   Bar,
-  Line,
   XAxis,
   YAxis,
   Tooltip,
   CartesianGrid,
-  Legend,
   PieChart,
   Pie,
   Cell,
@@ -37,7 +35,6 @@ import { ToggleSelect } from "@/components/ui/toggle-select";
 
 const REVENUE = "#2f9e6f";
 const EXPENSE = "#C8705E";
-const PROFIT = "#111827";
 const RENT = "#C8705E";
 const STAFF = "#E0A99B";
 
@@ -47,6 +44,32 @@ const toRupees = (paise: number) => Math.round(paise) / 100;
 function monthLabel(monthKey: string): string {
   const [y, m] = monthKey.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+}
+
+// A clean, no-jitter tooltip: shown on CLICK (not hover), so it doesn't chase the
+// cursor. Recharts hides it when you click elsewhere in the chart.
+interface TooltipEntry {
+  name?: string;
+  value?: number | string;
+  color?: string;
+  payload?: { fill?: string };
+}
+function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: TooltipEntry[]; label?: string }) {
+  if (!active || !payload || payload.length === 0) return null;
+  return (
+    <div className="pointer-events-none rounded-xl border bg-white/95 px-3 py-2 text-xs shadow-lg backdrop-blur-sm">
+      {label ? <div className="mb-1.5 font-semibold text-foreground">{label}</div> : null}
+      <div className="space-y-1">
+        {payload.map((p, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: p.color ?? p.payload?.fill ?? "#999" }} />
+            <span className="text-muted-foreground">{p.name}</span>
+            <span className="ml-auto pl-4 font-semibold text-foreground">{inr0.format(Number(p.value ?? 0))}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 const SOURCE_LABEL: Record<PnlSource, string> = {
@@ -97,7 +120,7 @@ export function PnlDashboard({
   const chartData = monthly.map((m) => {
     const revenue = toRupees(sourceRevenue(m, source));
     const expenses = toRupees(m.expenseTotal);
-    return { label: m.label.replace(/ \d{4}$/, ""), Revenue: revenue, Expenses: expenses, Profit: revenue - expenses };
+    return { label: m.label.replace(/ \d{4}$/, ""), Revenue: revenue, Expenses: expenses };
   });
   const hasChart = chartData.some((d) => d.Revenue > 0 || d.Expenses > 0);
 
@@ -164,22 +187,29 @@ export function PnlDashboard({
         <Kpi label="Unbooked days" value={String(total.unbookedDays)} sub="available, not booked" />
       </div>
 
-      {/* Revenue vs expenses trend + profit line */}
+      {/* Revenue vs expenses trend */}
       <div className="rounded-xl border p-5">
-        <h2 className="mb-4 font-semibold">Revenue vs expenses · {fyLabel}</h2>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-semibold">Revenue vs expenses · {fyLabel}</h2>
+          <div className="flex items-center gap-4 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: REVENUE }} />Revenue</span>
+            <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: EXPENSE }} />Expenses</span>
+          </div>
+        </div>
         {hasChart ? (
-          <ResponsiveContainer width="100%" height={340}>
-            <ComposedChart data={chartData} margin={{ top: 10, right: 16, left: 0, bottom: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
-              <YAxis tickFormatter={(v) => inr0.format(v)} tickLine={false} axisLine={false} fontSize={12} width={72} />
-              <Tooltip formatter={(value) => inr0.format(Number(value))} contentStyle={{ borderRadius: 12, border: "1px solid #e5e7eb" }} />
-              <Legend />
-              <Bar dataKey="Revenue" fill={REVENUE} radius={[6, 6, 0, 0]} barSize={16} />
-              <Bar dataKey="Expenses" fill={EXPENSE} radius={[6, 6, 0, 0]} barSize={16} />
-              <Line type="monotone" dataKey="Profit" stroke={PROFIT} strokeWidth={2.5} dot={{ r: 3 }} />
-            </ComposedChart>
-          </ResponsiveContainer>
+          <>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 4 }} barGap={4} barCategoryGap="28%">
+                <CartesianGrid strokeDasharray="2 6" stroke="#eef0f2" vertical={false} />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} dy={6} />
+                <YAxis tickFormatter={(v) => inr0.format(v)} tickLine={false} axisLine={false} fontSize={11} width={64} />
+                <Tooltip content={<ChartTooltip />} trigger="click" isAnimationActive={false} cursor={{ fill: "rgba(0,0,0,0.04)" }} />
+                <Bar dataKey="Revenue" fill={REVENUE} radius={[6, 6, 0, 0]} maxBarSize={26} />
+                <Bar dataKey="Expenses" fill={EXPENSE} radius={[6, 6, 0, 0]} maxBarSize={26} />
+              </BarChart>
+            </ResponsiveContainer>
+            <p className="mt-1 text-center text-[11px] text-muted-foreground">Tap a bar to see the exact amounts.</p>
+          </>
         ) : (
           <Empty label="No revenue or expenses to show yet." />
         )}
@@ -200,14 +230,14 @@ export function PnlDashboard({
         <div className="rounded-xl border p-5">
           <h2 className="mb-4 font-semibold">Expenses · {scopeLabel}</h2>
           {expensePie.length > 0 ? (
-            <div className="flex items-center gap-4">
-              <ResponsiveContainer width="50%" height={170}>
+            <div className="flex items-center gap-5">
+              <ResponsiveContainer width="45%" height={160}>
                 <PieChart>
-                  <Pie data={expensePie} dataKey="value" nameKey="name" innerRadius={40} outerRadius={70} paddingAngle={2}>
+                  <Pie data={expensePie} dataKey="value" nameKey="name" innerRadius={46} outerRadius={72} paddingAngle={3} stroke="none" isAnimationActive={false}>
                     <Cell fill={RENT} />
                     <Cell fill={STAFF} />
                   </Pie>
-                  <Tooltip formatter={(value) => inr0.format(Number(value))} />
+                  <Tooltip content={<ChartTooltip />} trigger="click" isAnimationActive={false} />
                 </PieChart>
               </ResponsiveContainer>
               <div className="flex-1">
