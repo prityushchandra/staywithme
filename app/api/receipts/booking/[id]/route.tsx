@@ -21,11 +21,11 @@ function nights(a: Date, b: Date) {
 }
 
 // Booking receipt as a PDF (flows to any length — never cropped).
+// Access: admin session, OR a guest link carrying the booking's unguessable ?t=<publicToken>.
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  if (!(await requireAdmin()))
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-
-  const download = new URL(req.url).searchParams.has("download");
+  const url = new URL(req.url);
+  const download = url.searchParams.has("download");
+  const token = url.searchParams.get("t");
   const { id } = await params;
 
   const booking = await prisma.offlineBooking.findUnique({
@@ -42,6 +42,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     },
   });
   if (!booking) return NextResponse.json({ error: "Booking not found" }, { status: 404 });
+
+  const tokenOk = !!token && !!booking.publicToken && token === booking.publicToken;
+  if (!tokenOk && !(await requireAdmin()))
+    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
 
   const [policy, settings] = await Promise.all([
     prisma.cancellationPolicyText.findUnique({ where: { policy: booking.listing.cancellationPolicy } }),

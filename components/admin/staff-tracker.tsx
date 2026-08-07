@@ -72,8 +72,6 @@ export function StaffTracker({
   const flats = selectedStaff?.numberOfFlats ?? defaultFlats;
   // Per-flat-day deduction derived from the selected staff's salary.
   const deductionPerDay = deductionPerFlatDay(salary, flats);
-  // Live preview of the deduction while adding a staff member.
-  const addDeduction = deductionPerFlatDay(Number(salaryRupees || defaultSalary / 100) * 100, Number(flatsInput) || defaultFlats);
 
   useEffect(() => {
     if (!staffId || !/^\d{4}-\d{2}$/.test(entryMonth)) return;
@@ -149,6 +147,7 @@ export function StaffTracker({
   }
 
   async function deleteEntry(id: string) {
+    if (!confirm("Delete this month's saved attendance for this staff member? This can't be undone.")) return;
     setDeletingRow(id);
     try {
       const res = await fetch(`/api/admin/staff-month?id=${id}`, { method: "DELETE" });
@@ -305,7 +304,7 @@ export function StaffTracker({
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/40 p-3 text-sm">
             <span className="text-muted-foreground">
-              Salary {formatINR(salary)} · {flats} flat{flats > 1 ? "s" : ""} · {formatINR(deductionPerDay)}/flat-day · {totalFlatDays}/{allowed} absent{extra > 0 ? ` · ${extra} × ${formatINR(deductionPerDay)} docked` : ""}
+              Salary {formatINR(salary)} · {totalFlatDays}/{allowed} flat-days absent{extra > 0 ? ` · ${formatINR(extra * deductionPerDay)} docked (${extra} extra flat-day${extra > 1 ? "s" : ""})` : ""}
             </span>
             <span className="text-lg font-bold">{formatINR(previewPay)}</span>
           </div>
@@ -351,8 +350,8 @@ export function StaffTracker({
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            Fixed salary per staff · their own allowed flat-day leaves · then a per-flat-day dock
-            derived from each staff&apos;s salary (salary ÷ flats ÷ 30).
+            Fixed salary per staff · their own allowed flat-day leaves · absences beyond that are
+            docked from their pay.
           </p>
           <ul className="space-y-2">
             {summaries.filter((sm) => sm.active || sm.hasEntry).length === 0 && (
@@ -420,10 +419,6 @@ export function StaffTracker({
               Add staff
             </Button>
           </form>
-          <p className="text-xs text-muted-foreground">
-            Deduction rate is computed from salary ÷ flats ÷ 30 ={" "}
-            <span className="font-medium text-foreground">{formatINR(addDeduction)}</span> per missed flat-day (beyond allowed leaves).
-          </p>
           {staffError && <p className="text-sm text-destructive">{staffError}</p>}
 
           <ul className="divide-y rounded-lg border">
@@ -439,9 +434,6 @@ export function StaffTracker({
                       <Input type="number" min={1} value={editFlats} onChange={(e) => setEditFlats(e.target.value)} className="h-8 w-14 text-sm" placeholder="3" />
                       <span className="ml-1 text-xs text-muted-foreground">leaves</span>
                       <Input type="number" min={0} value={editAllowed} onChange={(e) => setEditAllowed(e.target.value)} className="h-8 w-14 text-sm" placeholder="12" />
-                      <span className="text-xs text-muted-foreground">
-                        → {formatINR(deductionPerFlatDay((Number(editSalary) || 0) * 100, Number(editFlats) || 1))}/flat-day
-                      </span>
                       <button type="button" aria-label="Save" onClick={() => saveEdit(person.id)} disabled={updatingStaff === person.id} className="text-green-700 disabled:opacity-40">
                         {updatingStaff === person.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                       </button>

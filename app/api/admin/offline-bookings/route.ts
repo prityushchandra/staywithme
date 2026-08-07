@@ -134,6 +134,7 @@ export async function POST(req: Request) {
           status: "CONFIRMED",
           note: input.note || null,
           blockId: blockResult.block.id,
+          publicToken: crypto.randomUUID().replace(/-/g, ""),
           createdById: session?.user?.id ?? null,
         },
       });

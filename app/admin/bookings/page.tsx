@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { BookingActions } from "@/components/admin/booking-actions";
 import { OfflineBookingActions, OfflineBookingForm } from "@/components/admin/offline-booking-form";
 import { OfflineBookingEdit } from "@/components/admin/offline-booking-edit";
+import { getPlatformSettings } from "@/lib/settings";
 
 export const metadata = { title: "Admin · Bookings" };
 export const dynamic = "force-dynamic";
@@ -25,15 +26,15 @@ function fmt(d: Date) {
   });
 }
 
-// Build a wa.me link for a guest phone. Strips non-digits; assumes India (+91)
-// for bare 10-digit numbers. Returns null if there's no usable number.
-function waLink(phone: string | null, guestName: string): string | null {
+// Build a wa.me link carrying a prefilled message. Strips non-digits from the
+// phone; assumes India (+91) for bare 10-digit numbers. Returns null if there's
+// no usable number.
+function waLink(phone: string | null, text: string): string | null {
   if (!phone) return null;
   let digits = phone.replace(/\D/g, "");
   if (digits.length === 10) digits = `91${digits}`;
   if (digits.length < 10) return null;
-  const text = encodeURIComponent(`Hi ${guestName.split(" ")[0] || "there"}, this is StayWithMe regarding your booking.`);
-  return `https://wa.me/${digits}?text=${text}`;
+  return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
 }
 
 // WhatsApp brand glyph (lucide has no brand icons).
@@ -55,7 +56,7 @@ export default async function AdminBookingsPage({
     ? (status as string) ?? "ALL"
     : "ALL";
 
-  const [bookings, listings, offlineBookings] = await Promise.all([
+  const [bookings, listings, offlineBookings, settings] = await Promise.all([
     prisma.booking.findMany({
       where: active && active !== "ALL" ? { status: active } : {},
       include: {
@@ -74,7 +75,10 @@ export default async function AdminBookingsPage({
       orderBy: { createdAt: "desc" },
       take: 100,
     }),
+    getPlatformSettings(),
   ]);
+
+  const origin = process.env.NEXTAUTH_URL ?? "https://staywithme.co.in";
 
   const listingOptions = listings.map((l) => ({
     id: l.id,
@@ -105,7 +109,11 @@ export default async function AdminBookingsPage({
           <div className="space-y-3">
             {offlineBookings.map((b) => {
               const flat = `${b.listing.flatNumber || b.listing.title}${b.listing.block ? `, ${b.listing.block}` : ""}`;
-              const wa = waLink(b.guestPhone, b.guestName);
+              const receiptUrl = b.publicToken
+                ? `${origin}/api/receipts/booking/${b.id}?t=${b.publicToken}`
+                : `${origin}/api/receipts/booking/${b.id}`;
+              const waMessage = `Hi ${b.guestName.split(" ")[0] || "there"}, please find your booking receipt: ${receiptUrl}\n\nYou can pay on this UPI id: ${settings.upiId}\n\nI'll share the check-in details a day before your check-in day. Please share the payment screenshot once done.`;
+              const wa = waLink(b.guestPhone, waMessage);
               return (
                 <div key={b.id} className="rounded-xl border p-4">
                   <div className="flex flex-wrap items-start justify-between gap-4">
@@ -136,10 +144,10 @@ export default async function AdminBookingsPage({
                                   href={wa}
                                   target="_blank"
                                   rel="noreferrer"
-                                  aria-label={`WhatsApp ${b.guestName}`}
+                                  aria-label={`Send receipt to ${b.guestName} on WhatsApp`}
                                   className="inline-flex items-center gap-1 rounded-full bg-[#25D366] px-2 py-0.5 text-xs font-medium text-white transition hover:brightness-105"
                                 >
-                                  <WhatsAppIcon /> Chat
+                                  <WhatsAppIcon /> Send receipt
                                 </a>
                               )}
                             </dd>

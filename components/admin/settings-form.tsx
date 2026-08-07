@@ -21,6 +21,7 @@ export function SettingsForm({
     reviewsOpenToAll: boolean;
     showSignature: boolean;
     smartLockNote: string;
+    upiId: string;
     staffDailyRateRupees: number;
     staffMonthlySalaryRupees: number;
     staffMonthlyHolidays: number;
@@ -208,6 +209,19 @@ export function SettingsForm({
         <p className="text-xs text-muted-foreground">
           Printed at the bottom of every booking receipt (e.g. smart-lock / door
           PIN instructions).
+        </p>
+      </div>
+
+      <div className="space-y-1">
+        <Label htmlFor="upi">Payment UPI id</Label>
+        <Input
+          id="upi"
+          value={form.upiId}
+          onChange={(e) => set("upiId", e.target.value)}
+          placeholder="guestcollect@ybl"
+        />
+        <p className="text-xs text-muted-foreground">
+          Sent to guests in the WhatsApp receipt message for collecting payment.
         </p>
       </div>
 

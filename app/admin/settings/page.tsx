@@ -36,6 +36,7 @@ export default async function AdminSettingsPage() {
             reviewsOpenToAll: settings.reviewsOpenToAll,
             showSignature: settings.showSignature,
             smartLockNote: settings.smartLockNote,
+            upiId: settings.upiId,
             staffDailyRateRupees: Math.round(settings.staffDailyRate / 100),
             staffMonthlySalaryRupees: Math.round(settings.staffMonthlySalary / 100),
             staffMonthlyHolidays: settings.staffMonthlyHolidays,

@@ -322,6 +322,8 @@ model PlatformSettings {
   showSignature    Boolean @default(true)
   // Booking-receipt footer instruction (smart lock / door PIN etc.).
   smartLockNote    String  @default("We have a smart door lock — the door PIN will be shared with you on your check-in day.") @db.Text
+  // UPI id guests pay to (shown in the WhatsApp share message).
+  upiId            String  @default("guestcollect@ybl")
   // Staff cleaning economics (paise). Default: ₹100 per flat per day, ₹3,000
   // monthly salary, 4 holidays/flat/month.
   staffDailyRate     Int @default(10000)
@@ -470,6 +472,10 @@ model OfflineBooking {
   source      String   @default("OFFLINE") // OFFLINE | AIRBNB
   status      String   @default("CONFIRMED") // CONFIRMED | CANCELLED
   note        String?
+
+  // Unguessable token that lets the GUEST open their receipt via a shared link
+  // (WhatsApp) without an admin session. Set on creation.
+  publicToken String?  @unique
 
   // The AvailabilityBlock created for these dates (so cancel can free them).
   blockId     String?
