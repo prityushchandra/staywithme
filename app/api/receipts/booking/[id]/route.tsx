@@ -35,7 +35,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       listing: {
         select: {
           title: true, flatNumber: true, block: true, city: true,
-          wifiName: true, wifiPassword: true, checkInTime: true, checkOutTime: true,
+          checkInTime: true, checkOutTime: true,
           cancellationPolicy: true,
         },
       },
@@ -73,11 +73,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       amountPaid: booking.amountPaid,
       due: booking.due,
       source: booking.source,
-      wifiName: booking.listing.wifiName,
-      wifiPassword: booking.listing.wifiPassword,
       policyTitle: policy?.title ?? String(booking.listing.cancellationPolicy),
       policyDescription: policy?.description ?? "Please contact StayWithMe for cancellation details.",
-      smartLockNote: settings.smartLockNote ?? "Check-in details will be shared before arrival.",
       whatsappNumber: settings.whatsappNumber,
     })
   );

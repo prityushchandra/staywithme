@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { formatINR } from "@/lib/pricing";
+import { IndianRupee, KeyRound } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { BookingActions } from "@/components/admin/booking-actions";
 import { OfflineBookingActions, OfflineBookingForm } from "@/components/admin/offline-booking-form";
@@ -26,6 +27,11 @@ function fmt(d: Date) {
     year: "numeric",
     timeZone: "UTC",
   });
+}
+
+// Nights between two UTC-midnight dates (min 1).
+function nights(a: Date, b: Date) {
+  return Math.max(1, Math.round((b.getTime() - a.getTime()) / 86_400_000));
 }
 
 // Build a wa.me link carrying a prefilled message. Strips non-digits from the
@@ -64,14 +70,31 @@ export default async function AdminBookingsPage({
       orderBy: { title: "asc" },
     }),
     prisma.offlineBooking.findMany({
-      include: { listing: { select: { title: true, flatNumber: true, block: true } } },
-      orderBy: { createdAt: "desc" },
+      include: {
+        listing: {
+          select: {
+            title: true, flatNumber: true, block: true, addressLine: true,
+            wifiName: true, wifiPassword: true, checkInTime: true, checkOutTime: true,
+          },
+        },
+      },
       take: 100,
     }),
     getPlatformSettings(),
   ]);
 
   const origin = process.env.NEXTAUTH_URL ?? "https://staywithme.co.in";
+
+  // Upcoming/active stays first (soonest check-in), then past stays (most recent).
+  const nowMs = Date.now();
+  const offline = [...offlineBookings].sort((a, b) => {
+    const aUpcoming = a.checkOut.getTime() >= nowMs;
+    const bUpcoming = b.checkOut.getTime() >= nowMs;
+    if (aUpcoming !== bUpcoming) return aUpcoming ? -1 : 1;
+    return aUpcoming
+      ? a.checkIn.getTime() - b.checkIn.getTime()
+      : b.checkIn.getTime() - a.checkIn.getTime();
+  });
 
   const listingOptions = listings.map((l) => ({
     id: l.id,
@@ -94,24 +117,51 @@ export default async function AdminBookingsPage({
 
       <section className="space-y-3">
         <h2 className="text-xl font-semibold tracking-tight">Offline bookings</h2>
-        {offlineBookings.length === 0 ? (
+        {offline.length === 0 ? (
           <div className="rounded-xl border border-dashed p-8 text-center text-muted-foreground">
             No offline bookings yet.
           </div>
         ) : (
           <div className="space-y-3">
-            {offlineBookings.map((b) => {
+            {offline.map((b) => {
               const flat = `${b.listing.flatNumber || b.listing.title}${b.listing.block ? `, ${b.listing.block}` : ""}`;
+              const n = nights(b.checkIn, b.checkOut);
               const receiptUrl = b.publicToken
                 ? `${origin}/api/receipts/booking/${b.id}?t=${b.publicToken}`
                 : `${origin}/api/receipts/booking/${b.id}`;
-              const firstName = b.guestName.split(" ")[0] || "there";
-              const payLine = `You can pay on this UPI id: ${settings.upiId}\n\nI'll share the check-in details a day before your check-in day. Please share the payment screenshot once done.`;
-              // Caption when the actual PDF is attached (mobile share sheet).
-              const shareMessage = `Hi ${firstName}, please find your booking receipt attached.\n\n${payLine}`;
-              // Fallback text (desktop) — links to the receipt since no file is attached.
-              const waMessage = `Hi ${firstName}, please find your booking receipt: ${receiptUrl}\n\n${payLine}`;
-              const wa = waLink(b.guestPhone, waMessage);
+
+              // Check-in / check-out with the listing's times (when set).
+              const ciTime = b.listing.checkInTime?.trim();
+              const coTime = b.listing.checkOutTime?.trim();
+              const checkinStr = `${fmt(b.checkIn)}${ciTime ? `, ${ciTime}` : ""}`;
+              const checkoutStr = `${fmt(b.checkOut)}${coTime ? `, ${coTime}` : ""}`;
+
+              // 1) Receipt — the actual PDF is attached on mobile (share sheet);
+              //    desktop falls back to a wa.me text link to the receipt URL.
+              const receiptShareMessage = "Please find the booking confirmation receipt for your reference.";
+              const receiptFallback = waLink(
+                b.guestPhone,
+                `Please find the booking confirmation receipt for your reference: ${receiptUrl}`
+              );
+
+              // 2) Payment reminder.
+              const paymentMessage =
+                `checkin: ${checkinStr}\n\n` +
+                `checkout: ${checkoutStr}\n\n\n` +
+                `no. of days: ${n}\n\n\n` +
+                `total amt: ${formatINR(b.totalPrice)}\n\n\n` +
+                `Due amt : ${formatINR(b.due)}\n\n\n` +
+                `u can pay the amt on this upi id: ${settings.upiId}\n\n\n` +
+                `will share u the checkin details a day before checkin day.`;
+              const paymentLink = waLink(b.guestPhone, paymentMessage);
+
+              // 3) Onboarding — flat + WiFi + smart-lock note (moved off the receipt).
+              const onboardMessage =
+                `Hi ${b.guestName}\n\n\n` +
+                `Flat details:\n${b.listing.flatNumber || b.listing.title} , ${b.listing.addressLine}\n\n\n` +
+                `Wifi Details:\nssid: ${b.listing.wifiName ?? ""}\npswd: ${b.listing.wifiPassword ?? ""}\n\n\n` +
+                `We have smart door lock, pls ring the door bell before entering pin else it will not work.\nPin: `;
+              const onboardLink = waLink(b.guestPhone, onboardMessage);
               return (
                 <div key={b.id} className="rounded-xl border p-4">
                   <div className="flex flex-wrap items-start justify-between gap-4">
@@ -126,7 +176,7 @@ export default async function AdminBookingsPage({
                         <dt className="text-muted-foreground">Flat</dt>
                         <dd className="font-medium">{flat}</dd>
                         <dt className="text-muted-foreground">Dates</dt>
-                        <dd>{fmt(b.checkIn)} → {fmt(b.checkOut)} · {b.guests} guest{b.guests > 1 ? "s" : ""}</dd>
+                        <dd>{fmt(b.checkIn)} → {fmt(b.checkOut)} · {n} night{n > 1 ? "s" : ""} · {b.guests} guest{b.guests > 1 ? "s" : ""}</dd>
                         <dt className="text-muted-foreground">Amount</dt>
                         <dd>
                           Total {formatINR(b.totalPrice)} · Paid {formatINR(b.amountPaid)} · Due{" "}
@@ -135,17 +185,7 @@ export default async function AdminBookingsPage({
                         {b.guestPhone && (
                           <>
                             <dt className="text-muted-foreground">Phone</dt>
-                            <dd className="flex items-center gap-2">
-                              <span>{b.guestPhone}</span>
-                              {wa && (
-                                <SendReceiptButton
-                                  receiptUrl={receiptUrl}
-                                  fallbackLink={wa}
-                                  message={shareMessage}
-                                  fileName={bookingReceiptFileName(b.guestName, b.checkIn)}
-                                />
-                              )}
-                            </dd>
+                            <dd>{b.guestPhone}</dd>
                           </>
                         )}
                         {b.note && (
@@ -155,6 +195,42 @@ export default async function AdminBookingsPage({
                           </>
                         )}
                       </dl>
+                      {b.guestPhone ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <SendReceiptButton
+                            receiptUrl={receiptUrl}
+                            fallbackLink={receiptFallback}
+                            message={receiptShareMessage}
+                            fileName={bookingReceiptFileName(b.guestName, b.checkIn)}
+                          />
+                          {paymentLink && (
+                            <a
+                              href={paymentLink}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="group inline-flex items-center gap-1.5 rounded-full bg-amber-500 px-3 py-1 text-xs font-medium text-white transition hover:brightness-110"
+                            >
+                              <IndianRupee className="h-3.5 w-3.5 transition-transform duration-200 group-hover:scale-125" />
+                              Payment
+                            </a>
+                          )}
+                          {onboardLink && (
+                            <a
+                              href={onboardLink}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="group inline-flex items-center gap-1.5 rounded-full bg-indigo-600 px-3 py-1 text-xs font-medium text-white transition hover:brightness-110"
+                            >
+                              <KeyRound className="h-3.5 w-3.5 transition-transform duration-200 group-hover:rotate-45" />
+                              Onboard
+                            </a>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          Add a phone number to message the guest.
+                        </p>
+                      )}
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <a

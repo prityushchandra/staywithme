@@ -22,11 +22,8 @@ export interface BookingReceiptData {
   amountPaid: number;
   due: number;
   source: string;
-  wifiName: string | null;
-  wifiPassword: string | null;
   policyTitle: string;
   policyDescription: string;
-  smartLockNote: string;
   whatsappNumber: string;
 }
 
@@ -124,22 +121,6 @@ export function BookingReceiptPdf(d: BookingReceiptData): React.ReactElement<Doc
           </View>
         </View>
 
-        {d.wifiName ? (
-          <View style={s.section}>
-            <Text style={s.secLabel}>WIFI</Text>
-            <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-              <View>
-                <Text style={s.muted}>Network</Text>
-                <Text style={{ fontWeight: "bold", marginTop: 2 }}>{d.wifiName}</Text>
-              </View>
-              <View>
-                <Text style={[s.muted, { textAlign: "right" }]}>Password</Text>
-                <Text style={{ fontWeight: "bold", marginTop: 2, textAlign: "right" }}>{d.wifiPassword || "—"}</Text>
-              </View>
-            </View>
-          </View>
-        ) : null}
-
         <View style={s.section}>
           <Text style={s.secLabel}>CANCELLATION POLICY</Text>
           <Text style={{ fontSize: 12, fontWeight: "bold" }}>{d.policyTitle}</Text>
@@ -147,8 +128,7 @@ export function BookingReceiptPdf(d: BookingReceiptData): React.ReactElement<Doc
         </View>
 
         <View style={s.note}>
-          <Text style={s.noteText}>{d.smartLockNote}</Text>
-          <Text style={[s.noteText, { fontWeight: "bold", marginTop: 5 }]}>Questions? WhatsApp {d.whatsappNumber}</Text>
+          <Text style={[s.noteText, { fontWeight: "bold" }]}>Questions? WhatsApp {d.whatsappNumber}</Text>
         </View>
       </Page>
     </Document>
