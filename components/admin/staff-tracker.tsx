@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Plus, Save, Trash2, X, Pencil, Check } from "lucide-react";
+import { Loader2, Plus, Save, Trash2, X, Pencil, Check, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -336,44 +336,47 @@ export function StaffTracker({
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Monthly payout · {monthLabel(month)}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">Fixed salary per staff · their own allowed flat-day leaves · then {formatINR(deductionPerDay)}/extra flat-day.</p>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[440px] text-sm">
-                <thead className="bg-muted/50 text-left text-muted-foreground">
-                  <tr>
-                    <th className="px-3 py-2 font-medium">Staff</th>
-                    <th className="px-3 py-2 font-medium">Salary</th>
-                    <th className="px-3 py-2 font-medium">Absent</th>
-                    <th className="px-3 py-2 font-medium">Pay</th>
-                    <th className="px-3 py-2 font-medium">Receipt</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {summaries.filter((sm) => sm.active || sm.hasEntry).map((sm) => (
-                    <tr key={sm.staffId}>
-                      <td className="px-3 py-2">{sm.staffName}{!sm.active && <span className="ml-1 text-xs text-muted-foreground">(inactive)</span>}</td>
-                      <td className="px-3 py-2 text-muted-foreground">{formatINR(sm.salary)}</td>
-                      <td className="px-3 py-2">{sm.hasEntry ? `${sm.absences}/${sm.allowed}` : "—"}</td>
-                      <td className="px-3 py-2 font-medium">{sm.pay !== null ? formatINR(sm.pay) : "—"}</td>
-                      <td className="px-3 py-2">
-                        {sm.hasEntry ? (
-                          <Link className="text-primary underline-offset-4 hover:underline" href={`/api/receipts/staff?staffId=${sm.staffId}&month=${month}&download=1`} target="_blank">PDF</Link>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Monthly payout · {monthLabel(month)}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Fixed salary per staff · their own allowed flat-day leaves · then {formatINR(deductionPerDay)}/extra flat-day.
+          </p>
+          <ul className="space-y-2">
+            {summaries.filter((sm) => sm.active || sm.hasEntry).length === 0 && (
+              <li className="rounded-lg border px-3 py-3 text-sm text-muted-foreground">Add staff to see payouts here.</li>
+            )}
+            {summaries.filter((sm) => sm.active || sm.hasEntry).map((sm) => (
+              <li key={sm.staffId} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-lg border p-3">
+                <div className="min-w-0">
+                  <p className="font-medium">
+                    {sm.staffName}
+                    {!sm.active && <span className="ml-1 text-xs text-muted-foreground">(inactive)</span>}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Salary {formatINR(sm.salary)} · {sm.hasEntry ? `${sm.absences}/${sm.allowed} flat-days` : "no entry yet"}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-3">
+                  <div className="text-right">
+                    <div className="text-base font-semibold">{sm.pay !== null ? formatINR(sm.pay) : "—"}</div>
+                    <div className="text-[11px] text-muted-foreground">net pay</div>
+                  </div>
+                  {sm.hasEntry && (
+                    <Button asChild size="sm" variant="outline">
+                      <a href={`/api/receipts/staff?staffId=${sm.staffId}&month=${month}&download=1`} download>
+                        <Download className="h-4 w-4" /> PDF
+                      </a>
+                    </Button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </CardContent>
+      </Card>
       </div>
 
       <Card>
