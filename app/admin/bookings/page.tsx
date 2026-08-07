@@ -4,6 +4,7 @@ import { formatINR } from "@/lib/pricing";
 import { Badge } from "@/components/ui/badge";
 import { BookingActions } from "@/components/admin/booking-actions";
 import { OfflineBookingActions, OfflineBookingForm } from "@/components/admin/offline-booking-form";
+import { OfflineBookingEdit } from "@/components/admin/offline-booking-edit";
 
 export const metadata = { title: "Admin · Bookings" };
 export const dynamic = "force-dynamic";
@@ -119,6 +120,23 @@ export default async function AdminBookingsPage({
                       >
                         Open
                       </a>
+                      {b.status !== "CANCELLED" && (
+                        <OfflineBookingEdit
+                          booking={{
+                            id: b.id,
+                            listingId: b.listingId,
+                            guestName: b.guestName,
+                            guestPhone: b.guestPhone,
+                            guests: b.guests,
+                            checkIn: b.checkIn.toISOString(),
+                            checkOut: b.checkOut.toISOString(),
+                            totalPrice: b.totalPrice,
+                            amountPaid: b.amountPaid,
+                            source: b.source,
+                            note: b.note,
+                          }}
+                        />
+                      )}
                       <OfflineBookingActions bookingId={b.id} status={b.status} />
                     </div>
                   </div>
