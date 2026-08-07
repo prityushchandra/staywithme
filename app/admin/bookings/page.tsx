@@ -73,7 +73,7 @@ export default async function AdminBookingsPage({
       include: {
         listing: {
           select: {
-            title: true, flatNumber: true, block: true, addressLine: true,
+            title: true, flatNumber: true, block: true,
             wifiName: true, wifiPassword: true, checkInTime: true, checkOutTime: true,
           },
         },
@@ -147,19 +147,19 @@ export default async function AdminBookingsPage({
               // 2) Payment reminder.
               const paymentMessage =
                 `checkin: ${checkinStr}\n\n` +
-                `checkout: ${checkoutStr}\n\n\n` +
-                `no. of days: ${n}\n\n\n` +
-                `total amt: ${formatINR(b.totalPrice)}\n\n\n` +
-                `Due amt : ${formatINR(b.due)}\n\n\n` +
-                `u can pay the amt on this upi id: ${settings.upiId}\n\n\n` +
+                `checkout: ${checkoutStr}\n\n` +
+                `no. of days: ${n}\n\n` +
+                `total amt: ${formatINR(b.totalPrice)}\n\n` +
+                `Due amt : ${formatINR(b.due)}\n\n` +
+                `u can pay the amt on this upi id: ${settings.upiId}\n\n` +
                 `will share u the checkin details a day before checkin day.`;
               const paymentLink = waLink(b.guestPhone, paymentMessage);
 
               // 3) Onboarding — flat + WiFi + smart-lock note (moved off the receipt).
               const onboardMessage =
-                `Hi ${b.guestName}\n\n\n` +
-                `Flat details:\n${b.listing.flatNumber || b.listing.title} , ${b.listing.addressLine}\n\n\n` +
-                `Wifi Details:\nssid: ${b.listing.wifiName ?? ""}\npswd: ${b.listing.wifiPassword ?? ""}\n\n\n` +
+                `Hi ${b.guestName}\n\n` +
+                `Flat details:\n${b.listing.flatNumber || b.listing.title}\n\n` +
+                `Wifi Details:\nssid: ${b.listing.wifiName ?? ""}\npswd: ${b.listing.wifiPassword ?? ""}\n\n` +
                 `We have smart door lock, pls ring the door bell before entering pin else it will not work.\nPin: `;
               const onboardLink = waLink(b.guestPhone, onboardMessage);
               return (
