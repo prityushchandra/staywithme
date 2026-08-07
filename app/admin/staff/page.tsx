@@ -7,11 +7,17 @@ import { allowedLeaves, currentMonth, monthLabel } from "@/lib/staff";
 export const metadata = { title: "Admin · Staff" };
 export const dynamic = "force-dynamic";
 
+function flatLabel(l: { title: string; flatNumber: string | null; block: string | null }) {
+  const base = l.flatNumber?.trim() || l.title;
+  return l.block?.trim() ? `${base}, ${l.block.trim()}` : base;
+}
+
 export default async function AdminStaffPage() {
   const month = currentMonth();
 
-  const [staff, entries, settings] = await Promise.all([
+  const [staff, listings, entries, settings] = await Promise.all([
     prisma.staff.findMany({ orderBy: [{ active: "desc" }, { name: "asc" }] }),
+    prisma.listing.findMany({ select: { id: true, title: true, flatNumber: true, block: true }, orderBy: { title: "asc" } }),
     prisma.staffMonth.findMany({
       where: { month },
       include: { staff: { select: { id: true, name: true } } },
@@ -20,7 +26,7 @@ export default async function AdminStaffPage() {
     getPlatformSettings(),
   ]);
 
-  const allowed = allowedLeaves(settings.staffMonthlyHolidays, settings.staffFlatsPerStaff);
+  const defaultAllowed = allowedLeaves(settings.staffMonthlyHolidays, settings.staffFlatsPerStaff);
   const totalPaid = entries.reduce((sum, r) => sum + r.pay, 0);
 
   const summaries = staff.map((person) => {
@@ -30,6 +36,7 @@ export default async function AdminStaffPage() {
       staffName: person.name,
       active: person.active,
       salary: person.monthlySalary ?? settings.staffMonthlySalary,
+      allowed: person.allowedLeaves ?? defaultAllowed,
       absences: entry?.absences ?? 0,
       pay: entry?.pay ?? null,
       hasEntry: !!entry,
@@ -41,9 +48,9 @@ export default async function AdminStaffPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Staff</h1>
         <p className="text-muted-foreground">
-          Monthly cleaning pay for {monthLabel(month)}. Each staff member has a fixed salary and{" "}
-          {allowed} allowed leaves ({settings.staffMonthlyHolidays} per flat × {settings.staffFlatsPerStaff}{" "}
-          flats). Absences beyond that are docked {formatINR(settings.staffDailyRate)}/day.
+          Cleaning pay for {monthLabel(month)}. Each staff member has a fixed salary and their own
+          allowed leaves (in flat-days). Tap a day to pick which flats they missed; absences beyond
+          the allowance are docked {formatINR(settings.staffDailyRate)}/flat-day.
         </p>
       </div>
 
@@ -57,24 +64,24 @@ export default async function AdminStaffPage() {
           <p className="mt-2 text-2xl font-semibold">{staff.filter((s) => s.active).length}</p>
         </div>
         <div className="rounded-xl border bg-card p-5 shadow-sm">
-          <p className="text-sm text-muted-foreground">Allowed leaves / month</p>
-          <p className="mt-2 text-2xl font-semibold">{allowed}</p>
+          <p className="text-sm text-muted-foreground">Flats</p>
+          <p className="mt-2 text-2xl font-semibold">{listings.length}</p>
         </div>
       </div>
 
       <StaffTracker
         month={month}
-        allowed={allowed}
         deductionPerDay={settings.staffDailyRate}
         defaultSalary={settings.staffMonthlySalary}
-        leavesPerFlat={settings.staffMonthlyHolidays}
-        flatsPerStaff={settings.staffFlatsPerStaff}
+        defaultAllowed={defaultAllowed}
+        listings={listings.map((l) => ({ id: l.id, label: flatLabel(l) }))}
         staff={staff.map((p) => ({
           id: p.id,
           name: p.name,
           phone: p.phone,
           active: p.active,
           monthlySalary: p.monthlySalary,
+          allowedLeaves: p.allowedLeaves,
         }))}
         entries={entries.map((r) => ({
           id: r.id,

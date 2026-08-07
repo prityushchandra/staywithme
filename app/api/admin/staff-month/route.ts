@@ -25,20 +25,22 @@ export async function GET(req: Request) {
 
   const row = await prisma.staffMonth.findUnique({
     where: { staffId_month: { staffId, month } },
-    select: { absentDays: true, note: true },
+    select: { absentByDay: true, note: true },
   });
-  return NextResponse.json({ absentDays: row?.absentDays ?? [], note: row?.note ?? "" });
+  return NextResponse.json({ absentByDay: row?.absentByDay ?? {}, note: row?.note ?? "" });
 }
 
 const schema = z.object({
   staffId: z.string().min(1),
   month: z.string().regex(/^\d{4}-\d{2}$/),
-  absentDays: z.array(z.coerce.number().int().min(1).max(31)).max(31),
+  // Map of day-of-month (1..31) → the listing IDs (flats) missed that day.
+  absentByDay: z.record(z.string(), z.array(z.string())).default({}),
   note: z.string().trim().max(300).optional(),
 });
 
 // Save a staff member's monthly attendance, computing pay from their salary and
-// the allowed-leaves rule (leaves-per-flat × flats-per-staff).
+// their allowed leaves. Absences are counted in FLAT-DAYS: each flat missed on a
+// day counts as one.
 export async function POST(req: Request) {
   if (!(await requireAdmin()))
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
@@ -51,24 +53,38 @@ export async function POST(req: Request) {
     );
   }
   const { staffId, month, note } = parsed.data;
-  const absentDays = [...new Set(parsed.data.absentDays)].sort((a, b) => a - b);
-  const absences = absentDays.length;
 
-  const [staff, settings] = await Promise.all([
-    prisma.staff.findUnique({ where: { id: staffId }, select: { name: true, monthlySalary: true } }),
+  const [staff, settings, listings] = await Promise.all([
+    prisma.staff.findUnique({ where: { id: staffId }, select: { name: true, monthlySalary: true, allowedLeaves: true } }),
     getPlatformSettings(),
+    prisma.listing.findMany({ select: { id: true } }),
   ]);
   if (!staff) return NextResponse.json({ error: "Staff not found" }, { status: 404 });
 
+  // Keep only valid, de-duplicated listing IDs per valid day; drop empty days.
+  const validIds = new Set(listings.map((l) => l.id));
+  const absentByDay: Record<string, string[]> = {};
+  let absences = 0;
+  for (const [key, ids] of Object.entries(parsed.data.absentByDay)) {
+    const day = Number(key);
+    if (day < 1 || day > 31) continue;
+    const clean = [...new Set(ids)].filter((id) => validIds.has(id));
+    if (clean.length) {
+      absentByDay[String(day)] = clean;
+      absences += clean.length;
+    }
+  }
+  const absentDays = Object.keys(absentByDay).map(Number).sort((a, b) => a - b);
+
   const monthlySalary = staff.monthlySalary ?? settings.staffMonthlySalary;
-  const allowed = allowedLeaves(settings.staffMonthlyHolidays, settings.staffFlatsPerStaff);
+  const allowed = staff.allowedLeaves ?? allowedLeaves(settings.staffMonthlyHolidays, settings.staffFlatsPerStaff);
   const deductionPerDay = settings.staffDailyRate;
   const pay = computeStaffPay(monthlySalary, allowed, deductionPerDay, absences);
 
   const row = await prisma.staffMonth.upsert({
     where: { staffId_month: { staffId, month } },
-    update: { absentDays, absences, monthlySalary, allowedLeaves: allowed, deductionPerDay, pay, note: note || null },
-    create: { staffId, month, absentDays, absences, monthlySalary, allowedLeaves: allowed, deductionPerDay, pay, note: note || null },
+    update: { absentByDay, absentDays, absences, monthlySalary, allowedLeaves: allowed, deductionPerDay, pay, note: note || null },
+    create: { staffId, month, absentByDay, absentDays, absences, monthlySalary, allowedLeaves: allowed, deductionPerDay, pay, note: note || null },
   });
 
   after(async () => {

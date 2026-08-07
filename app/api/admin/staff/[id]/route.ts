@@ -14,13 +14,15 @@ const updateSchema = z
     phone: z.string().trim().max(30).nullable().optional(),
     active: z.boolean().optional(),
     monthlySalaryRupees: z.coerce.number().int().min(0).max(10_000_000).optional(),
+    allowedLeaves: z.coerce.number().int().min(0).max(200).optional(),
   })
   .refine(
     (data) =>
       data.name !== undefined ||
       data.phone !== undefined ||
       data.active !== undefined ||
-      data.monthlySalaryRupees !== undefined,
+      data.monthlySalaryRupees !== undefined ||
+      data.allowedLeaves !== undefined,
     { message: "No changes supplied" }
   );
 
@@ -46,6 +48,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       ...(parsed.data.monthlySalaryRupees !== undefined
         ? { monthlySalary: parsed.data.monthlySalaryRupees * 100 }
         : {}),
+      ...(parsed.data.allowedLeaves !== undefined ? { allowedLeaves: parsed.data.allowedLeaves } : {}),
     },
   });
 

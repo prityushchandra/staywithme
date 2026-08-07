@@ -5,6 +5,12 @@ import { registerReceiptFonts, RECEIPT_FONT } from "@/lib/receipt-fonts";
 
 registerReceiptFonts();
 
+export interface StaffReceiptFlat {
+  flat: string;
+  days: number;
+  dayList: number[];
+}
+
 export interface StaffReceiptData {
   staffName: string;
   staffPhone: string | null;
@@ -13,8 +19,8 @@ export interface StaffReceiptData {
   monthlySalary: number; // paise
   allowedLeaves: number;
   deductionPerDay: number; // paise
-  absences: number;
-  absentDays: number[];
+  absences: number; // total flat-days
+  flatSummary: StaffReceiptFlat[];
   pay: number; // paise
   note: string | null;
 }
@@ -33,6 +39,8 @@ const s = StyleSheet.create({
   totalCard: { width: 190, backgroundColor: C.brand, borderRadius: 10, padding: 12 },
   section: { borderWidth: 1, borderColor: C.line, borderRadius: 10, padding: 12, marginTop: 12 },
   row: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 5 },
+  th: { flexDirection: "row", backgroundColor: C.soft, paddingVertical: 7, paddingHorizontal: 10 },
+  tr: { flexDirection: "row", paddingVertical: 7, paddingHorizontal: 10, borderTopWidth: 1, borderTopColor: C.line },
   divider: { borderBottomWidth: 1, borderBottomColor: C.line, marginVertical: 4 },
   muted: { color: C.muted },
   ref: { backgroundColor: "#fff7ed", borderRadius: 10, padding: 12, marginTop: 12 },
@@ -69,6 +77,26 @@ export function StaffReceiptPdf(d: StaffReceiptData): React.ReactElement<Documen
           </View>
         </View>
 
+        {/* Per-flat absence summary */}
+        <View style={{ borderWidth: 1, borderColor: C.line, borderRadius: 10, overflow: "hidden", marginTop: 12 }}>
+          <View style={s.th}>
+            <Text style={[s.muted, { flex: 1, fontSize: 9 }]}>FLAT MISSED</Text>
+            <Text style={[s.muted, { width: 60, textAlign: "center", fontSize: 9 }]}>DAYS</Text>
+            <Text style={[s.muted, { flex: 1.3, fontSize: 9 }]}>ON DAYS</Text>
+          </View>
+          {d.flatSummary.length === 0 ? (
+            <View style={s.tr}><Text style={s.muted}>Full attendance — no flats missed.</Text></View>
+          ) : (
+            d.flatSummary.map((f, i) => (
+              <View key={i} style={s.tr}>
+                <Text style={{ flex: 1, fontWeight: "bold" }}>{f.flat}</Text>
+                <Text style={{ width: 60, textAlign: "center" }}>{f.days}</Text>
+                <Text style={[s.muted, { flex: 1.3 }]}>{f.dayList.join(", ")}</Text>
+              </View>
+            ))
+          )}
+        </View>
+
         <View style={s.section}>
           <Text style={s.label}>PAY BREAKDOWN</Text>
           <View style={s.row}>
@@ -76,14 +104,12 @@ export function StaffReceiptPdf(d: StaffReceiptData): React.ReactElement<Documen
             <Text style={{ fontWeight: "bold" }}>{formatINR(d.monthlySalary)}</Text>
           </View>
           <View style={s.row}>
-            <Text style={s.muted}>Absences</Text>
+            <Text style={s.muted}>Total flat-days missed</Text>
             <Text style={{ color: extra > 0 ? C.warn : C.ink }}>{d.absences} / {d.allowedLeaves} allowed</Text>
           </View>
           <View style={s.row}>
-            <Text style={s.muted}>Extra absent days docked</Text>
-            <Text style={{ color: docked > 0 ? C.warn : C.muted }}>
-              {extra} × {formatINR(d.deductionPerDay)} = −{formatINR(docked)}
-            </Text>
+            <Text style={s.muted}>Docked (beyond allowance)</Text>
+            <Text style={{ color: docked > 0 ? C.warn : C.muted }}>{extra} × {formatINR(d.deductionPerDay)} = −{formatINR(docked)}</Text>
           </View>
           <View style={s.divider} />
           <View style={s.row}>
@@ -92,17 +118,10 @@ export function StaffReceiptPdf(d: StaffReceiptData): React.ReactElement<Documen
           </View>
         </View>
 
-        <View style={s.section}>
-          <Text style={s.label}>ABSENT DAYS ({d.monthLabelText})</Text>
-          <Text style={{ marginTop: 2 }}>
-            {d.absentDays.length ? d.absentDays.slice().sort((a, b) => a - b).join(", ") : "None — full attendance"}
-          </Text>
-        </View>
-
         <View style={s.ref}>
           <Text style={s.refText}>
-            Fixed monthly salary {formatINR(d.monthlySalary)} · {d.allowedLeaves} allowed leaves/month · then{" "}
-            {formatINR(d.deductionPerDay)} per extra absent day.
+            Fixed monthly salary {formatINR(d.monthlySalary)} · {d.allowedLeaves} allowed flat-day leaves · then{" "}
+            {formatINR(d.deductionPerDay)} per extra flat-day.
           </Text>
           {d.note ? <Text style={[s.refText, { marginTop: 4 }]}>Note: {d.note}</Text> : null}
         </View>

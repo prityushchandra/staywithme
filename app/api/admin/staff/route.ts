@@ -12,6 +12,7 @@ const createSchema = z.object({
   name: z.string().trim().min(1).max(80),
   phone: z.string().trim().max(30).optional(),
   monthlySalaryRupees: z.coerce.number().int().min(0).max(10_000_000).optional(),
+  allowedLeaves: z.coerce.number().int().min(0).max(200).optional(),
 });
 
 export async function GET() {
@@ -40,6 +41,7 @@ export async function POST(req: Request) {
       phone: parsed.data.phone || null,
       monthlySalary:
         parsed.data.monthlySalaryRupees !== undefined ? parsed.data.monthlySalaryRupees * 100 : null,
+      allowedLeaves: parsed.data.allowedLeaves ?? null,
     },
   });
 

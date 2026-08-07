@@ -515,9 +515,11 @@ model Staff {
   phone      String?
   active     Boolean           @default(true)
   // Fixed monthly salary for this staff member (paise), admin-entered. Absences
-  // beyond the allowed leaves are docked from this. Null until set (then the
-  // platform default salary is used as a fallback).
+  // beyond the allowed leaves are docked from this. Null → platform default.
   monthlySalary Int?
+  // Allowed monthly leaves in FLAT-DAYS, admin-entered per staff. Null → the
+  // platform default (leaves-per-flat × flats-per-staff).
+  allowedLeaves Int?
   createdAt  DateTime          @default(now())
 
   payroll    StaffPayroll[]
@@ -538,9 +540,12 @@ model StaffMonth {
   staff           Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
 
   month           String   // "YYYY-MM"
-  // The specific day-of-month numbers (1..31) the staff was absent.
+  // The specific day-of-month numbers (1..31) with at least one flat missed.
   absentDays      Int[]    @default([])
-  absences        Int      @default(0) // mirrors absentDays.length
+  // Map of day-of-month → the listing IDs (flats) missed that day, e.g.
+  // { "5": ["clx..","cly.."], "6": ["clx.."] }. `absences` = total flat-days.
+  absentByDay     Json     @default("{}")
+  absences        Int      @default(0) // total FLAT-DAYS missed (sum of absentByDay lengths)
 
   monthlySalary   Int      // paise — snapshot of the staff's salary that month
   allowedLeaves   Int      // snapshot (= leavesPerFlat × flatsPerStaff)

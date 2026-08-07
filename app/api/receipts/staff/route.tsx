@@ -14,6 +14,11 @@ async function requireAdmin() {
   return !!session?.user?.isAdmin;
 }
 
+function flatLabel(l: { title: string; flatNumber: string | null; block: string | null }) {
+  const base = l.flatNumber?.trim() || l.title;
+  return l.block?.trim() ? `${base}, ${l.block.trim()}` : base;
+}
+
 // Staff monthly payout as a PDF.
 export async function GET(req: Request) {
   if (!(await requireAdmin()))
@@ -27,21 +32,34 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Missing staffId or month" }, { status: 400 });
   }
 
-  const [staff, entry, settings] = await Promise.all([
-    prisma.staff.findUnique({ where: { id: staffId }, select: { name: true, phone: true, monthlySalary: true } }),
+  const [staff, entry, settings, listings] = await Promise.all([
+    prisma.staff.findUnique({ where: { id: staffId }, select: { name: true, phone: true, monthlySalary: true, allowedLeaves: true } }),
     prisma.staffMonth.findUnique({ where: { staffId_month: { staffId, month } } }),
     getPlatformSettings(),
+    prisma.listing.findMany({ select: { id: true, title: true, flatNumber: true, block: true } }),
   ]);
   if (!staff) return NextResponse.json({ error: "Staff not found" }, { status: 404 });
 
-  // Prefer the saved month snapshot; otherwise compute a zero-absence payout from
-  // the staff's current salary and settings.
   const monthlySalary = entry?.monthlySalary ?? staff.monthlySalary ?? settings.staffMonthlySalary;
-  const allowed = entry?.allowedLeaves ?? allowedLeaves(settings.staffMonthlyHolidays, settings.staffFlatsPerStaff);
+  const allowed = entry?.allowedLeaves ?? staff.allowedLeaves ?? allowedLeaves(settings.staffMonthlyHolidays, settings.staffFlatsPerStaff);
   const deductionPerDay = entry?.deductionPerDay ?? settings.staffDailyRate;
-  const absentDays = entry?.absentDays ?? [];
-  const absences = entry?.absences ?? absentDays.length;
+  const absentByDay = (entry?.absentByDay as Record<string, string[]> | undefined) ?? {};
+  const absences = entry?.absences ?? 0;
   const pay = entry?.pay ?? computeStaffPay(monthlySalary, allowed, deductionPerDay, absences);
+
+  // Per-flat summary: how many days each flat was missed, and on which days.
+  const labelOf = new Map(listings.map((l) => [l.id, flatLabel(l)]));
+  const perFlat = new Map<string, number[]>();
+  for (const [day, ids] of Object.entries(absentByDay)) {
+    for (const id of ids) {
+      const list = perFlat.get(id) ?? [];
+      list.push(Number(day));
+      perFlat.set(id, list);
+    }
+  }
+  const flatSummary = [...perFlat.entries()]
+    .map(([id, days]) => ({ flat: labelOf.get(id) ?? "Unknown flat", days: days.length, dayList: days.sort((a, b) => a - b) }))
+    .sort((a, b) => b.days - a.days);
 
   const buffer = await renderToBuffer(
     StaffReceiptPdf({
@@ -53,7 +71,7 @@ export async function GET(req: Request) {
       allowedLeaves: allowed,
       deductionPerDay,
       absences,
-      absentDays,
+      flatSummary,
       pay,
       note: entry?.note ?? null,
     })
