@@ -13,10 +13,16 @@ const updateSchema = z
     name: z.string().trim().min(1).max(80).optional(),
     phone: z.string().trim().max(30).nullable().optional(),
     active: z.boolean().optional(),
+    monthlySalaryRupees: z.coerce.number().int().min(0).max(10_000_000).optional(),
   })
-  .refine((data) => data.name !== undefined || data.phone !== undefined || data.active !== undefined, {
-    message: "No changes supplied",
-  });
+  .refine(
+    (data) =>
+      data.name !== undefined ||
+      data.phone !== undefined ||
+      data.active !== undefined ||
+      data.monthlySalaryRupees !== undefined,
+    { message: "No changes supplied" }
+  );
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   if (!(await requireAdmin()))
@@ -37,6 +43,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
       ...(parsed.data.phone !== undefined ? { phone: parsed.data.phone || null } : {}),
       ...(parsed.data.active !== undefined ? { active: parsed.data.active } : {}),
+      ...(parsed.data.monthlySalaryRupees !== undefined
+        ? { monthlySalary: parsed.data.monthlySalaryRupees * 100 }
+        : {}),
     },
   });
 

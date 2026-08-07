@@ -24,6 +24,7 @@ export function SettingsForm({
     staffDailyRateRupees: number;
     staffMonthlySalaryRupees: number;
     staffMonthlyHolidays: number;
+    staffFlatsPerStaff: number;
   };
 }) {
   const router = useRouter();
@@ -213,9 +214,11 @@ export function SettingsForm({
       <div className="space-y-1">
         <Label>Cleaning staff</Label>
         <p className="text-xs text-muted-foreground">
-          Defaults used by the Staff tracker to calculate cleaning pay.
+          Defaults used by the Staff tracker. Allowed leaves per staff each month ={" "}
+          leaves per flat × flats a staff covers at a time (e.g. {form.staffMonthlyHolidays} ×{" "}
+          {form.staffFlatsPerStaff} = {form.staffMonthlyHolidays * form.staffFlatsPerStaff}).
         </p>
-        <div className="mt-2 grid grid-cols-3 gap-4">
+        <div className="mt-2 grid grid-cols-2 gap-4 sm:grid-cols-4">
           <div className="space-y-1">
             <Label htmlFor="sRate" className="text-xs">Deduction / extra absent day (₹)</Label>
             <Input
@@ -227,7 +230,7 @@ export function SettingsForm({
             />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="sSalary" className="text-xs">Monthly salary (₹)</Label>
+            <Label htmlFor="sSalary" className="text-xs">Default monthly salary (₹)</Label>
             <Input
               id="sSalary"
               type="number"
@@ -237,7 +240,7 @@ export function SettingsForm({
             />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="sHol" className="text-xs">Holidays / flat</Label>
+            <Label htmlFor="sHol" className="text-xs">Leaves / flat</Label>
             <Input
               id="sHol"
               type="number"
@@ -245,6 +248,17 @@ export function SettingsForm({
               max={31}
               value={form.staffMonthlyHolidays}
               onChange={(e) => set("staffMonthlyHolidays", Number(e.target.value) || 0)}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="sFlats" className="text-xs">Flats / staff at a time</Label>
+            <Input
+              id="sFlats"
+              type="number"
+              min={1}
+              max={20}
+              value={form.staffFlatsPerStaff}
+              onChange={(e) => set("staffFlatsPerStaff", Number(e.target.value) || 1)}
             />
           </div>
         </div>

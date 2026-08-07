@@ -155,25 +155,21 @@ export async function syncOfflineBooking(b: OfflineBookingRow): Promise<void> {
 export interface StaffPayrollRow {
   month: string;
   staffName: string;
-  listingTitle: string;
-  flat?: string | null;
   absences: number;
-  allowedHolidays: number;
+  allowedLeaves: number;
   monthlySalary: number; // paise
   deductionPerDay: number; // paise
   pay: number; // paise
   note?: string | null;
 }
 
-/** Mirror a monthly staff payroll entry to the StaffPayroll tab. */
+/** Mirror a monthly staff payout entry to the StaffPayroll tab. */
 export async function syncStaffPayroll(a: StaffPayrollRow): Promise<void> {
   await appendRow("StaffPayroll", [
     a.month,
     a.staffName,
-    a.listingTitle,
-    a.flat ?? "",
     a.absences,
-    a.allowedHolidays,
+    a.allowedLeaves,
     rupees(a.monthlySalary),
     rupees(a.deductionPerDay),
     rupees(a.pay),

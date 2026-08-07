@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getPlatformSettings } from "@/lib/settings";
-import { monthLabel } from "@/lib/staff";
+import { allowedLeaves, computeStaffPay, monthLabel } from "@/lib/staff";
 import { StaffReceiptPdf } from "@/lib/pdf/staff-receipt";
 
 export const runtime = "nodejs";
@@ -12,10 +12,6 @@ export const dynamic = "force-dynamic";
 async function requireAdmin() {
   const session = await auth();
   return !!session?.user?.isAdmin;
-}
-
-function flat(l: { title: string; flatNumber: string | null; block: string | null }) {
-  return l.flatNumber ? `${l.flatNumber}${l.block ? `, ${l.block}` : ""}` : l.title;
 }
 
 // Staff monthly payout as a PDF.
@@ -31,29 +27,21 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Missing staffId or month" }, { status: 400 });
   }
 
-  const [staff, settings] = await Promise.all([
-    prisma.staff.findUnique({
-      where: { id: staffId },
-      include: {
-        payroll: {
-          where: { month },
-          include: { listing: { select: { title: true, flatNumber: true, block: true } } },
-          orderBy: { createdAt: "asc" },
-        },
-      },
-    }),
+  const [staff, entry, settings] = await Promise.all([
+    prisma.staff.findUnique({ where: { id: staffId }, select: { name: true, phone: true, monthlySalary: true } }),
+    prisma.staffMonth.findUnique({ where: { staffId_month: { staffId, month } } }),
     getPlatformSettings(),
   ]);
   if (!staff) return NextResponse.json({ error: "Staff not found" }, { status: 404 });
 
-  const rows = staff.payroll.map((r) => ({
-    flat: flat(r.listing),
-    absences: r.absences,
-    allowedHolidays: r.allowedHolidays,
-    absentDays: r.absentDays,
-    pay: r.pay,
-  }));
-  const total = rows.reduce((sum, r) => sum + r.pay, 0);
+  // Prefer the saved month snapshot; otherwise compute a zero-absence payout from
+  // the staff's current salary and settings.
+  const monthlySalary = entry?.monthlySalary ?? staff.monthlySalary ?? settings.staffMonthlySalary;
+  const allowed = entry?.allowedLeaves ?? allowedLeaves(settings.staffMonthlyHolidays, settings.staffFlatsPerStaff);
+  const deductionPerDay = entry?.deductionPerDay ?? settings.staffDailyRate;
+  const absentDays = entry?.absentDays ?? [];
+  const absences = entry?.absences ?? absentDays.length;
+  const pay = entry?.pay ?? computeStaffPay(monthlySalary, allowed, deductionPerDay, absences);
 
   const buffer = await renderToBuffer(
     StaffReceiptPdf({
@@ -61,11 +49,13 @@ export async function GET(req: Request) {
       staffPhone: staff.phone,
       month,
       monthLabelText: monthLabel(month),
-      rows,
-      total,
-      monthlySalary: settings.staffMonthlySalary,
-      allowedHolidays: settings.staffMonthlyHolidays,
-      deductionPerDay: settings.staffDailyRate,
+      monthlySalary,
+      allowedLeaves: allowed,
+      deductionPerDay,
+      absences,
+      absentDays,
+      pay,
+      note: entry?.note ?? null,
     })
   );
 

@@ -20,6 +20,7 @@ const schema = z.object({
   staffDailyRateRupees: z.coerce.number().int().min(0).max(1_000_000),
   staffMonthlySalaryRupees: z.coerce.number().int().min(0).max(10_000_000),
   staffMonthlyHolidays: z.coerce.number().int().min(0).max(31),
+  staffFlatsPerStaff: z.coerce.number().int().min(1).max(20),
 });
 
 export async function PATCH(req: Request) {
@@ -64,6 +65,7 @@ export async function PATCH(req: Request) {
       staffDailyRate: d.staffDailyRateRupees * 100,
       staffMonthlySalary: d.staffMonthlySalaryRupees * 100,
       staffMonthlyHolidays: d.staffMonthlyHolidays,
+      staffFlatsPerStaff: d.staffFlatsPerStaff,
     },
     create: {
       id: "singleton",
@@ -80,6 +82,7 @@ export async function PATCH(req: Request) {
       staffDailyRate: d.staffDailyRateRupees * 100,
       staffMonthlySalary: d.staffMonthlySalaryRupees * 100,
       staffMonthlyHolidays: d.staffMonthlyHolidays,
+      staffFlatsPerStaff: d.staffFlatsPerStaff,
     },
   });
 

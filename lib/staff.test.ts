@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeStaffPay } from "./staff";
+import { computeStaffPay, allowedLeaves } from "./staff";
 
 // ₹3,000 salary, 4 free holidays, ₹100/day deduction (all in paise).
 const SALARY = 300000;
@@ -30,5 +30,24 @@ describe("computeStaffPay", () => {
   it("scales the deduction with a different rate/salary", () => {
     // ₹3,600 salary, 4 holidays, ₹120/day → 2 extra absences dock ₹240.
     expect(computeStaffPay(360000, 4, 12000, 6)).toBe(336000);
+  });
+});
+
+describe("allowedLeaves", () => {
+  it("multiplies leaves-per-flat by flats-a-staff-covers (4 × 3 = 12)", () => {
+    expect(allowedLeaves(4, 3)).toBe(12);
+    expect(allowedLeaves(4, 1)).toBe(4);
+    expect(allowedLeaves(2, 5)).toBe(10);
+  });
+
+  it("clamps to a non-negative integer", () => {
+    expect(allowedLeaves(0, 3)).toBe(0);
+    expect(allowedLeaves(-4, 3)).toBe(0);
+  });
+
+  it("a staff with 12 allowed leaves is only docked beyond the 12th absence", () => {
+    const allowed = allowedLeaves(4, 3); // 12
+    expect(computeStaffPay(900000, allowed, 10000, 12)).toBe(900000); // within allowance
+    expect(computeStaffPay(900000, allowed, 10000, 15)).toBe(870000); // 3 extra × ₹100
   });
 });

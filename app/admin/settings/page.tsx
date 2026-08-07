@@ -39,6 +39,7 @@ export default async function AdminSettingsPage() {
             staffDailyRateRupees: Math.round(settings.staffDailyRate / 100),
             staffMonthlySalaryRupees: Math.round(settings.staffMonthlySalary / 100),
             staffMonthlyHolidays: settings.staffMonthlyHolidays,
+            staffFlatsPerStaff: settings.staffFlatsPerStaff,
           }}
         />
       </section>

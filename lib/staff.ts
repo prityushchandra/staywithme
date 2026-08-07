@@ -13,6 +13,15 @@ export function computeStaffPay(
   return Math.max(0, monthlySalary - extraAbsences * deductionPerDay);
 }
 
+/**
+ * Allowed monthly leaves for a staff member = free leaves per flat × the number
+ * of flats one staff can cover at a time (e.g. 4 × 3 = 12). Absences beyond this
+ * are docked.
+ */
+export function allowedLeaves(leavesPerFlat: number, flatsPerStaff: number): number {
+  return Math.max(0, Math.round(leavesPerFlat) * Math.round(flatsPerStaff));
+}
+
 /** Current month as "YYYY-MM" (UTC). */
 export function currentMonth(): string {
   const d = new Date();

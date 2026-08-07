@@ -86,7 +86,9 @@ export async function GET(req: Request) {
     ["Total expenses", rupees(total.expenseTotal)],
     ["Net profit", rupees(scopedTotal.profit)],
     ["Net margin", pct(scopedTotal.margin)],
-    ["Unbooked (vacant) days", total.unbookedDays]
+    // A day count — NOT currency, so keep it a string so the ₹ number format on
+    // this column doesn't apply to it.
+    ["Unbooked (available) days", `${total.unbookedDays}`]
   );
 
   // --- Monthly sheet ---

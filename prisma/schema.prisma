@@ -327,6 +327,9 @@ model PlatformSettings {
   staffDailyRate     Int @default(10000)
   staffMonthlySalary Int @default(300000)
   staffMonthlyHolidays Int @default(4)
+  // How many flats one staff member covers "at a time". Allowed monthly leaves =
+  // staffMonthlyHolidays × staffFlatsPerStaff (e.g. 4 × 3 = 12).
+  staffFlatsPerStaff Int @default(3)
   updatedAt          DateTime @updatedAt
 }
 
@@ -511,11 +514,46 @@ model Staff {
   name       String
   phone      String?
   active     Boolean           @default(true)
+  // Fixed monthly salary for this staff member (paise), admin-entered. Absences
+  // beyond the allowed leaves are docked from this. Null until set (then the
+  // platform default salary is used as a fallback).
+  monthlySalary Int?
   createdAt  DateTime          @default(now())
 
   payroll    StaffPayroll[]
+  months     StaffMonth[]
 
   @@index([active])
+}
+
+// One month's attendance + pay for a staff member (NOT per flat). The staff is
+// paid a fixed monthly salary; each month they get `allowedLeaves` free leaves
+// (= leaves-per-flat × flats-a-staff-covers-at-a-time, e.g. 4 × 3 = 12). Every
+// absence BEYOND that is docked at `deductionPerDay`. Snapshots keep past months
+// stable if the settings later change.
+//   pay = monthlySalary − max(0, absences − allowedLeaves) × deductionPerDay
+model StaffMonth {
+  id              String   @id @default(cuid())
+  staffId         String
+  staff           Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  month           String   // "YYYY-MM"
+  // The specific day-of-month numbers (1..31) the staff was absent.
+  absentDays      Int[]    @default([])
+  absences        Int      @default(0) // mirrors absentDays.length
+
+  monthlySalary   Int      // paise — snapshot of the staff's salary that month
+  allowedLeaves   Int      // snapshot (= leavesPerFlat × flatsPerStaff)
+  deductionPerDay Int      // paise — snapshot of the per-extra-absent-day dock
+  pay             Int      // paise — computed net pay
+  note            String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([staffId, month])
+  @@index([month])
+  @@index([staffId])
 }
 
 // Monthly cleaning pay for one staff member and one flat. The base salary is a
