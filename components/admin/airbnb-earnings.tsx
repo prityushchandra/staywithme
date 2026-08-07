@@ -7,7 +7,8 @@ import { formatINR } from "@/lib/pricing";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SelectItem } from "@/components/ui/select";
+import { ToggleSelect } from "@/components/ui/toggle-select";
 
 interface Flat {
   id: string;
@@ -94,14 +95,11 @@ export function AirbnbEarnings({
         <form onSubmit={save} className="grid gap-3 sm:grid-cols-[1fr_160px_160px_auto] sm:items-end">
           <div className="space-y-1">
             <Label>Flat</Label>
-            <Select value={listingId} onValueChange={setListingId}>
-              <SelectTrigger><SelectValue placeholder="Choose flat" /></SelectTrigger>
-              <SelectContent>
-                {flats.map((f) => (
-                  <SelectItem key={f.id} value={f.id}>{f.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <ToggleSelect value={listingId} onValueChange={setListingId} placeholder="Choose flat" ariaLabel="Flat">
+              {flats.map((f) => (
+                <SelectItem key={f.id} value={f.id}>{f.label}</SelectItem>
+              ))}
+            </ToggleSelect>
           </div>
           <div className="space-y-1">
             <Label htmlFor="ae-month">Month</Label>

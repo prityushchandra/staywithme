@@ -32,7 +32,8 @@ import {
   type PnlSource,
 } from "@/lib/pnl-compute";
 import type { PnlListingMonth } from "@/lib/pnl";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SelectItem } from "@/components/ui/select";
+import { ToggleSelect } from "@/components/ui/toggle-select";
 
 const REVENUE = "#2f9e6f";
 const EXPENSE = "#C8705E";
@@ -68,16 +69,17 @@ export function PnlDashboard({
     return list.length ? list : [financialYearStart(currentMonth)];
   }, [months, currentMonth]);
 
-  const [fy, setFy] = useState<number>(fyStarts[fyStarts.length - 1]);
-  const [month, setMonth] = useState<string>("all");
+  // Default to the current financial year and CURRENT MONTH (not the whole year).
+  const currentFy = financialYearStart(currentMonth);
+  const defaultFy = fyStarts.includes(currentFy) ? currentFy : fyStarts[fyStarts.length - 1];
+  const [fy, setFy] = useState<number>(defaultFy);
+  const [month, setMonth] = useState<string>(defaultFy === currentFy ? currentMonth : "all");
   const [source, setSource] = useState<PnlSource>("both");
 
-  // The 12 FY months (Apr…Mar); the month picker only offers elapsed ones.
+  // The 12 FY months (Apr…Mar) are all selectable — past months for P&L history,
+  // the current and upcoming months for still-available inventory.
   const fyMonths = useMemo(() => monthsOfFinancialYear(fy), [fy]);
-  const selectableMonths = useMemo(
-    () => fyMonths.filter((m) => m <= currentMonth),
-    [fyMonths, currentMonth]
-  );
+  const selectableMonths = fyMonths;
 
   // Scope: whole FY or a single month within it.
   const scopedRows = useMemo(
@@ -129,31 +131,22 @@ export function PnlDashboard({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={source} onValueChange={(v) => setSource(v as PnlSource)}>
-            <SelectTrigger className="h-9 w-[170px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="both">Online + offline</SelectItem>
-              <SelectItem value="online">Online (Airbnb)</SelectItem>
-              <SelectItem value="offline">Offline (direct)</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={String(fy)} onValueChange={(v) => { setFy(Number(v)); setMonth("all"); }}>
-            <SelectTrigger className="h-9 w-[140px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {fyStarts.map((y) => (
-                <SelectItem key={y} value={String(y)}>{financialYearLabel(y)}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={month} onValueChange={setMonth}>
-            <SelectTrigger className="h-9 w-[150px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Whole year</SelectItem>
-              {selectableMonths.map((m) => (
-                <SelectItem key={m} value={m}>{monthLabel(m)}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <ToggleSelect value={source} onValueChange={(v) => setSource(v as PnlSource)} triggerClassName="h-9 w-[170px]" ariaLabel="Revenue channel">
+            <SelectItem value="both">Online + offline</SelectItem>
+            <SelectItem value="online">Online (Airbnb)</SelectItem>
+            <SelectItem value="offline">Offline (direct)</SelectItem>
+          </ToggleSelect>
+          <ToggleSelect value={String(fy)} onValueChange={(v) => { setFy(Number(v)); setMonth("all"); }} triggerClassName="h-9 w-[140px]" ariaLabel="Financial year">
+            {fyStarts.map((y) => (
+              <SelectItem key={y} value={String(y)}>{financialYearLabel(y)}</SelectItem>
+            ))}
+          </ToggleSelect>
+          <ToggleSelect value={month} onValueChange={setMonth} triggerClassName="h-9 w-[150px]" ariaLabel="Month">
+            <SelectItem value="all">Whole year</SelectItem>
+            {selectableMonths.map((m) => (
+              <SelectItem key={m} value={m}>{monthLabel(m)}</SelectItem>
+            ))}
+          </ToggleSelect>
           <a
             href={exportHref}
             className="inline-flex h-9 items-center gap-2 rounded-lg bg-foreground px-3 text-sm font-medium text-background transition hover:opacity-90"
@@ -168,7 +161,7 @@ export function PnlDashboard({
         <Kpi label="Total revenue" value={formatINR(scoped.revenue)} sub={SOURCE_LABEL[source]} />
         <Kpi label="Total expenses" value={formatINR(total.expenseTotal)} sub="rent + staff" />
         <Kpi label="Net profit" value={formatINR(scoped.profit)} sub={`${scoped.margin.toFixed(1)}% margin`} valueClass={profitColor} />
-        <Kpi label="Unbooked days" value={String(total.unbookedDays)} sub="vacant days (elapsed)" />
+        <Kpi label="Unbooked days" value={String(total.unbookedDays)} sub="available, not booked" />
       </div>
 
       {/* Revenue vs expenses trend + profit line */}
@@ -235,12 +228,12 @@ export function PnlDashboard({
         <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="font-semibold">Unbooked days · {scopeLabel}</h2>
           <span className="text-sm text-muted-foreground">
-            Total <span className="font-semibold text-foreground">{total.unbookedDays}</span> vacant days
+            Total <span className="font-semibold text-foreground">{total.unbookedDays}</span> available days
           </span>
         </div>
         <p className="mb-3 text-xs text-muted-foreground">
-          Elapsed days with no booking on the calendar, per flat. Days in the future and before a
-          flat was added aren&apos;t counted. (Count only — no lost-amount estimate.)
+          Days still open on each flat&apos;s calendar (today onward) with no booking. Past days and
+          blocked/booked days aren&apos;t counted — so a fully-booked or fully-blocked month shows 0.
         </p>
         {perFlat.length === 0 ? (
           <p className="text-sm text-muted-foreground">No flats to show for this period.</p>

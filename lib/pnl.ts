@@ -24,9 +24,8 @@ export interface PnlListingMonth {
   revenueOnline: number;
   rent: number;
   staff: number;
-  // Vacant days in this month for this flat (no booking/block on the calendar),
-  // counted only for days that have already elapsed (up to yesterday) and from
-  // the flat's creation onward. We track the COUNT only, never a lost-amount.
+  // Vacant days still available to book on the calendar: today-or-later days in
+  // this month with no AvailabilityBlock. Past and blocked days aren't counted.
   unbookedDays: number;
 }
 
@@ -73,23 +72,29 @@ function floorDayUtc(d: Date): number {
  * before today) and never before the flat existed, so future/empty months and
  * pre-launch days don't inflate the number.
  */
-function countUnbookedDays(
+/**
+ * Count AVAILABLE (still-bookable) days for one flat in one month: days that are
+ * today-or-later and NOT covered by any AvailabilityBlock — i.e. exactly the
+ * "open" days a guest could still book on the calendar. Past days aren't
+ * available (you can't book them), and blocked/booked days aren't available, so
+ * neither is counted. A fully-blocked or fully-past month yields 0.
+ */
+function countAvailableDays(
   monthKeyStr: string,
   blocks: { startDate: Date; endDate: Date }[],
-  flatCreatedMs: number,
   todayMs: number
 ): number {
   const [y, m] = monthKeyStr.split("-").map(Number);
   const monthStart = Date.UTC(y, m - 1, 1);
   const monthEndExclusive = Date.UTC(y, m, 1);
-  const startMs = Math.max(monthStart, flatCreatedMs);
-  const endMs = Math.min(monthEndExclusive, todayMs); // today excluded (in progress)
+  const startMs = Math.max(monthStart, todayMs); // today onward only
+  const endMs = monthEndExclusive;
   if (endMs <= startMs) return 0;
 
   let count = 0;
   for (let t = startMs; t < endMs; t += DAY_MS) {
-    const booked = blocks.some((b) => b.startDate.getTime() <= t && t < b.endDate.getTime());
-    if (!booked) count++;
+    const blocked = blocks.some((b) => b.startDate.getTime() <= t && t < b.endDate.getTime());
+    if (!blocked) count++;
   }
   return count;
 }
@@ -141,7 +146,13 @@ export async function getPnlData(): Promise<PnlData> {
     for (const l of listings) keys.push(monthKey(l.createdAt));
 
     let minIdx = Math.min(...keys.map(ymToIndex));
-    const maxIdx = Math.max(...keys.map(ymToIndex));
+    // Extend the window through the END of the current financial year (March), so
+    // upcoming months in this FY exist in the grid and their still-available days
+    // show up in the "unbooked" (available) metric.
+    const [cy, cm] = currentMonth.split("-").map(Number);
+    const currentFyStart = cm >= 4 ? cy : cy - 1;
+    const fyEndIdx = ymToIndex(`${currentFyStart + 1}-03`);
+    const maxIdx = Math.max(...keys.map(ymToIndex), fyEndIdx);
     if (maxIdx - minIdx + 1 > MAX_MONTHS) minIdx = maxIdx - MAX_MONTHS + 1;
 
     const months: string[] = [];
@@ -202,17 +213,15 @@ export async function getPnlData(): Promise<PnlData> {
       }
     }
 
-    // Unbooked (vacant) days per flat per month — over every flat×month in the
-    // occupancy window (from the flat's first month to the current month), so the
-    // metric appears even for months with no revenue or rent.
+    // Available (still-bookable) days per flat per month — from the current month
+    // through the end of the window (future months in this FY). Past months are
+    // left at 0 (nothing is "available" to book in the past).
     const todayMs = floorDayUtc(now);
     for (const l of listings) {
       const flatBlocks = blocksByListing.get(l.id) ?? [];
-      const flatCreatedMs = floorDayUtc(l.createdAt);
-      const startIdx = Math.max(minIdx, ymToIndex(monthKey(l.createdAt)));
-      for (let i = startIdx; i <= Math.min(maxIdx, currentIdx); i++) {
+      for (let i = Math.max(minIdx, currentIdx); i <= maxIdx; i++) {
         const m = indexToYm(i);
-        cell(l.id, m).unbookedDays = countUnbookedDays(m, flatBlocks, flatCreatedMs, todayMs);
+        cell(l.id, m).unbookedDays = countAvailableDays(m, flatBlocks, todayMs);
       }
     }
 
