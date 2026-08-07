@@ -51,6 +51,7 @@ export function DateRangePicker({
   variant = "bar",
   align = "left",
   blockedRanges = [],
+  allowBlocked = false,
   open: openProp,
   onOpenChange,
 }: {
@@ -63,6 +64,12 @@ export function DateRangePicker({
   align?: "left" | "right";
   /** Booked ranges (start inclusive, end exclusive) to disable. */
   blockedRanges?: { startDate: string; endDate: string }[];
+  /**
+   * Admin override mode: blocked dates stay SELECTABLE (shown struck-through in
+   * amber) instead of disabled, so an admin can deliberately pick occupied dates
+   * and override them. Guests never get this.
+   */
+  allowBlocked?: boolean;
   /** Controlled open state (optional). */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -107,6 +114,12 @@ export function DateRangePicker({
     const t = day.getTime();
     const isPast = t < today.getTime();
     const choosingCheckout = !!start && !end;
+
+    // Admin override mode: blocked dates stay selectable (the server will prompt
+    // to confirm the override). Only the past is unpickable.
+    if (allowBlocked) {
+      return { disabled: isPast, checkoutOnly: false };
+    }
 
     if (choosingCheckout && start) {
       if (t <= start.getTime()) {
@@ -165,7 +178,13 @@ export function DateRangePicker({
   function pick(day: Date) {
     if (dayStatus(day).disabled) return;
     // Shared, tested transition — identical to the on-page calendar & server.
-    const next = nextRangeSelection({ checkIn: start, checkOut: end }, day, blockDates);
+    // In admin override mode we ignore block constraints so any chronological
+    // range can be chosen (occupied dates included).
+    const next = nextRangeSelection(
+      { checkIn: start, checkOut: end },
+      day,
+      allowBlocked ? [] : blockDates
+    );
     if (!next) return;
     onChange(
       next.checkIn ? toYmd(next.checkIn) : "",
@@ -387,6 +406,8 @@ function Month({
                   !disabled && !isEndpoint && "hover:border hover:border-foreground",
                   // Truly unavailable booked night → struck through.
                   blockedNight && disabled && "text-muted-foreground/40 line-through",
+                  // Admin override: blocked but still selectable → amber strike.
+                  blockedNight && !disabled && !isEndpoint && "text-amber-600 line-through decoration-amber-500/70",
                   // Booked night that's still valid as a checkout (same-day turnover).
                   checkoutOnly && !isEndpoint && "text-foreground underline decoration-dotted underline-offset-4",
                   isPast && !blockedNight && "cursor-default text-muted-foreground/30"

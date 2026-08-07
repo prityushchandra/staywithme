@@ -23,6 +23,8 @@ const bookingSchema = z.object({
   amountPaid: z.coerce.number().min(0).default(0),
   source: z.enum(["OFFLINE", "AIRBNB"]).default("OFFLINE"),
   note: z.string().trim().max(500).optional(),
+  // Admin chose to book on top of already-blocked dates.
+  override: z.boolean().default(false),
 });
 
 function toPaise(rupees: number) {
@@ -94,9 +96,24 @@ export async function POST(req: Request) {
     guests: input.guests,
     note: input.note,
     createdById: session?.user?.id ?? null,
+    allowOverlap: input.override,
   });
   if (!blockResult.ok) {
-    return NextResponse.json({ error: blockResult.error }, { status: 409 });
+    // Dates overlap existing blocks. Report the conflicts so the client can
+    // offer an "override & book anyway" option (re-POST with override: true).
+    return NextResponse.json(
+      {
+        error: blockResult.error,
+        conflict: true,
+        conflicts: (blockResult.conflicts ?? []).map((b) => ({
+          startDate: b.startDate.toISOString(),
+          endDate: b.endDate.toISOString(),
+          kind: b.kind,
+          guestName: b.guestName,
+        })),
+      },
+      { status: 409 }
+    );
   }
 
   try {

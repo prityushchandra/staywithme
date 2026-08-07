@@ -4,7 +4,7 @@
 
 import { prisma } from "./db";
 import { memo } from "./memo";
-import { isRangeAvailable, toUtcDate } from "./dates";
+import { isRangeAvailable, rangesOverlap, toUtcDate } from "./dates";
 
 export { rangesOverlap, isRangeAvailable, toUtcDate } from "./dates";
 export type { DateRange } from "./dates";
@@ -38,13 +38,19 @@ export async function addBlock(input: {
   guests?: number | null;
   note?: string | null;
   createdById?: string | null;
+  /** Skip the overlap guard (admin override — book on top of existing blocks). */
+  allowOverlap?: boolean;
 }) {
-  // Reject overlaps with existing blocks.
+  const { allowOverlap, ...data } = input;
+  // Reject overlaps with existing blocks, unless the caller overrides.
   const existing = await getBlocks(input.listingId);
-  if (!isRangeAvailable(input.startDate, input.endDate, existing)) {
-    return { ok: false as const, error: "These dates overlap an existing block." };
+  if (!allowOverlap && !isRangeAvailable(input.startDate, input.endDate, existing)) {
+    const conflicts = existing.filter((b) =>
+      rangesOverlap(input.startDate, input.endDate, b.startDate, b.endDate)
+    );
+    return { ok: false as const, error: "These dates overlap an existing block.", conflicts };
   }
-  const block = await prisma.availabilityBlock.create({ data: input });
+  const block = await prisma.availabilityBlock.create({ data });
   return { ok: true as const, block };
 }
 

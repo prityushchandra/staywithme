@@ -12,12 +12,23 @@ import { DateRangePicker } from "@/components/date-range-picker";
 export type OfflineBookingListing = { id: string; label: string };
 
 type Success = { receiptNumber: string; receiptUrl: string };
+type ConflictRange = { startDate: string; endDate: string; kind: string; guestName?: string | null };
+
+function fmtDay(iso: string) {
+  return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+}
+function kindLabel(kind: string) {
+  if (kind === "BOOKING") return "Booked";
+  if (kind === "ICAL") return "Imported (Airbnb/other)";
+  return "Blocked";
+}
 
 export function OfflineBookingForm({ listings }: { listings: OfflineBookingListing[] }) {
   const router = useRouter();
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState<Success | null>(null);
+  const [conflicts, setConflicts] = useState<ConflictRange[] | null>(null);
   const [blockedRanges, setBlockedRanges] = useState<{ startDate: string; endDate: string }[]>([]);
   const [blocksVersion, setBlocksVersion] = useState(0);
   const [form, setForm] = useState({
@@ -60,6 +71,11 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    setConflicts(null);
+    await doSubmit(false);
+  }
+
+  async function doSubmit(override: boolean) {
     setError("");
     setSuccess(null);
 
@@ -78,15 +94,21 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
           guests: Number(form.guests),
           totalPrice: Number(form.totalPrice),
           amountPaid: Number(form.amountPaid || 0),
+          override,
         }),
       });
       const data = await res.json().catch(() => ({}));
+      // Dates already blocked → surface an override prompt instead of an error.
+      if (res.status === 409 && data.conflict) {
+        setConflicts(Array.isArray(data.conflicts) ? data.conflicts : []);
+        return;
+      }
       if (!res.ok) {
         setError(data.error ?? "Could not record booking.");
-        setSubmitting(false);
         return;
       }
       setSuccess({ receiptNumber: data.receiptNumber, receiptUrl: data.receiptUrl });
+      setConflicts(null);
       setForm((current) => ({ ...current, guestName: "", guestPhone: "", guests: 1, checkIn: "", checkOut: "", totalPrice: "", amountPaid: "", note: "" }));
       setBlocksVersion((v) => v + 1);
       router.refresh();
@@ -108,7 +130,7 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2 md:col-span-2">
             <Label>Listing</Label>
-            <Select value={form.listingId} onValueChange={(value) => setField("listingId", value)}>
+            <Select value={form.listingId} onValueChange={(value) => { setField("listingId", value); setConflicts(null); }}>
               <SelectTrigger><SelectValue placeholder="Choose listing" /></SelectTrigger>
               <SelectContent>
                 {listings.map((listing) => <SelectItem key={listing.id} value={listing.id}>{listing.label}</SelectItem>)}
@@ -144,12 +166,15 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
               checkIn={form.checkIn}
               checkOut={form.checkOut}
               blockedRanges={blockedRanges}
-              onChange={(checkIn, checkOut) =>
-                setForm((c) => ({ ...c, checkIn, checkOut }))
-              }
+              allowBlocked
+              onChange={(checkIn, checkOut) => {
+                setForm((c) => ({ ...c, checkIn, checkOut }));
+                setConflicts(null);
+              }}
             />
             <p className="text-xs text-muted-foreground">
-              Booked dates are greyed out. Pick a check-in, then a check-out.
+              Available dates book straight away. Already-booked dates show struck-through in
+              amber — you can still pick them and you&apos;ll be asked to confirm an override.
             </p>
           </div>
           <div className="space-y-2">
@@ -167,6 +192,35 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
         </div>
 
         {error && <p className="text-sm text-destructive">{error}</p>}
+
+        {conflicts && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+            <p className="font-semibold">These dates are already blocked</p>
+            {conflicts.length > 0 && (
+              <ul className="mt-2 space-y-1">
+                {conflicts.map((c, i) => (
+                  <li key={i}>
+                    {fmtDay(c.startDate)} → {fmtDay(c.endDate)} · {kindLabel(c.kind)}
+                    {c.guestName ? ` — ${c.guestName}` : ""}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="mt-2">
+              Record this booking anyway? The existing block stays in place; your new booking
+              will overlap it and its dates will be blocked.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button type="button" size="sm" variant="destructive" onClick={() => doSubmit(true)} disabled={submitting}>
+                {submitting ? "Booking…" : "Override & book anyway"}
+              </Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => setConflicts(null)} disabled={submitting}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+
         <Button type="submit" disabled={submitting || listings.length === 0}>{submitting ? "Recording…" : "Record booking"}</Button>
       </form>
 
