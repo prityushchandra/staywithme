@@ -1,5 +1,6 @@
 import { getPlatformSettings } from "@/lib/settings";
 import { searchListings, getAmenityOptions, type SearchParams } from "@/lib/search";
+import { toListingCardData } from "@/lib/data-access";
 import { getRatingSummaries } from "@/lib/reviews";
 import { ListingCard } from "@/components/listing-card";
 import { SearchFilters } from "@/components/search-filters";
@@ -92,7 +93,7 @@ export default async function SearchPage({
               {results.map((listing) => (
                 <ListingCard
                   key={listing.id}
-                  listing={listing}
+                  listing={toListingCardData(listing)}
                   platformFeePercent={settings.platformFeePercent}
                   rating={ratings.get(listing.id)}
                 />

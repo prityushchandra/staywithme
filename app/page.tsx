@@ -1,4 +1,4 @@
-import { getPublishedListings, getFeaturedListings } from "@/lib/data-access";
+import { getPublishedListings, getFeaturedListings, toListingCardData } from "@/lib/data-access";
 import { getPlatformSettings } from "@/lib/settings";
 import { getRatingSummaries } from "@/lib/reviews";
 import { ListingCard } from "@/components/listing-card";
@@ -72,7 +72,7 @@ export default async function HomePage() {
               {featured.map((listing) => (
                 <ListingCard
                   key={listing.id}
-                  listing={listing}
+                  listing={toListingCardData(listing)}
                   platformFeePercent={settings.platformFeePercent}
                   rating={ratings.get(listing.id)}
                 />
@@ -97,7 +97,7 @@ export default async function HomePage() {
               {rest.map((listing) => (
                 <ListingCard
                   key={listing.id}
-                  listing={listing}
+                  listing={toListingCardData(listing)}
                   platformFeePercent={settings.platformFeePercent}
                   rating={ratings.get(listing.id)}
                 />

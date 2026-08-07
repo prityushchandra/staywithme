@@ -130,8 +130,19 @@ const searchArgs = {
     amenities: { include: { amenity: true } },
     host: { select: { id: true, name: true, image: true, createdAt: true } },
   },
-  // Same confidential-field guard as the public reads — never expose to guests.
-  omit: { flatNumber: true, block: true },
+  // Same confidential-field guard as the public reads — never expose to guests
+  // (exact location, internal rent, WiFi creds, moderation notes).
+  omit: {
+    flatNumber: true,
+    block: true,
+    addressLine: true,
+    lat: true,
+    lng: true,
+    monthlyRent: true,
+    wifiName: true,
+    wifiPassword: true,
+    rejectionReason: true,
+  },
 } satisfies Prisma.ListingDefaultArgs;
 
 export type SearchResult = Prisma.ListingGetPayload<typeof searchArgs>;

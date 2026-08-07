@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Heart } from "lucide-react";
 import { auth } from "@/lib/auth";
 import { getSavedListingIds } from "@/lib/wishlist";
-import { getPublishedListingsByIds } from "@/lib/data-access";
+import { getPublishedListingsByIds, toListingCardData } from "@/lib/data-access";
 import { getPlatformSettings } from "@/lib/settings";
 import { getRatingSummaries } from "@/lib/reviews";
 import { ListingCard } from "@/components/listing-card";
@@ -49,7 +49,7 @@ export default async function WishlistsPage() {
           {listings.map((listing) => (
             <ListingCard
               key={listing.id}
-              listing={listing}
+              listing={toListingCardData(listing)}
               platformFeePercent={settings.platformFeePercent}
               rating={ratings.get(listing.id)}
             />

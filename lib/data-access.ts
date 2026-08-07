@@ -22,13 +22,49 @@ const publicListingArgs = {
     amenities: { include: { amenity: true } },
     host: { select: { id: true, name: true, image: true, createdAt: true } },
   },
-  // Confidential exact-location fields must NEVER reach guests. Omitting them
-  // here means the public listing type doesn't even carry them, so no page can
-  // accidentally render flatNumber / block.
-  omit: { flatNumber: true, block: true },
+  // Confidential fields must NEVER reach guests. Omitting them here means the
+  // public listing type doesn't even carry them, so no page/response can leak
+  // exact location (flat/block/address/geo), our internal rent, WiFi creds, or
+  // moderation notes. (iCal fields are kept: the detail page uses them
+  // server-side only, and cards get a minimal projection — see toListingCardData.)
+  omit: {
+    flatNumber: true,
+    block: true,
+    addressLine: true,
+    lat: true,
+    lng: true,
+    monthlyRent: true,
+    wifiName: true,
+    wifiPassword: true,
+    rejectionReason: true,
+  },
 } satisfies Prisma.ListingDefaultArgs;
 
 export type PublicListing = Prisma.ListingGetPayload<typeof publicListingArgs>;
+
+// The ONLY fields the client <ListingCard> renders. Public pages map each row
+// to this before passing it to the (client) card, so confidential columns never
+// enter the serialized RSC/Flight payload embedded in the page HTML.
+export type ListingCardData = {
+  id: string;
+  title: string;
+  basePrice: number;
+  cover: string | null;
+};
+
+export function toListingCardData(l: {
+  id: string;
+  title: string;
+  basePrice: number;
+  images: { url: string }[];
+}): ListingCardData {
+  return {
+    id: l.id,
+    title: l.title,
+    basePrice: l.basePrice,
+    cover: l.images[0]?.url ?? null,
+  };
+}
 
 // Fetch the FULL published set, rank by engagement, and cache the ranked array.
 // Ranking the whole set (not a pre-paged slice) is required so pagination pages

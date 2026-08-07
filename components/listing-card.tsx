@@ -6,7 +6,7 @@ import { computePricing, formatINR } from "@/lib/pricing";
 import { SmartImage } from "@/components/smart-image";
 import { WishlistButton } from "@/components/wishlist-button";
 import { useSearchDates } from "@/components/search-dates-context";
-import type { PublicListing } from "@/lib/data-access";
+import type { ListingCardData } from "@/lib/data-access";
 
 // Listing card. Shows only the cover photo (swiping through all photos happens
 // on the listing detail page). Price is the guest-facing TOTAL per night.
@@ -15,12 +15,12 @@ export function ListingCard({
   platformFeePercent,
   rating,
 }: {
-  listing: PublicListing;
+  listing: ListingCardData;
   platformFeePercent: number;
   rating?: { average: number; count: number };
 }) {
   const { total } = computePricing(listing.basePrice, { platformFeePercent });
-  const cover = listing.images[0]?.url;
+  const cover = listing.cover;
 
   // Carry the dates/guests chosen in the search bar into the listing link.
   const searchDates = useSearchDates();
