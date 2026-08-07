@@ -10,9 +10,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { formatINR } from "@/lib/pricing";
-import { computeStaffPay, monthLabel } from "@/lib/staff";
+import { computeStaffPay, deductionPerFlatDay, monthLabel } from "@/lib/staff";
 
-type StaffRow = { id: string; name: string; phone: string | null; active: boolean; monthlySalary: number | null; allowedLeaves: number | null };
+type StaffRow = { id: string; name: string; phone: string | null; active: boolean; monthlySalary: number | null; allowedLeaves: number | null; numberOfFlats: number | null };
 type ListingRow = { id: string; label: string };
 type Entry = { id: string; staffId: string; staffName: string; month: string; absences: number; allowedLeaves: number; pay: number; note: string | null };
 type SummaryRow = { staffId: string; staffName: string; active: boolean; salary: number; allowed: number; absences: number; pay: number | null; hasEntry: boolean };
@@ -21,18 +21,18 @@ const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
 export function StaffTracker({
   month,
-  deductionPerDay,
   defaultSalary,
   defaultAllowed,
+  defaultFlats,
   listings,
   staff,
   entries,
   summaries,
 }: {
   month: string;
-  deductionPerDay: number;
   defaultSalary: number;
   defaultAllowed: number;
+  defaultFlats: number;
   listings: ListingRow[];
   staff: StaffRow[];
   entries: Entry[];
@@ -57,16 +57,23 @@ export function StaffTracker({
   const [phone, setPhone] = useState("");
   const [salaryRupees, setSalaryRupees] = useState("");
   const [allowedInput, setAllowedInput] = useState(String(defaultAllowed));
+  const [flatsInput, setFlatsInput] = useState(String(defaultFlats));
   const [staffError, setStaffError] = useState("");
   const [staffBusy, setStaffBusy] = useState(false);
   const [updatingStaff, setUpdatingStaff] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const [editSalary, setEditSalary] = useState("");
   const [editAllowed, setEditAllowed] = useState("");
+  const [editFlats, setEditFlats] = useState("");
 
   const selectedStaff = staff.find((p) => p.id === staffId);
   const salary = selectedStaff?.monthlySalary ?? defaultSalary;
   const allowed = selectedStaff?.allowedLeaves ?? defaultAllowed;
+  const flats = selectedStaff?.numberOfFlats ?? defaultFlats;
+  // Per-flat-day deduction derived from the selected staff's salary.
+  const deductionPerDay = deductionPerFlatDay(salary, flats);
+  // Live preview of the deduction while adding a staff member.
+  const addDeduction = deductionPerFlatDay(Number(salaryRupees || defaultSalary / 100) * 100, Number(flatsInput) || defaultFlats);
 
   useEffect(() => {
     if (!staffId || !/^\d{4}-\d{2}$/.test(entryMonth)) return;
@@ -164,6 +171,7 @@ export function StaffTracker({
           phone: phone.trim() || undefined,
           monthlySalaryRupees: salaryRupees ? Number(salaryRupees) : undefined,
           allowedLeaves: allowedInput ? Number(allowedInput) : undefined,
+          numberOfFlats: flatsInput ? Number(flatsInput) : undefined,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -175,6 +183,7 @@ export function StaffTracker({
       setPhone("");
       setSalaryRupees("");
       setAllowedInput(String(defaultAllowed));
+      setFlatsInput(String(defaultFlats));
       router.refresh();
     } finally {
       setStaffBusy(false);
@@ -203,7 +212,7 @@ export function StaffTracker({
   }
 
   async function saveEdit(id: string) {
-    const ok = await patchStaff(id, { monthlySalaryRupees: Number(editSalary) || 0, allowedLeaves: Number(editAllowed) || 0 });
+    const ok = await patchStaff(id, { monthlySalaryRupees: Number(editSalary) || 0, allowedLeaves: Number(editAllowed) || 0, numberOfFlats: Number(editFlats) || 1 });
     if (ok) setEditId(null);
   }
 
@@ -296,7 +305,7 @@ export function StaffTracker({
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/40 p-3 text-sm">
             <span className="text-muted-foreground">
-              Salary {formatINR(salary)} · {totalFlatDays}/{allowed} flat-days absent{extra > 0 ? ` · ${extra} × ${formatINR(deductionPerDay)} docked` : ""}
+              Salary {formatINR(salary)} · {flats} flat{flats > 1 ? "s" : ""} · {formatINR(deductionPerDay)}/flat-day · {totalFlatDays}/{allowed} absent{extra > 0 ? ` · ${extra} × ${formatINR(deductionPerDay)} docked` : ""}
             </span>
             <span className="text-lg font-bold">{formatINR(previewPay)}</span>
           </div>
@@ -342,7 +351,8 @@ export function StaffTracker({
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            Fixed salary per staff · their own allowed flat-day leaves · then {formatINR(deductionPerDay)}/extra flat-day.
+            Fixed salary per staff · their own allowed flat-day leaves · then a per-flat-day dock
+            derived from each staff&apos;s salary (salary ÷ flats ÷ 30).
           </p>
           <ul className="space-y-2">
             {summaries.filter((sm) => sm.active || sm.hasEntry).length === 0 && (
@@ -384,7 +394,7 @@ export function StaffTracker({
           <CardTitle className="text-lg">Manage staff</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <form onSubmit={addStaff} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5 lg:items-end">
+          <form onSubmit={addStaff} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6 lg:items-end">
             <div className="space-y-1">
               <Label htmlFor="staffName">Name</Label>
               <Input id="staffName" value={name} onChange={(e) => setName(e.target.value)} required />
@@ -398,6 +408,10 @@ export function StaffTracker({
               <Input id="staffSalary" type="number" min={0} inputMode="numeric" placeholder={String(Math.round(defaultSalary / 100))} value={salaryRupees} onChange={(e) => setSalaryRupees(e.target.value)} />
             </div>
             <div className="space-y-1">
+              <Label htmlFor="staffFlats">No. of flats</Label>
+              <Input id="staffFlats" type="number" min={1} inputMode="numeric" value={flatsInput} onChange={(e) => setFlatsInput(e.target.value)} />
+            </div>
+            <div className="space-y-1">
               <Label htmlFor="staffAllowed">Allowed leaves</Label>
               <Input id="staffAllowed" type="number" min={0} inputMode="numeric" value={allowedInput} onChange={(e) => setAllowedInput(e.target.value)} />
             </div>
@@ -406,6 +420,10 @@ export function StaffTracker({
               Add staff
             </Button>
           </form>
+          <p className="text-xs text-muted-foreground">
+            Deduction rate is computed from salary ÷ flats ÷ 30 ={" "}
+            <span className="font-medium text-foreground">{formatINR(addDeduction)}</span> per missed flat-day (beyond allowed leaves).
+          </p>
           {staffError && <p className="text-sm text-destructive">{staffError}</p>}
 
           <ul className="divide-y rounded-lg border">
@@ -417,8 +435,13 @@ export function StaffTracker({
                     <div className="mt-1 flex flex-wrap items-center gap-1.5">
                       <span className="text-xs text-muted-foreground">₹</span>
                       <Input type="number" min={0} value={editSalary} onChange={(e) => setEditSalary(e.target.value)} className="h-8 w-24 text-sm" placeholder="salary" autoFocus />
+                      <span className="ml-1 text-xs text-muted-foreground">flats</span>
+                      <Input type="number" min={1} value={editFlats} onChange={(e) => setEditFlats(e.target.value)} className="h-8 w-14 text-sm" placeholder="3" />
                       <span className="ml-1 text-xs text-muted-foreground">leaves</span>
-                      <Input type="number" min={0} value={editAllowed} onChange={(e) => setEditAllowed(e.target.value)} className="h-8 w-16 text-sm" placeholder="12" />
+                      <Input type="number" min={0} value={editAllowed} onChange={(e) => setEditAllowed(e.target.value)} className="h-8 w-14 text-sm" placeholder="12" />
+                      <span className="text-xs text-muted-foreground">
+                        → {formatINR(deductionPerFlatDay((Number(editSalary) || 0) * 100, Number(editFlats) || 1))}/flat-day
+                      </span>
                       <button type="button" aria-label="Save" onClick={() => saveEdit(person.id)} disabled={updatingStaff === person.id} className="text-green-700 disabled:opacity-40">
                         {updatingStaff === person.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                       </button>
@@ -429,10 +452,10 @@ export function StaffTracker({
                       {person.phone || "No phone"} · {person.active ? "Active" : "Inactive"} ·{" "}
                       <button
                         type="button"
-                        onClick={() => { setEditId(person.id); setEditSalary(String(Math.round((person.monthlySalary ?? defaultSalary) / 100))); setEditAllowed(String(person.allowedLeaves ?? defaultAllowed)); }}
+                        onClick={() => { setEditId(person.id); setEditSalary(String(Math.round((person.monthlySalary ?? defaultSalary) / 100))); setEditAllowed(String(person.allowedLeaves ?? defaultAllowed)); setEditFlats(String(person.numberOfFlats ?? defaultFlats)); }}
                         className="inline-flex items-center gap-1 underline-offset-2 hover:underline"
                       >
-                        {formatINR(person.monthlySalary ?? defaultSalary)} · {person.allowedLeaves ?? defaultAllowed} leaves<Pencil className="h-3 w-3" />
+                        {formatINR(person.monthlySalary ?? defaultSalary)} · {person.numberOfFlats ?? defaultFlats} flats · {person.allowedLeaves ?? defaultAllowed} leaves<Pencil className="h-3 w-3" />
                       </button>
                     </p>
                   )}

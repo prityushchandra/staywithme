@@ -52,6 +52,7 @@ export function DateRangePicker({
   align = "left",
   blockedRanges = [],
   allowBlocked = false,
+  allowPast = false,
   open: openProp,
   onOpenChange,
 }: {
@@ -70,6 +71,9 @@ export function DateRangePicker({
    * and override them. Guests never get this.
    */
   allowBlocked?: boolean;
+  /** Admin mode: allow selecting past dates (e.g. recording a stay that already
+   * happened). Guests never get this. */
+  allowPast?: boolean;
   /** Controlled open state (optional). */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -112,11 +116,11 @@ export function DateRangePicker({
   // night can't be picked (you can't check IN on an occupied night).
   function dayStatus(day: Date): { disabled: boolean; checkoutOnly: boolean } {
     const t = day.getTime();
-    const isPast = t < today.getTime();
+    const isPast = !allowPast && t < today.getTime();
     const choosingCheckout = !!start && !end;
 
     // Admin override mode: blocked dates stay selectable (the server will prompt
-    // to confirm the override). Only the past is unpickable.
+    // to confirm the override). Only the past is unpickable (unless allowPast).
     if (allowBlocked) {
       return { disabled: isPast, checkoutOnly: false };
     }
@@ -410,7 +414,7 @@ function Month({
                   blockedNight && !disabled && !isEndpoint && "text-amber-600 line-through decoration-amber-500/70",
                   // Booked night that's still valid as a checkout (same-day turnover).
                   checkoutOnly && !isEndpoint && "text-foreground underline decoration-dotted underline-offset-4",
-                  isPast && !blockedNight && "cursor-default text-muted-foreground/30"
+                  isPast && disabled && !blockedNight && "cursor-default text-muted-foreground/30"
                 )}
               >
                 {day.getDate()}

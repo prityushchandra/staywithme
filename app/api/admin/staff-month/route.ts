@@ -3,7 +3,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getPlatformSettings } from "@/lib/settings";
-import { computeStaffPay, allowedLeaves } from "@/lib/staff";
+import { computeStaffPay, allowedLeaves, deductionPerFlatDay } from "@/lib/staff";
 import { syncStaffPayroll } from "@/lib/google-sheets";
 
 async function requireAdmin() {
@@ -55,13 +55,14 @@ export async function POST(req: Request) {
   const { staffId, month, note } = parsed.data;
 
   const [staff, settings, listings] = await Promise.all([
-    prisma.staff.findUnique({ where: { id: staffId }, select: { name: true, monthlySalary: true, allowedLeaves: true } }),
+    prisma.staff.findUnique({ where: { id: staffId }, select: { name: true, monthlySalary: true, allowedLeaves: true, numberOfFlats: true } }),
     getPlatformSettings(),
     prisma.listing.findMany({ select: { id: true } }),
   ]);
   if (!staff) return NextResponse.json({ error: "Staff not found" }, { status: 404 });
 
-  // Keep only valid, de-duplicated listing IDs per valid day; drop empty days.
+  // Clean counts, compute pay from the staff's own salary, allowed leaves, and a
+  // per-flat-day deduction DERIVED from their salary ÷ (flats × 30).
   const validIds = new Set(listings.map((l) => l.id));
   const absentByDay: Record<string, string[]> = {};
   let absences = 0;
@@ -78,7 +79,8 @@ export async function POST(req: Request) {
 
   const monthlySalary = staff.monthlySalary ?? settings.staffMonthlySalary;
   const allowed = staff.allowedLeaves ?? allowedLeaves(settings.staffMonthlyHolidays, settings.staffFlatsPerStaff);
-  const deductionPerDay = settings.staffDailyRate;
+  const numberOfFlats = staff.numberOfFlats ?? settings.staffFlatsPerStaff;
+  const deductionPerDay = deductionPerFlatDay(monthlySalary, numberOfFlats);
   const pay = computeStaffPay(monthlySalary, allowed, deductionPerDay, absences);
 
   const row = await prisma.staffMonth.upsert({

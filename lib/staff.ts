@@ -22,6 +22,17 @@ export function allowedLeaves(leavesPerFlat: number, flatsPerStaff: number): num
   return Math.max(0, Math.round(leavesPerFlat) * Math.round(flatsPerStaff));
 }
 
+/**
+ * Per-flat-day deduction rate DERIVED from the staff's salary: one flat-day of
+ * cleaning is worth salary ÷ (numberOfFlats × 30). Missing a flat-day beyond the
+ * allowed leaves docks this amount. Using 30 keeps it stable across 30/31-day
+ * months, matching the fixed-salary principle. Paise in, paise out.
+ */
+export function deductionPerFlatDay(monthlySalary: number, numberOfFlats: number): number {
+  const flats = Math.max(1, Math.round(numberOfFlats));
+  return Math.max(0, Math.round(monthlySalary / (flats * 30)));
+}
+
 /** Current month as "YYYY-MM" (UTC). */
 export function currentMonth(): string {
   const d = new Date();

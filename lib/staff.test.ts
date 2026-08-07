@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeStaffPay, allowedLeaves } from "./staff";
+import { computeStaffPay, allowedLeaves, deductionPerFlatDay } from "./staff";
 
 // ₹3,000 salary, 4 free holidays, ₹100/day deduction (all in paise).
 const SALARY = 300000;
@@ -49,5 +49,23 @@ describe("allowedLeaves", () => {
     const allowed = allowedLeaves(4, 3); // 12
     expect(computeStaffPay(900000, allowed, 10000, 12)).toBe(900000); // within allowance
     expect(computeStaffPay(900000, allowed, 10000, 15)).toBe(870000); // 3 extra × ₹100
+  });
+});
+
+describe("deductionPerFlatDay", () => {
+  it("derives per-flat-day rate = salary ÷ (flats × 30)", () => {
+    expect(deductionPerFlatDay(900000, 3)).toBe(10000); // ₹9,000 / (3×30) = ₹100
+    expect(deductionPerFlatDay(600000, 2)).toBe(10000); // ₹6,000 / (2×30) = ₹100
+    expect(deductionPerFlatDay(300000, 1)).toBe(10000); // ₹3,000 / 30 = ₹100
+  });
+
+  it("treats flats < 1 as 1 and never goes negative", () => {
+    expect(deductionPerFlatDay(300000, 0)).toBe(10000);
+    expect(deductionPerFlatDay(0, 3)).toBe(0);
+  });
+
+  it("rounds to the nearest paise", () => {
+    // 1000000 / (3×30) = 11111.11 → 11111
+    expect(deductionPerFlatDay(1000000, 3)).toBe(11111);
   });
 });

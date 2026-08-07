@@ -165,6 +165,7 @@ export function OfflineBookingEdit({ booking }: { booking: OfflineBookingEditDat
             checkOut={form.checkOut}
             blockedRanges={blockedRanges}
             allowBlocked
+            allowPast
             onChange={(checkIn, checkOut) => { setForm((c) => ({ ...c, checkIn, checkOut })); setConflicts(null); }}
           />
         </div>

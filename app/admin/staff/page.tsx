@@ -48,9 +48,10 @@ export default async function AdminStaffPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Staff</h1>
         <p className="text-muted-foreground">
-          Cleaning pay for {monthLabel(month)}. Each staff member has a fixed salary and their own
-          allowed leaves (in flat-days). Tap a day to pick which flats they missed; absences beyond
-          the allowance are docked {formatINR(settings.staffDailyRate)}/flat-day.
+          Cleaning pay for {monthLabel(month)}. Each staff member has a fixed salary, their own
+          allowed leaves (in flat-days), and a number of flats. Tap a day to pick which flats they
+          missed; absences beyond the allowance are docked at a per-flat-day rate derived from their
+          salary (salary ÷ flats ÷ 30).
         </p>
       </div>
 
@@ -71,9 +72,9 @@ export default async function AdminStaffPage() {
 
       <StaffTracker
         month={month}
-        deductionPerDay={settings.staffDailyRate}
         defaultSalary={settings.staffMonthlySalary}
         defaultAllowed={defaultAllowed}
+        defaultFlats={settings.staffFlatsPerStaff}
         listings={listings.map((l) => ({ id: l.id, label: flatLabel(l) }))}
         staff={staff.map((p) => ({
           id: p.id,
@@ -82,6 +83,7 @@ export default async function AdminStaffPage() {
           active: p.active,
           monthlySalary: p.monthlySalary,
           allowedLeaves: p.allowedLeaves,
+          numberOfFlats: p.numberOfFlats,
         }))}
         entries={entries.map((r) => ({
           id: r.id,

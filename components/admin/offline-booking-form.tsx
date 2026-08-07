@@ -167,6 +167,7 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
               checkOut={form.checkOut}
               blockedRanges={blockedRanges}
               allowBlocked
+              allowPast
               onChange={(checkIn, checkOut) => {
                 setForm((c) => ({ ...c, checkIn, checkOut }));
                 setConflicts(null);
@@ -174,7 +175,8 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
             />
             <p className="text-xs text-muted-foreground">
               Available dates book straight away. Already-booked dates show struck-through in
-              amber — you can still pick them and you&apos;ll be asked to confirm an override.
+              amber — you can still pick them and you&apos;ll be asked to confirm an override. Past
+              dates are allowed too (for recording a stay that already happened).
             </p>
           </div>
           <div className="space-y-2">

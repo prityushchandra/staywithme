@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getPlatformSettings } from "@/lib/settings";
-import { allowedLeaves, computeStaffPay, monthLabel } from "@/lib/staff";
+import { allowedLeaves, computeStaffPay, deductionPerFlatDay, monthLabel } from "@/lib/staff";
 import { StaffReceiptPdf } from "@/lib/pdf/staff-receipt";
 
 export const runtime = "nodejs";
@@ -33,7 +33,7 @@ export async function GET(req: Request) {
   }
 
   const [staff, entry, settings, listings] = await Promise.all([
-    prisma.staff.findUnique({ where: { id: staffId }, select: { name: true, phone: true, monthlySalary: true, allowedLeaves: true } }),
+    prisma.staff.findUnique({ where: { id: staffId }, select: { name: true, phone: true, monthlySalary: true, allowedLeaves: true, numberOfFlats: true } }),
     prisma.staffMonth.findUnique({ where: { staffId_month: { staffId, month } } }),
     getPlatformSettings(),
     prisma.listing.findMany({ select: { id: true, title: true, flatNumber: true, block: true } }),
@@ -42,7 +42,7 @@ export async function GET(req: Request) {
 
   const monthlySalary = entry?.monthlySalary ?? staff.monthlySalary ?? settings.staffMonthlySalary;
   const allowed = entry?.allowedLeaves ?? staff.allowedLeaves ?? allowedLeaves(settings.staffMonthlyHolidays, settings.staffFlatsPerStaff);
-  const deductionPerDay = entry?.deductionPerDay ?? settings.staffDailyRate;
+  const deductionPerDay = entry?.deductionPerDay ?? deductionPerFlatDay(monthlySalary, staff.numberOfFlats ?? settings.staffFlatsPerStaff);
   const absentByDay = (entry?.absentByDay as Record<string, string[]> | undefined) ?? {};
   const absences = entry?.absences ?? 0;
   const pay = entry?.pay ?? computeStaffPay(monthlySalary, allowed, deductionPerDay, absences);

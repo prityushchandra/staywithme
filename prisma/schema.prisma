@@ -520,6 +520,9 @@ model Staff {
   // Allowed monthly leaves in FLAT-DAYS, admin-entered per staff. Null → the
   // platform default (leaves-per-flat × flats-per-staff).
   allowedLeaves Int?
+  // How many flats this staff cleans. Used to DERIVE the per-flat-day deduction
+  // rate (= monthlySalary ÷ (numberOfFlats × 30)). Null → platform default.
+  numberOfFlats Int?
   createdAt  DateTime          @default(now())
 
   payroll    StaffPayroll[]
