@@ -1,18 +1,25 @@
 import { prisma } from "@/lib/db";
-import { getPnlData } from "@/lib/pnl";
-import { EarningsPanel } from "@/components/admin/earnings-panel";
+import { AirbnbEarnings } from "@/components/admin/airbnb-earnings";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Admin · Earnings" };
+export const metadata = { title: "Admin · Airbnb earnings" };
 
 function flatLabel(l: { title: string; flatNumber: string | null; block: string | null }) {
   const base = l.flatNumber?.trim() || l.title;
   return l.block?.trim() ? `${base}, ${l.block.trim()}` : base;
 }
 
-export default async function AdminEarningsPage() {
-  const [pnl, online] = await Promise.all([
-    getPnlData(),
+function currentMonth(): string {
+  const d = new Date();
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+export default async function AdminAirbnbEarningsPage() {
+  const [listings, online] = await Promise.all([
+    prisma.listing.findMany({
+      select: { id: true, title: true, flatNumber: true, block: true },
+      orderBy: { title: "asc" },
+    }),
     prisma.onlineEarning.findMany({
       include: { listing: { select: { title: true, flatNumber: true, block: true } } },
       orderBy: [{ month: "desc" }, { updatedAt: "desc" }],
@@ -20,17 +27,11 @@ export default async function AdminEarningsPage() {
     }),
   ]);
 
-  const rows = pnl.rows.map((r) => ({
-    listingId: r.listingId,
-    label: r.label,
-    month: r.month,
-    year: r.year,
-    revenueOnline: r.revenueOnline,
-    revenueOffline: r.revenueOffline,
-    revenueDirect: r.revenueDirect,
-  }));
+  const flats = listings
+    .map((l) => ({ id: l.id, label: flatLabel(l) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 
-  const onlineEarnings = online.map((e) => ({
+  const entries = online.map((e) => ({
     id: e.id,
     listingId: e.listingId,
     label: flatLabel(e.listing),
@@ -38,14 +39,5 @@ export default async function AdminEarningsPage() {
     amount: e.amount,
   }));
 
-  return (
-    <EarningsPanel
-      rows={rows}
-      flats={pnl.flats}
-      years={pnl.years}
-      months={pnl.months}
-      currentMonth={pnl.currentMonth}
-      onlineEarnings={onlineEarnings}
-    />
-  );
+  return <AirbnbEarnings flats={flats} entries={entries} defaultMonth={currentMonth()} />;
 }

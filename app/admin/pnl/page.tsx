@@ -9,7 +9,6 @@ export default async function AdminPnlPage() {
   return (
     <PnlDashboard
       rows={pnl.rows}
-      years={pnl.years}
       months={pnl.months}
       currentMonth={pnl.currentMonth}
     />

@@ -24,6 +24,10 @@ export interface PnlListingMonth {
   revenueOnline: number;
   rent: number;
   staff: number;
+  // Vacant days in this month for this flat (no booking/block on the calendar),
+  // counted only for days that have already elapsed (up to yesterday) and from
+  // the flat's creation onward. We track the COUNT only, never a lost-amount.
+  unbookedDays: number;
 }
 
 export interface PnlData {
@@ -58,9 +62,41 @@ function flatLabel(l: { title: string; flatNumber: string | null; block: string 
   return l.block?.trim() ? `${base}, ${l.block.trim()}` : base;
 }
 
+const DAY_MS = 86_400_000;
+function floorDayUtc(d: Date): number {
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+/**
+ * Count vacant (unbooked) days for one flat in one month: days with NO
+ * AvailabilityBlock covering them. Only fully-elapsed days are counted (strictly
+ * before today) and never before the flat existed, so future/empty months and
+ * pre-launch days don't inflate the number.
+ */
+function countUnbookedDays(
+  monthKeyStr: string,
+  blocks: { startDate: Date; endDate: Date }[],
+  flatCreatedMs: number,
+  todayMs: number
+): number {
+  const [y, m] = monthKeyStr.split("-").map(Number);
+  const monthStart = Date.UTC(y, m - 1, 1);
+  const monthEndExclusive = Date.UTC(y, m, 1);
+  const startMs = Math.max(monthStart, flatCreatedMs);
+  const endMs = Math.min(monthEndExclusive, todayMs); // today excluded (in progress)
+  if (endMs <= startMs) return 0;
+
+  let count = 0;
+  for (let t = startMs; t < endMs; t += DAY_MS) {
+    const booked = blocks.some((b) => b.startDate.getTime() <= t && t < b.endDate.getTime());
+    if (!booked) count++;
+  }
+  return count;
+}
+
 export async function getPnlData(): Promise<PnlData> {
   return memo("admin-pnl", 30_000, async () => {
-    const [listings, directBookings, offlineBookings, onlineEarnings, staffPayroll] =
+    const [listings, directBookings, offlineBookings, onlineEarnings, staffPayroll, allBlocks] =
       await Promise.all([
         prisma.listing.findMany({
           select: { id: true, title: true, flatNumber: true, block: true, monthlyRent: true, createdAt: true },
@@ -75,14 +111,23 @@ export async function getPnlData(): Promise<PnlData> {
         }),
         prisma.onlineEarning.findMany({ select: { listingId: true, month: true, amount: true } }),
         prisma.staffPayroll.findMany({ select: { listingId: true, month: true, pay: true } }),
+        prisma.availabilityBlock.findMany({ select: { listingId: true, startDate: true, endDate: true } }),
       ]);
 
     const listingMeta = new Map(
       listings.map((l) => [
         l.id,
-        { label: flatLabel(l), monthlyRent: l.monthlyRent ?? 0, createdMonth: monthKey(l.createdAt) },
+        { label: flatLabel(l), monthlyRent: l.monthlyRent ?? 0, createdAt: l.createdAt },
       ])
     );
+
+    // Group availability blocks by flat for the unbooked-day scan.
+    const blocksByListing = new Map<string, { startDate: Date; endDate: Date }[]>();
+    for (const b of allBlocks) {
+      const list = blocksByListing.get(b.listingId);
+      if (list) list.push({ startDate: b.startDate, endDate: b.endDate });
+      else blocksByListing.set(b.listingId, [{ startDate: b.startDate, endDate: b.endDate }]);
+    }
 
     const now = new Date();
     const currentMonth = monthKey(now);
@@ -121,6 +166,7 @@ export async function getPnlData(): Promise<PnlData> {
           revenueOnline: 0,
           rent: 0,
           staff: 0,
+          unbookedDays: 0,
         };
         grid.set(k, c);
       }
@@ -153,6 +199,20 @@ export async function getPnlData(): Promise<PnlData> {
       const startIdx = Math.max(minIdx, ymToIndex(monthKey(l.createdAt)));
       for (let i = startIdx; i <= Math.min(maxIdx, currentIdx); i++) {
         cell(l.id, indexToYm(i)).rent += rent;
+      }
+    }
+
+    // Unbooked (vacant) days per flat per month — over every flat×month in the
+    // occupancy window (from the flat's first month to the current month), so the
+    // metric appears even for months with no revenue or rent.
+    const todayMs = floorDayUtc(now);
+    for (const l of listings) {
+      const flatBlocks = blocksByListing.get(l.id) ?? [];
+      const flatCreatedMs = floorDayUtc(l.createdAt);
+      const startIdx = Math.max(minIdx, ymToIndex(monthKey(l.createdAt)));
+      for (let i = startIdx; i <= Math.min(maxIdx, currentIdx); i++) {
+        const m = indexToYm(i);
+        cell(l.id, m).unbookedDays = countUnbookedDays(m, flatBlocks, flatCreatedMs, todayMs);
       }
     }
 

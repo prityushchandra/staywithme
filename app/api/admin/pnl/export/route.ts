@@ -1,10 +1,27 @@
 import { auth } from "@/lib/auth";
 import { getPnlData } from "@/lib/pnl";
-import { filterScope, monthlyBreakdown, perFlatBreakdown, summarize } from "@/lib/pnl-compute";
+import {
+  monthlyBreakdown,
+  perFlatBreakdown,
+  summarize,
+  scopeSummary,
+  sourceRevenue,
+  filterFinancialYear,
+  financialYearLabel,
+  financialYearsFromMonths,
+  monthsOfFinancialYear,
+  type PnlSource,
+} from "@/lib/pnl-compute";
 import { buildXlsx, type XlsxValue } from "@/lib/xlsx";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const SOURCE_LABEL: Record<PnlSource, string> = {
+  both: "Online + offline",
+  online: "Online (Airbnb)",
+  offline: "Offline (direct)",
+};
 
 function rupees(paise: number): number {
   return Math.round(paise) / 100;
@@ -12,7 +29,7 @@ function rupees(paise: number): number {
 function pct(n: number): string {
   return `${n.toFixed(1)}%`;
 }
-function monthLabel(monthKey: string): string {
+function monthLabelLong(monthKey: string): string {
   const [y, m] = monthKey.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
 }
@@ -29,105 +46,96 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const data = await getPnlData();
 
-  const yearParam = Number(url.searchParams.get("year"));
-  const year = data.years.includes(yearParam) ? yearParam : data.years[data.years.length - 1] ?? new Date().getUTCFullYear();
+  const fyList = financialYearsFromMonths(data.months);
+  const fyParam = Number(url.searchParams.get("fy"));
+  const fy = fyList.includes(fyParam) ? fyParam : fyList[fyList.length - 1] ?? new Date().getUTCFullYear();
+
   const monthParam = url.searchParams.get("month") || "";
-  const month = /^\d{4}-\d{2}$/.test(monthParam) && monthParam.startsWith(String(year)) ? monthParam : "";
+  const fyMonths = monthsOfFinancialYear(fy);
+  const month = /^\d{4}-\d{2}$/.test(monthParam) && fyMonths.includes(monthParam) ? monthParam : "";
 
-  const scopeLabel = month ? monthLabel(month) : `Year ${year}`;
-  const monthsInScope = data.months.filter((m) => Number(m.slice(0, 4)) === year && (!month || m === month));
+  const sourceParam = url.searchParams.get("source") as PnlSource | null;
+  const source: PnlSource = sourceParam === "online" || sourceParam === "offline" ? sourceParam : "both";
 
-  const scopedRows = filterScope(data.rows, year, month || undefined);
+  const fyLabel = financialYearLabel(fy);
+  const scopeLabel = month ? monthLabelLong(month) : fyLabel;
+  const monthsInScope = fyMonths.filter((m) => m <= data.currentMonth && (!month || m === month));
+
+  const scopedRows = filterFinancialYear(data.rows, fy, month || undefined);
   const total = summarize(scopedRows);
+  const scopedTotal = scopeSummary(total, source);
   const monthly = monthlyBreakdown(scopedRows, monthsInScope);
   const perFlat = perFlatBreakdown(scopedRows);
 
   // --- Summary sheet ---
   const summaryRows: XlsxValue[][] = [
     [`StayWithMe — Profit & Loss (${scopeLabel})`],
+    [`Channel: ${SOURCE_LABEL[source]}`],
     [],
     ["Metric", "Amount"],
-    ["Online revenue (Airbnb etc.)", rupees(total.revenueOnline)],
-    ["Offline / walk-in revenue", rupees(total.revenueOffline)],
-    ["Direct (WhatsApp) revenue", rupees(total.revenueDirect)],
-    ["Total revenue", rupees(total.revenueTotal)],
+  ];
+  if (source !== "offline") summaryRows.push(["Online (Airbnb)", rupees(total.revenueOnline)]);
+  if (source !== "online") {
+    summaryRows.push(["Offline / walk-in", rupees(total.revenueOffline)]);
+    summaryRows.push(["Direct (WhatsApp)", rupees(total.revenueDirect)]);
+  }
+  summaryRows.push(
+    ["Total revenue", rupees(scopedTotal.revenue)],
     ["Rent", rupees(total.rent)],
     ["Staff salaries", rupees(total.staff)],
     ["Total expenses", rupees(total.expenseTotal)],
-    ["Net profit", rupees(total.profit)],
-    ["Net margin", pct(total.margin)],
-  ];
+    ["Net profit", rupees(scopedTotal.profit)],
+    ["Net margin", pct(scopedTotal.margin)],
+    ["Unbooked (vacant) days", total.unbookedDays]
+  );
 
   // --- Monthly sheet ---
-  const monthlyHeader = [
-    "Month",
-    "Online",
-    "Offline",
-    "Direct",
-    "Total revenue",
-    "Rent",
-    "Staff",
-    "Total expenses",
-    "Net profit",
-    "Margin",
-  ];
-  const monthlyBody: XlsxValue[][] = monthly.map((m) => [
-    m.label,
-    rupees(m.revenueOnline),
-    rupees(m.revenueOffline),
-    rupees(m.revenueDirect),
-    rupees(m.revenueTotal),
-    rupees(m.rent),
-    rupees(m.staff),
-    rupees(m.expenseTotal),
-    rupees(m.profit),
-    pct(m.margin),
-  ]);
+  const monthlyHeader = ["Month", "Revenue", "Rent", "Staff", "Total expenses", "Net profit", "Margin", "Unbooked days"];
+  const monthlyBody: XlsxValue[][] = monthly.map((m) => {
+    const rev = sourceRevenue(m, source);
+    const profit = rev - m.expenseTotal;
+    const margin = rev > 0 ? (profit / rev) * 100 : 0;
+    return [m.label, rupees(rev), rupees(m.rent), rupees(m.staff), rupees(m.expenseTotal), rupees(profit), pct(margin), m.unbookedDays];
+  });
   const monthlyTotal: XlsxValue[] = [
     "Total",
-    rupees(total.revenueOnline),
-    rupees(total.revenueOffline),
-    rupees(total.revenueDirect),
-    rupees(total.revenueTotal),
+    rupees(scopedTotal.revenue),
     rupees(total.rent),
     rupees(total.staff),
     rupees(total.expenseTotal),
-    rupees(total.profit),
-    pct(total.margin),
+    rupees(scopedTotal.profit),
+    pct(scopedTotal.margin),
+    total.unbookedDays,
   ];
-  const moneyCols = [1, 2, 3, 4, 5, 6, 7, 8];
 
   // --- By-flat sheet ---
-  const flatHeader = ["Flat", "Total revenue", "Rent", "Staff", "Total expenses", "Net profit", "Margin"];
-  const flatBody: XlsxValue[][] = perFlat.map((f) => [
-    f.label,
-    rupees(f.revenueTotal),
-    rupees(f.rent),
-    rupees(f.staff),
-    rupees(f.expenseTotal),
-    rupees(f.profit),
-    pct(f.margin),
-  ]);
+  const flatHeader = ["Flat", "Revenue", "Rent", "Staff", "Total expenses", "Net profit", "Margin", "Unbooked days"];
+  const flatBody: XlsxValue[][] = perFlat.map((f) => {
+    const rev = sourceRevenue(f, source);
+    const profit = rev - f.expenseTotal;
+    const margin = rev > 0 ? (profit / rev) * 100 : 0;
+    return [f.label, rupees(rev), rupees(f.rent), rupees(f.staff), rupees(f.expenseTotal), rupees(profit), pct(margin), f.unbookedDays];
+  });
 
   const xlsx = buildXlsx([
-    { name: "Summary", rows: summaryRows, headerRow: false, moneyColumns: [1], colWidths: [32, 16] },
+    { name: "Summary", rows: summaryRows, headerRow: false, moneyColumns: [1], colWidths: [30, 16] },
     {
       name: "Monthly",
       rows: [monthlyHeader, ...monthlyBody, monthlyTotal],
       headerRow: true,
-      moneyColumns: moneyCols,
-      colWidths: [16, 12, 12, 12, 15, 12, 12, 15, 13, 9],
+      moneyColumns: [1, 2, 3, 4, 5],
+      colWidths: [16, 15, 12, 12, 15, 13, 9, 14],
     },
     {
       name: "By flat",
       rows: [flatHeader, ...flatBody],
       headerRow: true,
       moneyColumns: [1, 2, 3, 4, 5],
-      colWidths: [26, 15, 12, 12, 15, 13, 9],
+      colWidths: [26, 15, 12, 12, 15, 13, 9, 14],
     },
   ]);
 
-  const filename = `StayWithMe-P&L-${month || year}.xlsx`;
+  const filename = `StayWithMe-PnL-FY${fy}-${fy + 1}${month ? `-${month}` : ""}-${source}.xlsx`;
   return new Response(new Uint8Array(xlsx), {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

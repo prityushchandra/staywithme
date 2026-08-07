@@ -18,11 +18,18 @@ import {
 import { Download } from "lucide-react";
 import { formatINR } from "@/lib/pricing";
 import {
-  filterScope,
   monthlyBreakdown,
   perFlatBreakdown,
   summarize,
+  scopeSummary,
+  sourceRevenue,
+  filterFinancialYear,
+  financialYearsFromMonths,
+  financialYearLabel,
+  financialYearStart,
+  monthsOfFinancialYear,
   type PnlSummary,
+  type PnlSource,
 } from "@/lib/pnl-compute";
 import type { PnlListingMonth } from "@/lib/pnl";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -41,53 +48,76 @@ function monthLabel(monthKey: string): string {
   return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
 }
 
+const SOURCE_LABEL: Record<PnlSource, string> = {
+  both: "Online + offline",
+  online: "Online (Airbnb)",
+  offline: "Offline (direct)",
+};
+
 export function PnlDashboard({
   rows,
-  years,
   months,
   currentMonth,
 }: {
   rows: PnlListingMonth[];
-  years: number[];
   months: string[];
   currentMonth: string;
 }) {
-  const defaultYear = years.length ? years[years.length - 1] : new Date().getUTCFullYear();
-  const [year, setYear] = useState<number>(defaultYear);
+  const fyStarts = useMemo(() => {
+    const list = financialYearsFromMonths(months);
+    return list.length ? list : [financialYearStart(currentMonth)];
+  }, [months, currentMonth]);
+
+  const [fy, setFy] = useState<number>(fyStarts[fyStarts.length - 1]);
   const [month, setMonth] = useState<string>("all");
+  const [source, setSource] = useState<PnlSource>("both");
 
-  const monthsOfYear = useMemo(() => months.filter((m) => Number(m.slice(0, 4)) === year), [months, year]);
+  // The 12 FY months (Apr…Mar); the month picker only offers elapsed ones.
+  const fyMonths = useMemo(() => monthsOfFinancialYear(fy), [fy]);
+  const selectableMonths = useMemo(
+    () => fyMonths.filter((m) => m <= currentMonth),
+    [fyMonths, currentMonth]
+  );
 
-  // KPIs / tables / pie honour the (year, month) scope.
+  // Scope: whole FY or a single month within it.
   const scopedRows = useMemo(
-    () => filterScope(rows, year, month === "all" ? undefined : month),
-    [rows, year, month]
+    () => filterFinancialYear(rows, fy, month === "all" ? undefined : month),
+    [rows, fy, month]
   );
   const total: PnlSummary = useMemo(() => summarize(scopedRows), [scopedRows]);
+  const scoped = useMemo(() => scopeSummary(total, source), [total, source]);
 
-  // The trend chart always shows the whole selected year for context.
-  const yearRows = useMemo(() => filterScope(rows, year), [rows, year]);
-  const yearTotal: PnlSummary = useMemo(() => summarize(yearRows), [yearRows]);
-  const monthly = useMemo(() => monthlyBreakdown(yearRows, monthsOfYear), [yearRows, monthsOfYear]);
+  // Trend chart spans the whole FY for context.
+  const fyRows = useMemo(() => filterFinancialYear(rows, fy), [rows, fy]);
+  const monthly = useMemo(() => monthlyBreakdown(fyRows, fyMonths), [fyRows, fyMonths]);
   const perFlat = useMemo(() => perFlatBreakdown(scopedRows), [scopedRows]);
 
-  const chartData = monthly.map((m) => ({
-    label: m.label,
-    Revenue: toRupees(m.revenueTotal),
-    Expenses: toRupees(m.expenseTotal),
-    Profit: toRupees(m.profit),
-  }));
+  const chartData = monthly.map((m) => {
+    const revenue = toRupees(sourceRevenue(m, source));
+    const expenses = toRupees(m.expenseTotal);
+    return { label: m.label.replace(/ \d{4}$/, ""), Revenue: revenue, Expenses: expenses, Profit: revenue - expenses };
+  });
   const hasChart = chartData.some((d) => d.Revenue > 0 || d.Expenses > 0);
+
+  const mix = useMemo(() => {
+    const out: { name: string; value: number }[] = [];
+    if (source !== "offline") out.push({ name: "Online (Airbnb)", value: total.revenueOnline });
+    if (source !== "online") {
+      out.push({ name: "Offline / walk-in", value: total.revenueOffline });
+      out.push({ name: "Direct (WhatsApp)", value: total.revenueDirect });
+    }
+    return out;
+  }, [total, source]);
 
   const expensePie = [
     { name: "Rent", value: toRupees(total.rent) },
     { name: "Staff", value: toRupees(total.staff) },
   ].filter((d) => d.value > 0);
 
-  const scopeLabel = month === "all" ? String(year) : monthLabel(month);
-  const exportHref = `/api/admin/pnl/export?year=${year}${month === "all" ? "" : `&month=${month}`}`;
-
-  const profitColor = total.profit >= 0 ? "text-green-700" : "text-destructive";
+  const fyLabel = financialYearLabel(fy);
+  const scopeLabel = month === "all" ? fyLabel : monthLabel(month);
+  const exportHref = `/api/admin/pnl/export?fy=${fy}&source=${source}${month === "all" ? "" : `&month=${month}`}`;
+  const profitColor = scoped.profit >= 0 ? "text-green-700" : "text-destructive";
 
   return (
     <div className="space-y-8">
@@ -95,15 +125,23 @@ export function PnlDashboard({
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Profit &amp; Loss</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Revenue (online + offline + direct) minus rent &amp; staff costs — {scopeLabel}.
+            {SOURCE_LABEL[source]} revenue minus rent &amp; staff costs — {scopeLabel}.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={String(year)} onValueChange={(v) => { setYear(Number(v)); setMonth("all"); }}>
-            <SelectTrigger className="h-9 w-[110px]"><SelectValue /></SelectTrigger>
+          <Select value={source} onValueChange={(v) => setSource(v as PnlSource)}>
+            <SelectTrigger className="h-9 w-[170px]"><SelectValue /></SelectTrigger>
             <SelectContent>
-              {years.map((y) => (
-                <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+              <SelectItem value="both">Online + offline</SelectItem>
+              <SelectItem value="online">Online (Airbnb)</SelectItem>
+              <SelectItem value="offline">Offline (direct)</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={String(fy)} onValueChange={(v) => { setFy(Number(v)); setMonth("all"); }}>
+            <SelectTrigger className="h-9 w-[140px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {fyStarts.map((y) => (
+                <SelectItem key={y} value={String(y)}>{financialYearLabel(y)}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -111,7 +149,7 @@ export function PnlDashboard({
             <SelectTrigger className="h-9 w-[150px]"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Whole year</SelectItem>
-              {monthsOfYear.map((m) => (
+              {selectableMonths.map((m) => (
                 <SelectItem key={m} value={m}>{monthLabel(m)}</SelectItem>
               ))}
             </SelectContent>
@@ -127,15 +165,15 @@ export function PnlDashboard({
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-        <Kpi label="Total revenue" value={formatINR(total.revenueTotal)} sub={`${scopeLabel}`} />
+        <Kpi label="Total revenue" value={formatINR(scoped.revenue)} sub={SOURCE_LABEL[source]} />
         <Kpi label="Total expenses" value={formatINR(total.expenseTotal)} sub="rent + staff" />
-        <Kpi label="Net profit" value={formatINR(total.profit)} sub={`${total.margin.toFixed(1)}% margin`} valueClass={profitColor} />
-        <Kpi label="Net margin" value={`${total.margin.toFixed(1)}%`} sub="profit ÷ revenue" valueClass={profitColor} />
+        <Kpi label="Net profit" value={formatINR(scoped.profit)} sub={`${scoped.margin.toFixed(1)}% margin`} valueClass={profitColor} />
+        <Kpi label="Unbooked days" value={String(total.unbookedDays)} sub="vacant days (elapsed)" />
       </div>
 
       {/* Revenue vs expenses trend + profit line */}
       <div className="rounded-xl border p-5">
-        <h2 className="mb-4 font-semibold">Revenue vs expenses · {year}</h2>
+        <h2 className="mb-4 font-semibold">Revenue vs expenses · {fyLabel}</h2>
         {hasChart ? (
           <ResponsiveContainer width="100%" height={340}>
             <ComposedChart data={chartData} margin={{ top: 10, right: 16, left: 0, bottom: 8 }}>
@@ -144,25 +182,25 @@ export function PnlDashboard({
               <YAxis tickFormatter={(v) => inr0.format(v)} tickLine={false} axisLine={false} fontSize={12} width={72} />
               <Tooltip formatter={(value) => inr0.format(Number(value))} contentStyle={{ borderRadius: 12, border: "1px solid #e5e7eb" }} />
               <Legend />
-              <Bar dataKey="Revenue" fill={REVENUE} radius={[6, 6, 0, 0]} barSize={18} />
-              <Bar dataKey="Expenses" fill={EXPENSE} radius={[6, 6, 0, 0]} barSize={18} />
+              <Bar dataKey="Revenue" fill={REVENUE} radius={[6, 6, 0, 0]} barSize={16} />
+              <Bar dataKey="Expenses" fill={EXPENSE} radius={[6, 6, 0, 0]} barSize={16} />
               <Line type="monotone" dataKey="Profit" stroke={PROFIT} strokeWidth={2.5} dot={{ r: 3 }} />
             </ComposedChart>
           </ResponsiveContainer>
         ) : (
-          <Empty />
+          <Empty label="No revenue or expenses to show yet." />
         )}
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2">
-        {/* Revenue breakdown */}
+        {/* Revenue mix */}
         <div className="rounded-xl border p-5">
           <h2 className="mb-4 font-semibold">Revenue mix · {scopeLabel}</h2>
-          <StatRow label="Online (Airbnb etc.)" value={total.revenueOnline} strong />
-          <StatRow label="Offline / walk-in" value={total.revenueOffline} strong />
-          <StatRow label="Direct (WhatsApp)" value={total.revenueDirect} strong />
+          {mix.map((row) => (
+            <StatRow key={row.name} label={row.name} value={row.value} strong />
+          ))}
           <div className="my-2 border-t" />
-          <StatRow label="Total revenue" value={total.revenueTotal} bold />
+          <StatRow label="Total revenue" value={scoped.revenue} bold />
         </div>
 
         {/* Expense breakdown */}
@@ -192,56 +230,96 @@ export function PnlDashboard({
         </div>
       </div>
 
+      {/* Unbooked (vacancy) tracking — flat-wise */}
+      <section className="rounded-xl border p-5">
+        <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="font-semibold">Unbooked days · {scopeLabel}</h2>
+          <span className="text-sm text-muted-foreground">
+            Total <span className="font-semibold text-foreground">{total.unbookedDays}</span> vacant days
+          </span>
+        </div>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Elapsed days with no booking on the calendar, per flat. Days in the future and before a
+          flat was added aren&apos;t counted. (Count only — no lost-amount estimate.)
+        </p>
+        {perFlat.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No flats to show for this period.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[360px] text-sm">
+              <thead className="text-left text-muted-foreground">
+                <tr className="border-b">
+                  <th className="py-2 font-medium">Flat</th>
+                  <th className="py-2 text-right font-medium">Unbooked days</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...perFlat]
+                  .sort((a, b) => b.unbookedDays - a.unbookedDays)
+                  .map((f) => (
+                    <tr key={f.listingId} className="border-b last:border-0">
+                      <td className="py-2 font-medium">{f.label}</td>
+                      <td className="py-2 text-right">{f.unbookedDays}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
       {/* Monthly table */}
       <section className="rounded-xl border p-5">
-        <h2 className="mb-4 font-semibold">Monthly breakdown · {year}</h2>
+        <h2 className="mb-4 font-semibold">Monthly breakdown · {fyLabel}</h2>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-sm">
             <thead className="text-left text-muted-foreground">
               <tr className="border-b">
                 <th className="py-2 font-medium">Month</th>
                 <th className="py-2 text-right font-medium">Revenue</th>
-                <th className="py-2 text-right font-medium">Rent</th>
-                <th className="py-2 text-right font-medium">Staff</th>
                 <th className="py-2 text-right font-medium">Expenses</th>
                 <th className="py-2 text-right font-medium">Profit</th>
                 <th className="py-2 text-right font-medium">Margin</th>
+                <th className="py-2 text-right font-medium">Unbooked</th>
               </tr>
             </thead>
             <tbody>
-              {monthly.map((m) => (
-                <tr key={m.month} className="border-b last:border-0">
-                  <td className="py-2 font-medium">{m.label}</td>
-                  <td className="py-2 text-right">{formatINR(m.revenueTotal)}</td>
-                  <td className="py-2 text-right text-muted-foreground">{formatINR(m.rent)}</td>
-                  <td className="py-2 text-right text-muted-foreground">{formatINR(m.staff)}</td>
-                  <td className="py-2 text-right">{formatINR(m.expenseTotal)}</td>
-                  <td className={`py-2 text-right font-medium ${m.profit >= 0 ? "" : "text-destructive"}`}>{formatINR(m.profit)}</td>
-                  <td className="py-2 text-right text-muted-foreground">{m.margin.toFixed(0)}%</td>
-                </tr>
-              ))}
+              {monthly.map((m) => {
+                const rev = sourceRevenue(m, source);
+                const profit = rev - m.expenseTotal;
+                const margin = rev > 0 ? (profit / rev) * 100 : 0;
+                return (
+                  <tr key={m.month} className="border-b last:border-0">
+                    <td className="py-2 font-medium">{m.label}</td>
+                    <td className="py-2 text-right">{formatINR(rev)}</td>
+                    <td className="py-2 text-right text-muted-foreground">{formatINR(m.expenseTotal)}</td>
+                    <td className={`py-2 text-right font-medium ${profit >= 0 ? "" : "text-destructive"}`}>{formatINR(profit)}</td>
+                    <td className="py-2 text-right text-muted-foreground">{margin.toFixed(0)}%</td>
+                    <td className="py-2 text-right text-muted-foreground">{m.unbookedDays}</td>
+                  </tr>
+                );
+              })}
             </tbody>
             <tfoot>
               <tr className="border-t-2">
-                <td className="py-2 font-semibold">Total · {year}</td>
-                <td className="py-2 text-right font-semibold">{formatINR(yearTotal.revenueTotal)}</td>
-                <td className="py-2 text-right font-semibold">{formatINR(yearTotal.rent)}</td>
-                <td className="py-2 text-right font-semibold">{formatINR(yearTotal.staff)}</td>
-                <td className="py-2 text-right font-semibold">{formatINR(yearTotal.expenseTotal)}</td>
-                <td className="py-2 text-right font-semibold">{formatINR(yearTotal.profit)}</td>
-                <td className="py-2 text-right font-semibold">{yearTotal.margin.toFixed(0)}%</td>
+                <td className="py-2 font-semibold">Total · {fyLabel}</td>
+                <td className="py-2 text-right font-semibold">{formatINR(sourceRevenue(summarize(fyRows), source))}</td>
+                <td className="py-2 text-right font-semibold">{formatINR(summarize(fyRows).expenseTotal)}</td>
+                <td className="py-2 text-right font-semibold">{formatINR(scopeSummary(summarize(fyRows), source).profit)}</td>
+                <td className="py-2 text-right font-semibold">{scopeSummary(summarize(fyRows), source).margin.toFixed(0)}%</td>
+                <td className="py-2 text-right font-semibold">{summarize(fyRows).unbookedDays}</td>
               </tr>
             </tfoot>
           </table>
         </div>
       </section>
 
-      {/* Per-flat table */}
+      {/* Per-flat P&L table */}
       {perFlat.length > 0 && (
         <section className="rounded-xl border p-5">
           <h2 className="mb-4 font-semibold">By flat · {scopeLabel}</h2>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[560px] text-sm">
+            <table className="w-full min-w-[620px] text-sm">
               <thead className="text-left text-muted-foreground">
                 <tr className="border-b">
                   <th className="py-2 font-medium">Flat</th>
@@ -252,15 +330,20 @@ export function PnlDashboard({
                 </tr>
               </thead>
               <tbody>
-                {perFlat.map((f) => (
-                  <tr key={f.listingId} className="border-b last:border-0">
-                    <td className="py-2 font-medium">{f.label}</td>
-                    <td className="py-2 text-right">{formatINR(f.revenueTotal)}</td>
-                    <td className="py-2 text-right text-muted-foreground">{formatINR(f.expenseTotal)}</td>
-                    <td className={`py-2 text-right font-medium ${f.profit >= 0 ? "" : "text-destructive"}`}>{formatINR(f.profit)}</td>
-                    <td className="py-2 text-right text-muted-foreground">{f.margin.toFixed(0)}%</td>
-                  </tr>
-                ))}
+                {perFlat.map((f) => {
+                  const rev = sourceRevenue(f, source);
+                  const profit = rev - f.expenseTotal;
+                  const margin = rev > 0 ? (profit / rev) * 100 : 0;
+                  return (
+                    <tr key={f.listingId} className="border-b last:border-0">
+                      <td className="py-2 font-medium">{f.label}</td>
+                      <td className="py-2 text-right">{formatINR(rev)}</td>
+                      <td className="py-2 text-right text-muted-foreground">{formatINR(f.expenseTotal)}</td>
+                      <td className={`py-2 text-right font-medium ${profit >= 0 ? "" : "text-destructive"}`}>{formatINR(profit)}</td>
+                      <td className="py-2 text-right text-muted-foreground">{margin.toFixed(0)}%</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -304,10 +387,10 @@ function StatRow({
   );
 }
 
-function Empty() {
+function Empty({ label }: { label: string }) {
   return (
     <div className="flex h-[340px] items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">
-      No revenue or expenses to show yet.
+      {label}
     </div>
   );
 }
