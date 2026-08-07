@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getPlatformSettings } from "@/lib/settings";
+import { bookingReceiptFileName } from "@/lib/receipts";
 import { BookingReceiptPdf } from "@/lib/pdf/booking-receipt";
 
 export const runtime = "nodejs";
@@ -84,7 +85,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   return new NextResponse(new Uint8Array(buffer), {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `${download ? "attachment" : "inline"}; filename="StayWithMe-${number.replace(/[^A-Za-z0-9._-]/g, "")}.pdf"`,
+      "Content-Disposition": `${download ? "attachment" : "inline"}; filename="${bookingReceiptFileName(booking.guestName, booking.checkIn)}"`,
       "Cache-Control": "no-store",
     },
   });

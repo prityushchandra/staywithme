@@ -7,6 +7,7 @@ import { OfflineBookingActions, OfflineBookingForm } from "@/components/admin/of
 import { OfflineBookingEdit } from "@/components/admin/offline-booking-edit";
 import { SendReceiptButton } from "@/components/admin/send-receipt-button";
 import { getPlatformSettings } from "@/lib/settings";
+import { bookingReceiptFileName } from "@/lib/receipts";
 
 export const metadata = { title: "Admin · Bookings" };
 export const dynamic = "force-dynamic";
@@ -141,7 +142,7 @@ export default async function AdminBookingsPage({
                                   receiptUrl={receiptUrl}
                                   fallbackLink={wa}
                                   message={shareMessage}
-                                  fileName={`StayWithMe-Receipt-${b.id.slice(-6)}.pdf`}
+                                  fileName={bookingReceiptFileName(b.guestName, b.checkIn)}
                                 />
                               )}
                             </dd>
