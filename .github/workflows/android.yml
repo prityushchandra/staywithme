@@ -94,8 +94,9 @@ jobs:
             exit 1
           fi
           mkdir -p dist
-          cp "$src" "dist/StayWithMe-${ANDROID_VERSION_NAME}.apk"
-          echo "path=dist/StayWithMe-${ANDROID_VERSION_NAME}.apk" >> "$GITHUB_OUTPUT"
+          # Stable filename keeps the release download URL permanent.
+          cp "$src" dist/StayWithMe.apk
+          echo "path=dist/StayWithMe.apk" >> "$GITHUB_OUTPUT"
           ls -lh dist
 
       - uses: actions/upload-artifact@v4
@@ -111,10 +112,23 @@ jobs:
           gh release view android-latest >/dev/null 2>&1 || \
             gh release create android-latest \
               --title "StayWithMe for Android" \
-              --notes "Latest Android build. Download the .apk below and open it on your phone to install." \
+              --notes "Building..." \
               --latest=false
 
           gh release upload android-latest "${{ steps.apk.outputs.path }}" --clobber
+
+          # Drop APKs left by older runs that used version-stamped filenames.
+          gh release view android-latest --json assets --jq '.assets[].name' \
+            | grep -E '\.apk$' | grep -v '^StayWithMe\.apk$' \
+            | while read -r stale; do gh release delete-asset android-latest "$stale" --yes || true; done
+
+          gh release edit android-latest --notes "$(printf '%s\n' \
+            "**Version ${ANDROID_VERSION_NAME}** (build ${ANDROID_VERSION_CODE})" \
+            "" \
+            "Download **StayWithMe.apk** below and open it on your Android phone to install." \
+            "You may need to allow \"Install unknown apps\" for your browser." \
+            "" \
+            "The app loads https://staywithme.co.in, so an internet connection is required.")"
 
           # A green build means any previously published failure log is stale.
           gh release delete ci-debug --yes --cleanup-tag 2>/dev/null || true
@@ -128,5 +142,5 @@ jobs:
               echo "> Debug-signed build. Each run uses a fresh debug key, so uninstall the previous app before installing a new APK."
             fi
             echo ""
-            echo "**Download:** https://github.com/${{ github.repository }}/releases/tag/android-latest"
+            echo "**Download:** https://github.com/${{ github.repository }}/releases/download/android-latest/StayWithMe.apk"
           } >> "$GITHUB_STEP_SUMMARY"
