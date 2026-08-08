@@ -64,12 +64,26 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          set -o pipefail
           chmod +x gradlew
           if [ "$HAS_KEYSTORE" = "true" ]; then
-            ./gradlew assembleRelease --no-daemon --stacktrace
+            TASK=assembleRelease
           else
-            ./gradlew assembleDebug --no-daemon --stacktrace
+            TASK=assembleDebug
           fi
+          ./gradlew "$TASK" --no-daemon --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle.log"
+
+      # Build logs need an authenticated API call to read, so mirror them to a
+      # public prerelease asset instead. Safe to delete once the build is green.
+      - name: Publish build log on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tail -c 200000 "$RUNNER_TEMP/gradle.log" > gradle-tail.log || echo "no gradle log" > gradle-tail.log
+          gh release view ci-debug >/dev/null 2>&1 || \
+            gh release create ci-debug --title "CI debug logs" --notes "Transient build logs." --prerelease --latest=false
+          gh release upload ci-debug gradle-tail.log --clobber
 
       - name: Collect APK
         id: apk
