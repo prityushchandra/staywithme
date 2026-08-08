@@ -2,8 +2,9 @@ import type { CapacitorConfig } from "@capacitor/cli";
 
 /**
  * StayWithMe is fully server-rendered (Prisma, NextAuth, API routes), so the
- * Android shell loads the live site instead of bundling a static export.
- * `native/www` only ships the offline fallback page referenced by errorPath.
+ * native shells load the live site instead of bundling a static export.
+ * `native/www` ships the retro splash screen and the offline fallback page
+ * referenced by errorPath.
  */
 const config: CapacitorConfig = {
   appId: "in.co.staywithme.app",
@@ -19,6 +20,12 @@ const config: CapacitorConfig = {
     backgroundColor: "#FFFFFF",
     allowMixedContent: false,
     webContentsDebuggingEnabled: false,
+  },
+  ios: {
+    backgroundColor: "#FFFFFF",
+    webContentsDebuggingEnabled: false,
+    // The site draws its own header, so let it own the full viewport.
+    contentInset: "never",
   },
 };
 
