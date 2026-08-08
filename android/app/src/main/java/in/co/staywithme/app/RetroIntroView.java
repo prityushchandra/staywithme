@@ -6,8 +6,11 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.LinearGradient;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffXfermode;
 import android.graphics.RadialGradient;
 import android.graphics.Shader;
 import android.graphics.Typeface;
@@ -66,6 +69,31 @@ public class RetroIntroView extends View {
     private static final float BLINK_MS = 1050f;
     private static final float SCAN_ROLL_MS = 7000f;
 
+    // --- Hologram turntable -------------------------------------------------
+    // Once the house lands it keeps turning on its vertical axis, projected as a
+    // thin slab so it reads as a rotating hologram rather than a flipping decal.
+
+    /** Angular velocity ramps in over this long so the spin starts from rest. */
+    private static final float SPIN_RAMP_MS = 400f;
+
+    /** Perspective focal length, in the same CSS units intro.js uses. */
+    private static final float FOCAL_DP = 900f;
+
+    /** One lit face plus two dim ghosts, so the slab reads as volume. */
+    private static final int SLICE_COUNT = 3;
+
+    /** The plane never fully collapses edge-on; it keeps a bright sliver. */
+    private static final float EDGE_FLOOR = 0.2f;
+
+    /** Scan band sweep period. */
+    private static final float BAND_MS = 1600f;
+
+    /** Odd, so the middle step is the untouched brand colour the assembly ends on. */
+    private static final int SHADE_STEPS = 9;
+
+    private static final int[] GOLD_SHADES = buildShades(GOLD);
+    private static final int[] TERRA_SHADES = buildShades(TERRA);
+
     private static final class Block {
         int col;
         int row;
@@ -88,10 +116,15 @@ public class RetroIntroView extends View {
     private final Paint tipPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint shaderPaint = new Paint();
 
+    /** Additive blend for the glow and scan band, matching canvas "lighter". */
+    private static final PorterDuffXfermode ADD_MODE = new PorterDuffXfermode(PorterDuff.Mode.ADD);
+
     private final Block[] blocks;
+    private final Block[][] byCol;
     private final float settledMs;
     private final float restingMs;
     private final float wordEndMs;
+    private final float spinPeriodMs;
 
     private final float density;
     private final boolean reduced;
@@ -108,10 +141,13 @@ public class RetroIntroView extends View {
     private Shader gridShader;
     private Shader scanShader;
     private Shader vignetteShader;
+    private Shader glowShader;
+    private Shader bandShader;
+    private float glowRadius;
+    private float bandHeight;
     private int scanTilePx = 4;
     private final Matrix scanMatrix = new Matrix();
 
-    private Bitmap houseCache;
     private int seed;
 
     public RetroIntroView(Context context) {
@@ -129,6 +165,13 @@ public class RetroIntroView extends View {
 
         blocks = buildBlocks();
 
+        int[] perCol = new int[COLS];
+        for (Block b : blocks) perCol[b.col]++;
+        byCol = new Block[COLS][];
+        for (int c = 0; c < COLS; c++) byCol[c] = new Block[perCol[c]];
+        int[] fillIdx = new int[COLS];
+        for (Block b : blocks) byCol[b.col][fillIdx[b.col]++] = b;
+
         float maxDelay = 0f;
         for (Block b : blocks) {
             if (b.delay > maxDelay) maxDelay = b.delay;
@@ -136,6 +179,11 @@ public class RetroIntroView extends View {
         settledMs = maxDelay + LAND_MS;
         restingMs = settledMs + IMPACT_MS;
         wordEndMs = settledMs + WORD_GAP_MS + TEXT.length() * LETTER_MS;
+
+        // Tuned so the house is back at 180 degrees — visually identical to 0, the art
+        // is symmetric — by the time the splash would normally hand over.
+        float holdMs = reduced ? 900f : Math.max(2600f, wordEndMs + 300f);
+        spinPeriodMs = 2f * spinPhase(Math.max(holdMs - restingMs, 600f));
     }
 
     /** How long the animation still needs before it is safe to fade the splash out. */
@@ -192,9 +240,38 @@ public class RetroIntroView extends View {
         return out;
     }
 
+    /**
+     * Depth shading, precomputed. The far side of the turntable darkens and the near
+     * side blooms toward white, which is what sells the rotation — the brand gold and
+     * terracotta stay recognisable at every step. Precomputed because allocating a
+     * colour per block per frame would churn the GC at 60fps.
+     */
+    private static int[] buildShades(int color) {
+        int[] out = new int[SHADE_STEPS];
+        for (int i = 0; i < SHADE_STEPS; i++) {
+            float f = (float) i / (SHADE_STEPS - 1);
+            out[i] = f < 0.5f
+                ? mix(color, 18, 11, 9, (0.5f - f) * 1.15f)
+                : mix(color, 255, 250, 240, (f - 0.5f) * 0.75f);
+        }
+        return out;
+    }
+
+    private static int mix(int color, int tr, int tg, int tb, float f) {
+        int r = Math.round(Color.red(color) + (tr - Color.red(color)) * f);
+        int g = Math.round(Color.green(color) + (tg - Color.green(color)) * f);
+        int b = Math.round(Color.blue(color) + (tb - Color.blue(color)) * f);
+        return Color.rgb(r, g, b);
+    }
+
+    /** Ramped spin so angular velocity starts at 0 and settles at 1. */
+    private static float spinPhase(float t) {
+        if (t <= 0f) return 0f;
+        return t < SPIN_RAMP_MS ? (t * t) / (2f * SPIN_RAMP_MS) : t - SPIN_RAMP_MS / 2f;
+    }
+
     /** Overshoot easing, the canvas equivalent of cubic-bezier(.18,1.5,.4,1). */
-    private static float backOut(float t) {
-        float c1 = 1.70158f;
+    private static float backOut(float t) {        float c1 = 1.70158f;
         float c3 = c1 + 1f;
         float u = t - 1f;
         return 1f + c3 * u * u * u + c1 * u * u;
@@ -262,11 +339,6 @@ public class RetroIntroView extends View {
         tipBaseline = barTop + barH + px * 0.8f - tipPaint.ascent();
 
         buildShaders(w, h);
-
-        if (houseCache != null) {
-            houseCache.recycle();
-            houseCache = null;
-        }
     }
 
     private float barHeight() {
@@ -317,6 +389,29 @@ public class RetroIntroView extends View {
         m.postTranslate(w / 2f, h / 2f);
         vig.setLocalMatrix(m);
         vignetteShader = vig;
+
+        // Projection glow behind the turntable, anchored on the house centre.
+        glowRadius = COLS * px * 1.45f;
+        glowShader = new RadialGradient(
+            houseLeft + (COLS * px) / 2f,
+            houseTop + (ROWS * px) / 2f,
+            glowRadius,
+            new int[] { Color.argb(87, 232, 160, 32), Color.argb(33, 200, 112, 94), Color.argb(0, 200, 112, 94) },
+            new float[] { 0f, 0.45f, 1f },
+            Shader.TileMode.CLAMP
+        );
+
+        // Scan band. Anchored at y=0 and moved with a matrix each frame.
+        bandHeight = px * 1.7f;
+        bandShader = new LinearGradient(
+            0f,
+            0f,
+            0f,
+            bandHeight,
+            new int[] { Color.argb(0, 255, 214, 140), Color.argb(77, 255, 226, 170), Color.argb(0, 255, 214, 140) },
+            new float[] { 0f, 0.5f, 1f },
+            Shader.TileMode.CLAMP
+        );
     }
 
     @Override
@@ -358,23 +453,118 @@ public class RetroIntroView extends View {
     }
 
     private void drawHouse(Canvas canvas, float elapsed) {
-        float bevel = Math.max(1f, px * 0.18f);
+        if (elapsed < restingMs) drawAssembly(canvas, elapsed);
+        else drawHologram(canvas, elapsed - restingMs);
+    }
 
-        // Nothing about the house moves once the impact shake ends, so bake it once.
-        if (elapsed >= restingMs) {
-            if (houseCache == null) {
-                int cw = Math.max(1, Math.round(COLS * px));
-                int ch = Math.max(1, Math.round(ROWS * px));
-                houseCache = Bitmap.createBitmap(cw, ch, Bitmap.Config.ARGB_8888);
-                Canvas hc = new Canvas(houseCache);
-                blockPaint.setAntiAlias(false);
-                for (Block bl : blocks) {
-                    paintSettled(hc, 0f, 0f, bl, bevel);
+    /**
+     * The settled house turns on its vertical axis forever. Three slices — one lit
+     * face plus two dim ghosts — give it thickness, so edge-on it reads as a solid
+     * slab instead of the logo blinking out of existence.
+     */
+    private void drawHologram(Canvas canvas, float t) {
+        double angle = reduced ? 0.0 : (2 * Math.PI * spinPhase(t)) / spinPeriodMs;
+        float cosA = (float) Math.cos(angle);
+        float sinA = (float) Math.sin(angle);
+        float absCos = Math.abs(cosA);
+
+        // Ease the projection treatment in, otherwise the glow and depth shading pop
+        // the instant the last block lands.
+        float holo = reduced ? 1f : Math.min(1f, t / 280f);
+
+        float cx = houseLeft + (COLS * px) / 2f;
+        float cyMid = houseTop + (ROWS * px) / 2f;
+
+        shaderPaint.setXfermode(ADD_MODE);
+        shaderPaint.setShader(glowShader);
+        shaderPaint.setAlpha(Math.round(holo * (reduced ? 0.8f : 0.72f + 0.28f * (float) Math.sin(t / 420f)) * 255f));
+        canvas.drawRect(cx - glowRadius, cyMid - glowRadius, cx + glowRadius, cyMid + glowRadius, shaderPaint);
+        shaderPaint.setXfermode(null);
+        shaderPaint.setShader(null);
+        shaderPaint.setAlpha(255);
+
+        float focal = FOCAL_DP * density;
+        // Slab thickness. At 0 degrees the ghosts hide exactly behind the lit face; as
+        // the house turns they fan out.
+        float slabD = px * 1.35f;
+        float spread = COLS * px * 2.2f;
+        float flicker = reduced ? 1f : 1f - holo * (0.07f - 0.07f * (float) Math.sin(t / 37f) * (float) Math.cos(t / 71f));
+
+        blockPaint.setAntiAlias(true);
+
+        for (int si = 0; si < SLICE_COUNT; si++) {
+            // Walk slices back to front so the lit face lands on top.
+            int k = cosA >= 0f ? SLICE_COUNT - 1 - si : si;
+            float d = (k - 1) * slabD;
+            boolean main = k == 1;
+            float sliceAlpha = main ? flicker : 0.34f * holo * flicker;
+            if (sliceAlpha <= 0.004f) continue;
+
+            for (int ci = 0; ci < COLS; ci++) {
+                // Columns also back to front; z is monotonic in x, so direction is enough.
+                int c = sinA >= 0f ? ci : COLS - 1 - ci;
+                Block[] colBlocks = byCol[c];
+                if (colBlocks.length == 0) continue;
+
+                float xc = (c + 0.5f - COLS / 2f) * px;
+                float xr = xc * cosA + d * sinA;
+                float z = d * cosA - xc * sinA;
+                float sc = focal / (focal + z);
+                float w = px * Math.max(absCos, EDGE_FLOOR) * sc;
+                if (w < 0.35f) continue;
+
+                float left = cx + xr * sc - w / 2f;
+                float h = px * sc;
+                float bevel = Math.max(1f, w * 0.18f);
+
+                float lum = 0.5f - holo * (z / spread);
+                int idx = (int) (lum * SHADE_STEPS);
+                if (idx < 0) idx = 0;
+                else if (idx >= SHADE_STEPS) idx = SHADE_STEPS - 1;
+
+                for (Block b : colBlocks) {
+                    float top = cyMid + (houseTop + b.row * px - cyMid) * sc;
+
+                    blockPaint.setColor((b.color == GOLD ? GOLD_SHADES : TERRA_SHADES)[idx]);
+                    blockPaint.setAlpha(Math.round(sliceAlpha * 255f));
+                    canvas.drawRect(left, top, left + w, top + h, blockPaint);
+
+                    if (!main) continue;
+
+                    blockPaint.setColor(Color.WHITE);
+                    blockPaint.setAlpha(Math.round(0.3f * sliceAlpha * 255f));
+                    canvas.drawRect(left, top, left + w, top + bevel, blockPaint);
+                    canvas.drawRect(left, top, left + bevel, top + h, blockPaint);
+
+                    blockPaint.setColor(Color.BLACK);
+                    blockPaint.setAlpha(Math.round(0.32f * sliceAlpha * 255f));
+                    canvas.drawRect(left, top + h - bevel, left + w, top + h, blockPaint);
+                    canvas.drawRect(left + w - bevel, top, left + w, top + h, blockPaint);
                 }
             }
-            canvas.drawBitmap(houseCache, houseLeft, houseTop, null);
-            return;
         }
+
+        // Scan band sweeping down the projection.
+        if (!reduced) {
+            float span = ROWS * px + bandHeight * 2f;
+            float bandY = houseTop - bandHeight + (t % BAND_MS) / BAND_MS * span;
+            float bandW = COLS * px * 0.85f;
+
+            shaderPaint.setXfermode(ADD_MODE);
+            shaderPaint.setShader(bandShader);
+            shaderPaint.setAlpha(Math.round(holo * 255f));
+            canvas.save();
+            canvas.translate(cx - bandW / 2f, bandY);
+            canvas.drawRect(0f, 0f, bandW, bandHeight, shaderPaint);
+            canvas.restore();
+            shaderPaint.setXfermode(null);
+            shaderPaint.setShader(null);
+            shaderPaint.setAlpha(255);
+        }
+    }
+
+    private void drawAssembly(Canvas canvas, float elapsed) {
+        float bevel = Math.max(1f, px * 0.18f);
 
         float shakeX = 0f;
         float shakeY = 0f;
@@ -564,9 +754,10 @@ public class RetroIntroView extends View {
     @Override
     protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
-        if (houseCache != null) {
-            houseCache.recycle();
-            houseCache = null;
-        }
+        gridShader = null;
+        scanShader = null;
+        vignetteShader = null;
+        glowShader = null;
+        bandShader = null;
     }
 }

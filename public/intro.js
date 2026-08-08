@@ -49,6 +49,71 @@
   /** Matches the Android shell's minimum splash time. */
   var HOLD_MS = 2600;
 
+  /* ---- hologram turntable ---------------------------------------------- */
+
+  var TAU = Math.PI * 2;
+
+  /** Angular velocity eases in over this long so the spin doesn't snap on. */
+  var SPIN_RAMP_MS = 400;
+
+  /** Perspective distance, in the same units as the block size. */
+  var FOCAL = 900;
+
+  /** Slab depth: one lit face plus two dim ghosts, so it reads as volume. */
+  var SLICE_COUNT = 3;
+
+  /** The plane never fully collapses edge-on; it keeps a bright sliver. */
+  var EDGE_FLOOR = 0.2;
+
+  /** Scan band sweep period. */
+  var BAND_MS = 1600;
+
+  // Odd count so the middle step is the untouched brand colour — that is what
+  // the assembly hands over at, so the transition has nothing to pop.
+  var SHADE_STEPS = 9;
+
+  function mixHex(hex, target, f) {
+    var r = parseInt(hex.slice(1, 3), 16);
+    var g = parseInt(hex.slice(3, 5), 16);
+    var b = parseInt(hex.slice(5, 7), 16);
+    return (
+      "rgb(" +
+      Math.round(r + (target[0] - r) * f) +
+      "," +
+      Math.round(g + (target[1] - g) * f) +
+      "," +
+      Math.round(b + (target[2] - b) * f) +
+      ")"
+    );
+  }
+
+  /**
+   * Depth shading, precomputed. The far side of the turntable darkens and the
+   * near side blooms toward white, which is what sells the rotation — the brand
+   * gold and terracotta stay recognisable at every step.
+   */
+  function buildShades(hex) {
+    var out = [];
+    for (var i = 0; i < SHADE_STEPS; i++) {
+      var f = i / (SHADE_STEPS - 1);
+      out.push(
+        f < 0.5
+          ? mixHex(hex, [18, 11, 9], (0.5 - f) * 1.15)
+          : mixHex(hex, [255, 250, 240], (f - 0.5) * 0.75)
+      );
+    }
+    return out;
+  }
+
+  var GOLD_SHADES = buildShades(GOLD);
+  var TERRA_SHADES = buildShades(TERRA);
+
+  /** Ramped spin so angular velocity starts at 0 and settles at 1. */
+  function spinPhase(t) {
+    if (t <= 0) return 0;
+    return t < SPIN_RAMP_MS ? (t * t) / (2 * SPIN_RAMP_MS) : t - SPIN_RAMP_MS / 2;
+  }
+
   var STYLE_ID = "swm-intro-style";
 
   var CSS =
@@ -128,7 +193,10 @@
   function buildBlocks() {
     var rand = rng(0x57414d);
     var blocks = [];
+    var byCol = [];
     var maxDelay = 0;
+
+    for (var i = 0; i < COLS; i++) byCol.push([]);
 
     for (var r = 0; r < ROWS; r++) {
       for (var c = 0; c < COLS; c++) {
@@ -140,7 +208,7 @@
         var delay = r * ROW_STAGGER + rand() * 40;
         if (delay > maxDelay) maxDelay = delay;
 
-        blocks.push({
+        var block = {
           col: c,
           row: r,
           dx: Math.cos(angle) * distance,
@@ -148,11 +216,14 @@
           rot: ((rand() * 200 - 100) * Math.PI) / 180,
           delay: delay,
           color: r <= 6 ? GOLD : TERRA
-        });
+        };
+
+        blocks.push(block);
+        byCol[c].push(block);
       }
     }
 
-    return { blocks: blocks, settled: maxDelay + LAND_MS };
+    return { blocks: blocks, byCol: byCol, settled: maxDelay + LAND_MS };
   }
 
   /** Overshoot easing, the canvas equivalent of cubic-bezier(.18,1.5,.4,1). */
@@ -203,8 +274,15 @@
 
     var built = buildBlocks();
     var blocks = built.blocks;
+    var byCol = built.byCol;
     var settled = built.settled;
     var wordEnd = settled + WORD_GAP_MS + TEXT.length * LETTER_MS;
+    var restingAt = settled + IMPACT_MS;
+
+    // Half a turn by the time the web overlay dismisses, so it hands over
+    // facing forward. The house art is horizontally symmetric, so 180 degrees
+    // reads the same as 0. Native shells keep spinning until the site loads.
+    var spinPeriod = 2 * spinPhase(Math.max(HOLD_MS - restingAt, 600));
 
     var reduced = !!(
       window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -213,6 +291,8 @@
     var px = 1;
     var cssW = 1;
     var cssH = 1;
+    var glowGrad = null;
+    var bandGrad = null;
 
     function measure() {
       px = houseEl.clientWidth / COLS || 10;
@@ -223,14 +303,34 @@
       canvas.width = Math.round(cssW * dpr);
       canvas.height = Math.round(cssH * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      // Gradients are rebuilt only on resize; allocating them per frame would
+      // churn the GC for no visual gain.
+      var cx = PAD + (COLS * px) / 2;
+      var cyMid = PAD + (ROWS * px) / 2;
+      var glowR = COLS * px * 1.45;
+      glowGrad = ctx.createRadialGradient(cx, cyMid, px, cx, cyMid, glowR);
+      glowGrad.addColorStop(0, "rgba(232,160,32,0.34)");
+      glowGrad.addColorStop(0.45, "rgba(200,112,94,0.13)");
+      glowGrad.addColorStop(1, "rgba(200,112,94,0)");
+
+      var bandH = px * 1.7;
+      bandGrad = ctx.createLinearGradient(0, 0, 0, bandH);
+      bandGrad.addColorStop(0, "rgba(255,214,140,0)");
+      bandGrad.addColorStop(0.5, "rgba(255,226,170,0.30)");
+      bandGrad.addColorStop(1, "rgba(255,214,140,0)");
     }
 
     function render(elapsed) {
       ctx.clearRect(0, 0, cssW, cssH);
+      if (elapsed < restingAt) renderAssembly(elapsed);
+      else renderHologram(elapsed - restingAt);
+    }
 
+    function renderAssembly(elapsed) {
       var shakeX = 0;
       var shakeY = 0;
-      if (!reduced && elapsed >= settled && elapsed < settled + IMPACT_MS) {
+      if (elapsed >= settled && elapsed < settled + IMPACT_MS) {
         var step = Math.floor((elapsed - settled) / (IMPACT_MS / 4));
         var amp = px * 0.18;
         if (step === 0) {
@@ -249,7 +349,7 @@
         var b = blocks[i];
         var x = PAD + b.col * px + shakeX;
         var y = PAD + b.row * px + shakeY;
-        var p = reduced ? 1 : (elapsed - b.delay) / LAND_MS;
+        var p = (elapsed - b.delay) / LAND_MS;
 
         if (p <= 0) continue;
 
@@ -274,24 +374,114 @@
       ctx.globalAlpha = 1;
     }
 
+    /**
+     * Turntable: the settled house spins about its vertical axis as a projected
+     * hologram. Columns are foreshortened by cos(angle) and pushed through a
+     * perspective divide; three depth slices give the flat pixel art volume.
+     */
+    function renderHologram(t) {
+      var angle = reduced ? 0 : (TAU * spinPhase(t)) / spinPeriod;
+      var cosA = Math.cos(angle);
+      var sinA = Math.sin(angle);
+      var absCos = Math.abs(cosA);
+
+      // Ease the projection treatment in, otherwise the glow and depth shading
+      // pop the instant the last block lands.
+      var holo = reduced ? 1 : Math.min(1, t / 280);
+
+      var cx = PAD + (COLS * px) / 2;
+      var cyMid = PAD + (ROWS * px) / 2;
+      var glowR = COLS * px * 1.45;
+
+      // Projection glow, pulsing gently.
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = holo * (reduced ? 0.8 : 0.72 + 0.28 * Math.sin(t / 420));
+      ctx.fillStyle = glowGrad;
+      ctx.fillRect(cx - glowR, cyMid - glowR, glowR * 2, glowR * 2);
+      ctx.globalCompositeOperation = "source-over";
+
+      // Slab thickness. At 0deg the ghosts hide exactly behind the lit face; as
+      // the house turns they fan out, so edge-on still reads as a solid object
+      // instead of the logo blinking out of existence.
+      var slabD = px * 1.35;
+      var spread = COLS * px * 2.2;
+      // Projector flicker.
+      var flicker = reduced ? 1 : 1 - holo * (0.07 - 0.07 * Math.sin(t / 37) * Math.cos(t / 71));
+
+      for (var si = 0; si < SLICE_COUNT; si++) {
+        // Walk slices back to front so the lit face lands on top.
+        var k = cosA >= 0 ? SLICE_COUNT - 1 - si : si;
+        var d = (k - 1) * slabD;
+        var main = k === 1;
+        var sliceAlpha = main ? flicker : 0.34 * holo * flicker;
+
+        for (var ci = 0; ci < COLS; ci++) {
+          // Columns also back to front; z is monotonic in x, so direction is enough.
+          var c = sinA >= 0 ? ci : COLS - 1 - ci;
+          var colBlocks = byCol[c];
+          if (!colBlocks.length) continue;
+
+          var xc = (c + 0.5 - COLS / 2) * px;
+          var xr = xc * cosA + d * sinA;
+          var z = d * cosA - xc * sinA;
+          var sc = FOCAL / (FOCAL + z);
+          var w = px * Math.max(absCos, EDGE_FLOOR) * sc;
+          if (w < 0.35) continue;
+
+          var left = cx + xr * sc - w / 2;
+          var h = px * sc;
+          var bevel = Math.max(1, w * 0.18);
+
+          var lum = 0.5 + holo * (0.5 - z / spread - 0.5);
+          var idx = lum <= 0 ? 0 : lum >= 1 ? SHADE_STEPS - 1 : (lum * SHADE_STEPS) | 0;
+
+          for (var bi = 0; bi < colBlocks.length; bi++) {
+            var b = colBlocks[bi];
+            var top = cyMid + (PAD + b.row * px - cyMid) * sc;
+
+            ctx.globalAlpha = sliceAlpha;
+            ctx.fillStyle = (b.color === GOLD ? GOLD_SHADES : TERRA_SHADES)[idx];
+            ctx.fillRect(left, top, w, h);
+
+            if (!main) continue;
+
+            ctx.fillStyle = "rgba(255,255,255,.3)";
+            ctx.fillRect(left, top, w, bevel);
+            ctx.fillRect(left, top, bevel, h);
+            ctx.fillStyle = "rgba(0,0,0,.32)";
+            ctx.fillRect(left, top + h - bevel, w, bevel);
+            ctx.fillRect(left + w - bevel, top, bevel, h);
+          }
+        }
+      }
+
+      // Scan band sweeping down the projection.
+      if (!reduced) {
+        var bandH = px * 1.7;
+        var span = ROWS * px + bandH * 2;
+        var bandY = PAD - bandH + ((t % BAND_MS) / BAND_MS) * span;
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = holo;
+        ctx.save();
+        ctx.translate(cx - (COLS * px * 0.85) / 2, bandY);
+        ctx.fillStyle = bandGrad;
+        ctx.fillRect(0, 0, COLS * px * 0.85, bandH);
+        ctx.restore();
+        ctx.globalCompositeOperation = "source-over";
+      }
+
+      ctx.globalAlpha = 1;
+    }
+
     measure();
 
-    var restingAt = settled + IMPACT_MS;
     var start = performance.now();
     var frame = 0;
     var stopped = false;
 
     function tick(now) {
       if (stopped) return;
-      var elapsed = now - start;
-
-      // Everything is static once the impact shake ends, so stop burning frames.
-      if (elapsed >= restingAt) {
-        render(restingAt);
-        return;
-      }
-
-      render(elapsed);
+      render(now - start);
       frame = requestAnimationFrame(tick);
     }
 
@@ -303,7 +493,7 @@
 
     function onResize() {
       measure();
-      render(Math.min(performance.now() - start, restingAt));
+      render(reduced ? restingAt : performance.now() - start);
     }
     window.addEventListener("resize", onResize);
 
