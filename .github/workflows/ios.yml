@@ -6,6 +6,7 @@ on:
     paths:
       - "ios/**"
       - "native/**"
+      - "public/intro.js"
       - "capacitor.config.ts"
       - "package.json"
       - ".github/workflows/ios.yml"
@@ -43,7 +44,9 @@ jobs:
 
       # Regenerates capacitor-cordova-ios-plugins + copies native/www assets.
       - name: Sync Capacitor
-        run: npx cap sync ios
+        run: |
+          npm run native:assets
+          npx cap sync ios
 
       - name: Import signing certificate
         if: env.HAS_SIGNING == 'true'

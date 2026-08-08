@@ -200,3 +200,24 @@ input[type="time"]::-webkit-calendar-picker-indicator {
     animation: none;
   }
 }
+
+/* Retro 8-bit intro overlay for the installed (home-screen) app. The boot
+   script in the root layout sets data-swm-intro only for a real standalone
+   launch, so browser tabs — and the Capacitor shells, which draw their own
+   splash — never see it. intro.js supplies the rest of the styling. */
+@layer base {
+  .swm-intro-root {
+    position: fixed;
+    inset: 0;
+    z-index: 2147483000;
+    background-color: #140f0d;
+  }
+
+  html:not([data-swm-intro="1"]) .swm-intro-root {
+    display: none !important;
+  }
+
+  html[data-swm-intro="1"] body {
+    overflow: hidden;
+  }
+}

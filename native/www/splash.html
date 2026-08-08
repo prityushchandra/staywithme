@@ -5,229 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>StayWithMe</title>
     <style>
-      :root {
-        color-scheme: dark;
-        --px: clamp(7px, 2.6vmin, 13px);
-        --gold: #e8a020;
-        --terra: #c8705e;
-        --terra-dark: #7d3527;
-        --bg: #140f0d;
-      }
-      * { box-sizing: border-box; margin: 0; padding: 0; }
-      html, body { height: 100%; overflow: hidden; background: var(--bg); }
+      html,
       body {
-        display: flex; flex-direction: column;
-        align-items: center; justify-content: center;
-        gap: calc(var(--px) * 2.6);
-        font-family: ui-monospace, "Courier New", Courier, monospace;
-        image-rendering: pixelated;
-        -webkit-user-select: none; user-select: none;
-        -webkit-tap-highlight-color: transparent;
-      }
-
-      /* Faint CRT grid so the dark field doesn't read as empty. */
-      .grid {
-        position: fixed; inset: 0; pointer-events: none; opacity: .5;
-        background-image:
-          linear-gradient(rgba(200, 112, 94, .07) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(200, 112, 94, .07) 1px, transparent 1px);
-        background-size: calc(var(--px) * 2) calc(var(--px) * 2);
-      }
-      .scanlines {
-        position: fixed; inset: 0; pointer-events: none; z-index: 9;
-        background: repeating-linear-gradient(
-          0deg, rgba(0,0,0,.28) 0 2px, transparent 2px 4px
-        );
-        animation: roll 7s linear infinite;
-      }
-      .vignette {
-        position: fixed; inset: 0; pointer-events: none; z-index: 8;
-        background: radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,.65) 100%);
-      }
-      @keyframes roll { to { background-position-y: 4px; } }
-
-      /* ---- pixel house ---- */
-      #house {
-        position: relative;
-        width: calc(var(--px) * 13);
-        height: calc(var(--px) * 12);
-      }
-      #house.impact { animation: impact .34s steps(4) 1; }
-      @keyframes impact {
-        0%, 100% { transform: translate(0, 0); }
-        25% { transform: translate(calc(var(--px) * .18), calc(var(--px) * .3)); }
-        50% { transform: translate(calc(var(--px) * -.18), 0); }
-        75% { transform: translate(0, calc(var(--px) * .18)); }
-      }
-      .blk {
-        position: absolute;
-        width: var(--px); height: var(--px);
-        opacity: 0;
-        animation: land .52s cubic-bezier(.18, 1.5, .4, 1) forwards;
-      }
-      /* Chunky bevel: light top-left, dark bottom-right — classic 16-bit shading. */
-      .blk::after {
-        content: ""; position: absolute; inset: 0;
-        box-shadow:
-          inset calc(var(--px) * .18) calc(var(--px) * .18) 0 rgba(255,255,255,.28),
-          inset calc(var(--px) * -.18) calc(var(--px) * -.18) 0 rgba(0,0,0,.3);
-      }
-      @keyframes land {
-        from { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(.2) rotate(var(--rot)); }
-        60%  { opacity: 1; }
-        to   { opacity: 1; transform: translate(0, 0) scale(1) rotate(0deg); }
-      }
-
-      /* ---- wordmark ---- */
-      #word {
-        display: flex; gap: calc(var(--px) * .22);
-        font-size: calc(var(--px) * 2.1);
-        font-weight: 900; letter-spacing: .06em;
-        color: #fff6ee;
-      }
-      #word span {
-        opacity: 0;
-        text-shadow:
-          calc(var(--px) * .22) calc(var(--px) * .22) 0 var(--terra-dark);
-        animation: drop .46s cubic-bezier(.2, 1.7, .38, 1) forwards;
-      }
-      #word span.hi { color: var(--gold); }
-      @keyframes drop {
-        from { opacity: 0; transform: translateY(calc(var(--px) * -3.4)) scaleY(1.6) scaleX(.7); }
-        55%  { opacity: 1; }
-        70%  { transform: translateY(0) scaleY(.72) scaleX(1.25); }
-        to   { opacity: 1; transform: translateY(0) scale(1); }
-      }
-
-      /* ---- loading bar ---- */
-      #load {
-        display: flex; flex-direction: column; align-items: center;
-        gap: calc(var(--px) * .8);
-        opacity: 0; animation: fadein .4s ease forwards;
-      }
-      @keyframes fadein { to { opacity: 1; } }
-      #bar {
-        display: flex; gap: calc(var(--px) * .3);
-        padding: calc(var(--px) * .3);
-        border: calc(var(--px) * .22) solid rgba(255, 246, 238, .32);
-      }
-      #bar i {
-        display: block;
-        width: calc(var(--px) * .9); height: calc(var(--px) * .72);
-        background: rgba(255, 246, 238, .12);
-      }
-      #bar i.on { background: var(--gold); }
-      #tip {
-        font-size: calc(var(--px) * .92);
-        letter-spacing: .34em; font-weight: 700;
-        color: rgba(255, 246, 238, .55);
-        animation: blink 1.05s steps(1) infinite;
-      }
-      @keyframes blink { 50% { opacity: .28; } }
-
-      @media (prefers-reduced-motion: reduce) {
-        .blk, #word span { animation-duration: .01ms !important; opacity: 1 !important; }
-        .scanlines, #tip { animation: none !important; }
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #140f0d;
       }
     </style>
   </head>
   <body>
-    <div class="grid"></div>
-    <div id="house" aria-hidden="true"></div>
+    <div id="intro"></div>
 
-    <div id="word" role="img" aria-label="StayWithMe"></div>
-
-    <div id="load">
-      <div id="bar"></div>
-      <div id="tip">LOADING</div>
-    </div>
-
-    <div class="scanlines"></div>
-    <div class="vignette"></div>
-
+    <!-- Copy of public/intro.js — see scripts/sync-native-assets.mjs. -->
+    <script src="intro.js"></script>
     <script>
-      (function () {
-        // 13x12 pixel-art house. Rows 0-6 are the roof, 7-11 the walls + doorway.
-        var ART = [
-          "......X......",
-          ".....XXX.....",
-          "....XXXXX....",
-          "...XXXXXXX...",
-          "..XXXXXXXXX..",
-          ".XXXXXXXXXXX.",
-          "XXXXXXXXXXXXX",
-          ".XXXXXXXXXXX.",
-          ".XXXXXXXXXXX.",
-          ".XXXX...XXXX.",
-          ".XXXX...XXXX.",
-          ".XXXX...XXXX."
-        ];
-
-        var house = document.getElementById("house");
-        var last = 0;
-
-        for (var r = 0; r < ART.length; r++) {
-          for (var c = 0; c < ART[r].length; c++) {
-            if (ART[r][c] !== "X") continue;
-
-            var b = document.createElement("i");
-            b.className = "blk";
-            b.style.left = "calc(var(--px) * " + c + ")";
-            b.style.top = "calc(var(--px) * " + r + ")";
-            b.style.background = r <= 6 ? "var(--gold)" : "var(--terra)";
-
-            // Fly in from a random direction so the house "assembles".
-            var ang = Math.random() * Math.PI * 2;
-            var dist = 60 + Math.random() * 130;
-            b.style.setProperty("--dx", Math.cos(ang) * dist + "px");
-            b.style.setProperty("--dy", (Math.sin(ang) * dist - 40) + "px");
-            b.style.setProperty("--rot", (Math.random() * 200 - 100) + "deg");
-
-            // Build top-down so the roof lands before the walls.
-            var delay = r * 52 + Math.random() * 40;
-            b.style.animationDelay = delay + "ms";
-            if (delay > last) last = delay;
-
-            house.appendChild(b);
-          }
-        }
-
-        var settled = last + 520;
-        setTimeout(function () { house.classList.add("impact"); }, settled);
-
-        // Wordmark bounces in once the house has landed.
-        var word = document.getElementById("word");
-        var TEXT = "STAYWITHME";
-        for (var i = 0; i < TEXT.length; i++) {
-          var s = document.createElement("span");
-          s.textContent = TEXT[i];
-          // Highlight the S, W and M of Stay With Me.
-          if (i === 0 || i === 4 || i === 8) s.className = "hi";
-          s.style.animationDelay = (settled + 90 + i * 62) + "ms";
-          word.appendChild(s);
-        }
-
-        var wordEnd = settled + 90 + TEXT.length * 62;
-
-        // Stepped 8-bit progress bar that keeps cycling until the app takes over.
-        var bar = document.getElementById("bar");
-        var CELLS = 12;
-        var cells = [];
-        for (var k = 0; k < CELLS; k++) {
-          var cell = document.createElement("i");
-          bar.appendChild(cell);
-          cells.push(cell);
-        }
-        document.getElementById("load").style.animationDelay = wordEnd + "ms";
-
-        var n = 0;
-        setInterval(function () {
-          n = (n + 1) % (CELLS + 4);
-          for (var j = 0; j < CELLS; j++) {
-            cells[j].className = j < n ? "on" : "";
-          }
-        }, 110);
-      })();
+      // The native shell removes this overlay once the site has loaded, so the
+      // loading bar keeps cycling instead of self-dismissing.
+      window.StayWithMeIntro.mount(document.getElementById("intro"), { loop: true });
     </script>
   </body>
 </html>

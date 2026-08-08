@@ -6,6 +6,7 @@ on:
     paths:
       - "android/**"
       - "native/**"
+      - "public/intro.js"
       - "capacitor.config.ts"
       - "package.json"
       - ".github/workflows/android.yml"
@@ -50,7 +51,9 @@ jobs:
 
       # Regenerates capacitor-cordova-android-plugins + copies native/www assets.
       - name: Sync Capacitor
-        run: npx cap sync android
+        run: |
+          npm run native:assets
+          npx cap sync android
 
       - name: Decode release keystore
         if: env.HAS_KEYSTORE == 'true'

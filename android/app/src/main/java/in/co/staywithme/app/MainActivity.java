@@ -2,7 +2,6 @@ package in.co.staywithme.app;
 
 import android.app.DownloadManager;
 import android.content.Context;
-import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
@@ -18,15 +17,12 @@ import com.getcapacitor.WebViewListener;
 
 public class MainActivity extends BridgeActivity {
 
-    /** Let the retro intro finish even when the site loads instantly. */
-    private static final long MIN_SPLASH_MS = 2600;
-
     /** Never strand the user on the splash if the network stalls. */
     private static final long MAX_SPLASH_MS = 9000;
 
-    private WebView splashOverlay;
-    private long splashShownAt;
+    private RetroIntroView splashOverlay;
     private boolean splashDismissing;
+    private long splashDeadline;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -90,19 +86,16 @@ public class MainActivity extends BridgeActivity {
 
     /**
      * The app shell loads staywithme.co.in over the network, so the first paint can lag.
-     * A local animated splash covers that gap instead of showing a blank WebView.
+     * A locally drawn animated splash covers that gap instead of showing a blank WebView.
      */
     private void showRetroSplash() {
-        splashOverlay = new WebView(this);
-        splashOverlay.setBackgroundColor(Color.parseColor("#140F0D"));
-        splashOverlay.getSettings().setJavaScriptEnabled(true);
-        splashOverlay.loadUrl("file:///android_asset/public/splash.html");
+        splashOverlay = new RetroIntroView(this);
+        splashDeadline = SystemClock.uptimeMillis() + MAX_SPLASH_MS;
 
         addContentView(
             splashOverlay,
             new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         );
-        splashShownAt = SystemClock.uptimeMillis();
 
         getBridge()
             .addWebViewListener(
@@ -120,7 +113,10 @@ public class MainActivity extends BridgeActivity {
     private void dismissRetroSplash() {
         if (splashOverlay == null || splashDismissing) return;
 
-        long remaining = MIN_SPLASH_MS - (SystemClock.uptimeMillis() - splashShownAt);
+        // The intro times itself from its first drawn frame, so ask it rather than
+        // measuring from when the view was added — but never wait past the deadline,
+        // otherwise a splash that somehow never draws would pin the user here.
+        long remaining = Math.min(splashOverlay.getRemainingMs(), splashDeadline - SystemClock.uptimeMillis());
         if (remaining > 0) {
             splashDismissing = true;
             splashOverlay.postDelayed(
@@ -133,7 +129,7 @@ public class MainActivity extends BridgeActivity {
             return;
         }
 
-        final WebView overlay = splashOverlay;
+        final RetroIntroView overlay = splashOverlay;
         splashOverlay = null;
         overlay
             .animate()
@@ -142,7 +138,6 @@ public class MainActivity extends BridgeActivity {
             .withEndAction(() -> {
                 ViewGroup parent = (ViewGroup) overlay.getParent();
                 if (parent != null) parent.removeView(overlay);
-                overlay.destroy();
             })
             .start();
     }
