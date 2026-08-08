@@ -116,6 +116,9 @@ jobs:
 
           gh release upload android-latest "${{ steps.apk.outputs.path }}" --clobber
 
+          # A green build means any previously published failure log is stale.
+          gh release delete ci-debug --yes --cleanup-tag 2>/dev/null || true
+
           {
             echo "### APK ready :rocket:"
             echo ""
