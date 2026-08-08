@@ -182,7 +182,11 @@
 
     injectStyles();
 
-    root.className = "swm-intro";
+    // classList.add, never `className =`: the web overlay also carries
+    // `swm-intro-root`, and that class is what the stylesheet uses to hide the
+    // element again once the intro is done. Clobbering it strands the app
+    // behind a full-screen dark layer.
+    root.classList.add("swm-intro");
     root.innerHTML =
       '<div class="swm-intro__house"><canvas></canvas></div>' +
       '<div class="swm-intro__word" role="img" aria-label="StayWithMe"></div>' +

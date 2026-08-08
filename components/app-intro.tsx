@@ -46,7 +46,9 @@ export function AppIntro() {
         delete document.documentElement.dataset.swmIntro;
         instance?.destroy();
         instance = undefined;
-        root.classList.remove("swm-intro--hiding");
+        // Drop intro.js's own class too, so nothing keeps the element painting
+        // full screen even if the attribute rule is ever bypassed.
+        root.classList.remove("swm-intro", "swm-intro--hiding");
         root.replaceChildren();
       }, FADE_MS);
     };
