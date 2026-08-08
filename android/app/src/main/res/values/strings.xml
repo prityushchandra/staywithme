@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">StayWithMe</string>
+    <string name="title_activity_main">StayWithMe</string>
+    <string name="package_name">in.co.staywithme.app</string>
+    <string name="custom_url_scheme">in.co.staywithme.app</string>
+</resources>

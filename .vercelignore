@@ -1,0 +1,4 @@
+# Native app shells are built in CI, not needed by the Vercel deployment.
+android
+ios
+native

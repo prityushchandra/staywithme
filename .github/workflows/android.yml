@@ -1,0 +1,115 @@
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - "native/**"
+      - "capacitor.config.ts"
+      - "package.json"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+# Needed to publish the APK as a release asset.
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # Release signing only kicks in once these repo secrets are configured.
+      HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+      ANDROID_VERSION_CODE: ${{ github.run_number }}
+      ANDROID_VERSION_NAME: 1.0.${{ github.run_number }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # The Android shell loads the live site, so no Next.js build is required —
+      # skip postinstall scripts to keep this fast and free of DB env vars.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      # Regenerates capacitor-cordova-android-plugins + copies native/www assets.
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      - name: Decode release keystore
+        if: env.HAS_KEYSTORE == 'true'
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.jks"
+
+      - name: Build APK
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ env.HAS_KEYSTORE == 'true' && format('{0}/release.jks', runner.temp) || '' }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          if [ "$HAS_KEYSTORE" = "true" ]; then
+            ./gradlew assembleRelease --no-daemon --stacktrace
+          else
+            ./gradlew assembleDebug --no-daemon --stacktrace
+          fi
+
+      - name: Collect APK
+        id: apk
+        run: |
+          src=$(find android/app/build/outputs/apk -name "*.apk" ! -name "*unsigned*" | head -n 1)
+          if [ -z "$src" ]; then
+            echo "::error::No APK was produced"
+            exit 1
+          fi
+          mkdir -p dist
+          cp "$src" "dist/StayWithMe-${ANDROID_VERSION_NAME}.apk"
+          echo "path=dist/StayWithMe-${ANDROID_VERSION_NAME}.apk" >> "$GITHUB_OUTPUT"
+          ls -lh dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StayWithMe-apk
+          path: ${{ steps.apk.outputs.path }}
+
+      # Rolling "android-latest" release so the download URL never changes.
+      - name: Publish to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view android-latest >/dev/null 2>&1 || \
+            gh release create android-latest \
+              --title "StayWithMe for Android" \
+              --notes "Latest Android build. Download the .apk below and open it on your phone to install." \
+              --latest=false
+
+          gh release upload android-latest "${{ steps.apk.outputs.path }}" --clobber
+
+          {
+            echo "### APK ready :rocket:"
+            echo ""
+            echo "Version \`${ANDROID_VERSION_NAME}\` (code \`${ANDROID_VERSION_CODE}\`)"
+            echo ""
+            if [ "$HAS_KEYSTORE" != "true" ]; then
+              echo "> Debug-signed build. Each run uses a fresh debug key, so uninstall the previous app before installing a new APK."
+            fi
+            echo ""
+            echo "**Download:** https://github.com/${{ github.repository }}/releases/tag/android-latest"
+          } >> "$GITHUB_STEP_SUMMARY"

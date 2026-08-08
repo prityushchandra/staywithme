@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Retro splash field, matched to native/www/splash.html. -->
+    <color name="splashBackground">#140F0D</color>
+
+    <!-- Override Capacitor's default indigo/pink with the StayWithMe palette. -->
+    <color name="colorPrimary">#C8705E</color>
+    <color name="colorPrimaryDark">#A84D3A</color>
+    <color name="colorAccent">#E8A020</color>
+</resources>
