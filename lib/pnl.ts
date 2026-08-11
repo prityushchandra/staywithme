@@ -79,17 +79,15 @@ function flatLabel(l: { title: string; flatNumber: string | null; block: string 
 const DAY_MS = 86_400_000;
 
 /**
- * Count vacant (unbooked) days for one flat in one month: days with NO
- * AvailabilityBlock covering them. Only fully-elapsed days are counted (strictly
- * before today) and never before the flat existed, so future/empty months and
- * pre-launch days don't inflate the number.
- */
-/**
  * Count AVAILABLE (still-bookable) days for one flat in one month: days that are
  * today-or-later and NOT covered by any AvailabilityBlock — i.e. exactly the
  * "open" days a guest could still book on the calendar. Past days aren't
  * available (you can't book them), and blocked/booked days aren't available, so
  * neither is counted. A fully-blocked or fully-past month yields 0.
+ *
+ * Deliberately NOT the complement of booked nights: this looks forward from
+ * today while nights look at the whole month, and dates blocked without a
+ * booking are neither available nor booked.
  */
 function countAvailableDays(
   monthKeyStr: string,
