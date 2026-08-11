@@ -37,6 +37,50 @@ describe("parseIcalBusyRanges", () => {
     expect(r[0].start.toISOString()).toBe("2026-06-25T00:00:00.000Z");
     expect(r[0].end.toISOString()).toBe("2026-06-26T00:00:00.000Z");
   });
+
+  // Both kinds block the calendar, but only a reservation earned money — the
+  // P&L divides online revenue by reserved nights alone.
+  it("marks dates the host blocked on the other platform as not reserved", () => {
+    const r = parseIcalBusyRanges(ics);
+    expect(r[0].reserved).toBe(false); // "Airbnb (Not available)"
+    expect(r[1].reserved).toBe(true); // no SUMMARY at all
+  });
+
+  it("marks Airbnb's 'Reserved' events as reservations", () => {
+    const feed = [
+      "BEGIN:VEVENT",
+      "DTSTART;VALUE=DATE:20260809",
+      "DTEND;VALUE=DATE:20260810",
+      "SUMMARY:Reserved",
+      "DESCRIPTION:Reservation URL: https://www.airbnb.com/hosting/reservations/x",
+      "END:VEVENT",
+    ].join("\r\n");
+    expect(parseIcalBusyRanges(feed)[0].reserved).toBe(true);
+  });
+
+  it("recognises other wordings for blocked dates", () => {
+    for (const s of ["Airbnb (Not available)", "Blocked", "Unavailable", "NOT AVAILABLE"]) {
+      const feed = `BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20260809\r\nDTEND;VALUE=DATE:20260810\r\nSUMMARY:${s}\r\nEND:VEVENT`;
+      expect(parseIcalBusyRanges(feed)[0].reserved).toBe(false);
+    }
+  });
+
+  it("does not leak a summary from one event into the next", () => {
+    const feed = [
+      "BEGIN:VEVENT",
+      "DTSTART;VALUE=DATE:20260809",
+      "DTEND;VALUE=DATE:20260810",
+      "SUMMARY:Airbnb (Not available)",
+      "END:VEVENT",
+      "BEGIN:VEVENT",
+      "DTSTART;VALUE=DATE:20260812",
+      "DTEND;VALUE=DATE:20260814",
+      "SUMMARY:Reserved",
+      "END:VEVENT",
+    ].join("\r\n");
+    const r = parseIcalBusyRanges(feed);
+    expect(r.map((x) => x.reserved)).toEqual([false, true]);
+  });
 });
 
 describe("isSafeIcalUrl", () => {

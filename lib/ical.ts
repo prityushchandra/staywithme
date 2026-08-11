@@ -1,7 +1,8 @@
 // Minimal iCalendar (RFC 5545) reading for external calendar import (Airbnb,
-// Vrbo, Booking.com all expose a per-listing .ics export URL). We only need the
-// busy date ranges, so we parse VEVENT DTSTART/DTEND and ignore everything else
-// — no dependency needed.
+// Vrbo, Booking.com all expose a per-listing .ics export URL). We need the busy
+// date ranges, plus whether each one is a real reservation or a date the host
+// merely blocked off — both make the date unavailable, but only a reservation
+// earned money, so the P&L needs to tell them apart. No dependency needed.
 
 import net from "node:net";
 
@@ -89,7 +90,16 @@ export function isSafeIcalUrl(raw: string): boolean {
 export interface BusyRange {
   start: Date; // check-in, inclusive (UTC midnight)
   end: Date; // check-out, exclusive — matches iCal's exclusive DTEND for all-day events
+  // A real booking, as opposed to dates the host blocked off on the other
+  // platform. Both make the dates unavailable; only a reservation earned money.
+  reserved: boolean;
 }
+
+// The note we stamp on imported blocks. Host-facing text that doubles as the
+// only record of which imported dates were actually booked, so the P&L can use
+// reservations alone as the denominator for the online daily rate.
+export const ICAL_RESERVED_NOTE = "Airbnb reservation";
+export const ICAL_BLOCKED_NOTE = "Blocked on Airbnb";
 
 // Parse a DTSTART/DTEND property line to a UTC-midnight date. Handles DATE
 // ("YYYYMMDD"), DATE-TIME ("YYYYMMDDTHHMMSSZ"), and TZID-prefixed values — we
@@ -104,6 +114,16 @@ function parseDate(line: string): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+/**
+ * Does a VEVENT summary describe a date the host blocked off rather than a
+ * booking? Airbnb emits "Reserved" for bookings and "Airbnb (Not available)"
+ * for manually-blocked dates. Anything we don't recognise counts as a booking,
+ * so feeds that export bookings without a descriptive summary keep working.
+ */
+function isBlockedSummary(summary: string): boolean {
+  return /not available|unavailable|blocked/i.test(summary);
+}
+
 /** Extract busy ranges from an iCal feed. */
 export function parseIcalBusyRanges(text: string): BusyRange[] {
   // Unfold folded lines (a CRLF followed by a space/tab continues the prior line).
@@ -114,21 +134,28 @@ export function parseIcalBusyRanges(text: string): BusyRange[] {
   let inEvent = false;
   let start: Date | null = null;
   let end: Date | null = null;
+  let summary = "";
 
   for (const line of lines) {
     if (line.startsWith("BEGIN:VEVENT")) {
       inEvent = true;
       start = end = null;
+      summary = "";
       continue;
     }
     if (line.startsWith("END:VEVENT")) {
-      if (start && end && end.getTime() > start.getTime()) ranges.push({ start, end });
+      if (start && end && end.getTime() > start.getTime())
+        ranges.push({ start, end, reserved: !isBlockedSummary(summary) });
       inEvent = false;
       continue;
     }
     if (!inEvent) continue;
     if (line.startsWith("DTSTART")) start = parseDate(line);
     else if (line.startsWith("DTEND")) end = parseDate(line);
+    else if (line.startsWith("SUMMARY")) {
+      const colon = line.indexOf(":");
+      if (colon !== -1) summary = line.slice(colon + 1).trim();
+    }
   }
   return ranges;
 }

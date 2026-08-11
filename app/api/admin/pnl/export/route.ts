@@ -6,6 +6,8 @@ import {
   summarize,
   scopeSummary,
   sourceRevenue,
+  sourceNights,
+  avgPerDay,
   filterFinancialYear,
   financialYearLabel,
   financialYearsFromMonths,
@@ -81,13 +83,15 @@ export async function GET(req: Request) {
   }
   summaryRows.push(
     ["Total revenue", rupees(scopedTotal.revenue)],
+    // Day counts are NOT currency, so keep them strings so the ₹ number format
+    // on this column doesn't apply to them.
+    ["Days booked", `${scopedTotal.nights}`],
+    ["Avg per booked day", scopedTotal.avgPerDay === null ? "—" : rupees(scopedTotal.avgPerDay)],
     ["Rent", rupees(total.rent)],
     ["Staff salaries", rupees(total.staff)],
     ["Total expenses", rupees(total.expenseTotal)],
     ["Net profit", rupees(scopedTotal.profit)],
     ["Net margin", pct(scopedTotal.margin)],
-    // A day count — NOT currency, so keep it a string so the ₹ number format on
-    // this column doesn't apply to it.
     ["Unbooked (available) days", `${total.unbookedDays}`]
   );
 
@@ -111,13 +115,37 @@ export async function GET(req: Request) {
   ];
 
   // --- By-flat sheet ---
-  const flatHeader = ["Flat", "Revenue", "Rent", "Staff", "Total expenses", "Net profit", "Margin", "Unbooked days"];
+  const flatHeader = ["Flat", "Revenue", "Days booked", "Avg / day", "Rent", "Staff", "Total expenses", "Net profit", "Margin", "Unbooked days"];
   const flatBody: XlsxValue[][] = perFlat.map((f) => {
     const rev = sourceRevenue(f, source);
     const profit = rev - f.expenseTotal;
     const margin = rev > 0 ? (profit / rev) * 100 : 0;
-    return [f.label, rupees(rev), rupees(f.rent), rupees(f.staff), rupees(f.expenseTotal), rupees(profit), pct(margin), f.unbookedDays];
+    const adr = avgPerDay(f, source);
+    return [
+      f.label,
+      rupees(rev),
+      sourceNights(f, source),
+      adr === null ? "—" : rupees(adr),
+      rupees(f.rent),
+      rupees(f.staff),
+      rupees(f.expenseTotal),
+      rupees(profit),
+      pct(margin),
+      f.unbookedDays,
+    ];
   });
+  const flatTotal: XlsxValue[] = [
+    "All flats",
+    rupees(scopedTotal.revenue),
+    scopedTotal.nights,
+    scopedTotal.avgPerDay === null ? "—" : rupees(scopedTotal.avgPerDay),
+    rupees(total.rent),
+    rupees(total.staff),
+    rupees(total.expenseTotal),
+    rupees(scopedTotal.profit),
+    pct(scopedTotal.margin),
+    total.unbookedDays,
+  ];
 
   const xlsx = buildXlsx([
     { name: "Summary", rows: summaryRows, headerRow: false, moneyColumns: [1], colWidths: [30, 16] },
@@ -130,10 +158,10 @@ export async function GET(req: Request) {
     },
     {
       name: "By flat",
-      rows: [flatHeader, ...flatBody],
+      rows: [flatHeader, ...flatBody, flatTotal],
       headerRow: true,
-      moneyColumns: [1, 2, 3, 4, 5],
-      colWidths: [26, 15, 12, 12, 15, 13, 9, 14],
+      moneyColumns: [1, 3, 4, 5, 6, 7],
+      colWidths: [26, 15, 13, 13, 12, 12, 15, 13, 9, 14],
     },
   ]);
 

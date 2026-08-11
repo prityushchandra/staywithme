@@ -21,6 +21,8 @@ import {
   summarize,
   scopeSummary,
   sourceRevenue,
+  sourceNights,
+  avgPerDay,
   filterFinancialYear,
   financialYearsFromMonths,
   financialYearLabel,
@@ -180,8 +182,13 @@ export function PnlDashboard({
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 xl:grid-cols-5">
         <Kpi label="Total revenue" value={formatINR(scoped.revenue)} sub={SOURCE_LABEL[source]} />
+        <Kpi
+          label="Avg per day"
+          value={scoped.avgPerDay === null ? "—" : formatINR(scoped.avgPerDay)}
+          sub={scoped.nights > 0 ? `over ${scoped.nights} booked ${scoped.nights === 1 ? "day" : "days"}` : "no booked days yet"}
+        />
         <Kpi label="Total expenses" value={formatINR(total.expenseTotal)} sub="rent + staff" />
         <Kpi label="Net profit" value={formatINR(scoped.profit)} sub={`${scoped.margin.toFixed(1)}% margin`} valueClass={profitColor} />
         <Kpi label="Unbooked days" value={String(total.unbookedDays)} sub="available, not booked" />
@@ -340,13 +347,19 @@ export function PnlDashboard({
       {/* Per-flat P&L table */}
       {perFlat.length > 0 && (
         <section className="rounded-xl border p-5">
-          <h2 className="mb-4 font-semibold">By flat · {scopeLabel}</h2>
+          <h2 className="mb-1 font-semibold">By flat · {scopeLabel}</h2>
+          <p className="mb-4 text-xs text-muted-foreground">
+            Avg per day is that flat&apos;s {SOURCE_LABEL[source].toLowerCase()} revenue divided by the nights
+            actually booked, so it reflects the rate you really achieved — not the listed price.
+          </p>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[620px] text-sm">
+            <table className="w-full min-w-[760px] text-sm">
               <thead className="text-left text-muted-foreground">
                 <tr className="border-b">
                   <th className="py-2 font-medium">Flat</th>
                   <th className="py-2 text-right font-medium">Revenue</th>
+                  <th className="py-2 text-right font-medium">Days booked</th>
+                  <th className="py-2 text-right font-medium">Avg / day</th>
                   <th className="py-2 text-right font-medium">Expenses</th>
                   <th className="py-2 text-right font-medium">Profit</th>
                   <th className="py-2 text-right font-medium">Margin</th>
@@ -357,10 +370,14 @@ export function PnlDashboard({
                   const rev = sourceRevenue(f, source);
                   const profit = rev - f.expenseTotal;
                   const margin = rev > 0 ? (profit / rev) * 100 : 0;
+                  const nights = sourceNights(f, source);
+                  const adr = avgPerDay(f, source);
                   return (
                     <tr key={f.listingId} className="border-b last:border-0">
                       <td className="py-2 font-medium">{f.label}</td>
                       <td className="py-2 text-right">{formatINR(rev)}</td>
+                      <td className="py-2 text-right text-muted-foreground">{nights}</td>
+                      <td className="py-2 text-right font-medium">{adr === null ? "—" : formatINR(adr)}</td>
                       <td className="py-2 text-right text-muted-foreground">{formatINR(f.expenseTotal)}</td>
                       <td className={`py-2 text-right font-medium ${profit >= 0 ? "" : "text-destructive"}`}>{formatINR(profit)}</td>
                       <td className="py-2 text-right text-muted-foreground">{margin.toFixed(0)}%</td>
@@ -368,6 +385,17 @@ export function PnlDashboard({
                   );
                 })}
               </tbody>
+              <tfoot>
+                <tr className="border-t-2">
+                  <td className="py-2 font-semibold">All flats</td>
+                  <td className="py-2 text-right font-semibold">{formatINR(scoped.revenue)}</td>
+                  <td className="py-2 text-right font-semibold">{scoped.nights}</td>
+                  <td className="py-2 text-right font-semibold">{scoped.avgPerDay === null ? "—" : formatINR(scoped.avgPerDay)}</td>
+                  <td className="py-2 text-right font-semibold">{formatINR(total.expenseTotal)}</td>
+                  <td className="py-2 text-right font-semibold">{formatINR(scoped.profit)}</td>
+                  <td className="py-2 text-right font-semibold">{scoped.margin.toFixed(0)}%</td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         </section>

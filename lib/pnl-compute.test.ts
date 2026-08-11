@@ -7,9 +7,21 @@ import {
   monthsOfFinancialYear,
   filterFinancialYear,
   sourceRevenue,
+  sourceNights,
+  avgPerDay,
+  stayNights,
+  eachNight,
+  icalNightsByMonth,
   scopeSummary,
   summarize,
+  perFlatBreakdown,
 } from "./pnl-compute";
+
+const utc = (s: string) => new Date(`${s}T00:00:00.000Z`);
+const monthStart = (ym: string) => {
+  const [y, m] = ym.split("-").map(Number);
+  return Date.UTC(y, m - 1, 1);
+};
 
 function row(partial: Partial<PnlListingMonth> & { listingId: string; month: string }): PnlListingMonth {
   const [y, m] = partial.month.split("-").map(Number);
@@ -22,6 +34,9 @@ function row(partial: Partial<PnlListingMonth> & { listingId: string; month: str
     revenueDirect: partial.revenueDirect ?? 0,
     revenueOffline: partial.revenueOffline ?? 0,
     revenueOnline: partial.revenueOnline ?? 0,
+    nightsDirect: partial.nightsDirect ?? 0,
+    nightsOffline: partial.nightsOffline ?? 0,
+    nightsOnline: partial.nightsOnline ?? 0,
     rent: partial.rent ?? 0,
     staff: partial.staff ?? 0,
     unbookedDays: partial.unbookedDays ?? 0,
@@ -98,5 +113,184 @@ describe("summarize", () => {
     expect(t.expenseTotal).toBe(150);
     expect(t.profit).toBe(550);
     expect(t.unbookedDays).toBe(8);
+  });
+
+  it("aggregates booked nights per channel", () => {
+    const t = summarize([
+      row({ listingId: "a", month: "2026-05", nightsOnline: 4, nightsOffline: 2, nightsDirect: 1 }),
+      row({ listingId: "a", month: "2026-06", nightsOnline: 3 }),
+    ]);
+    expect(t.nightsOnline).toBe(7);
+    expect(t.nightsOffline).toBe(2);
+    expect(t.nightsDirect).toBe(1);
+    expect(t.nightsTotal).toBe(10);
+  });
+});
+
+describe("average per booked day", () => {
+  const r = row({
+    listingId: "a",
+    month: "2026-05",
+    revenueOnline: 40_000, // ₹400 over 4 nights  → ₹100/night
+    revenueOffline: 18_000,
+    revenueDirect: 6_000, // ₹240 over 3 nights   → ₹80/night
+    nightsOnline: 4,
+    nightsOffline: 2,
+    nightsDirect: 1,
+  });
+
+  it("sums nights for the chosen channel", () => {
+    expect(sourceNights(r, "online")).toBe(4);
+    expect(sourceNights(r, "offline")).toBe(3); // offline + direct
+    expect(sourceNights(r, "both")).toBe(7);
+  });
+
+  it("divides channel revenue by that channel's booked nights", () => {
+    expect(avgPerDay(r, "online")).toBe(10_000);
+    expect(avgPerDay(r, "offline")).toBe(8_000);
+    expect(avgPerDay(r, "both")).toBe(Math.round(64_000 / 7));
+  });
+
+  it("returns null rather than 0 when nothing was booked", () => {
+    // Revenue with no nights (e.g. an Airbnb payout with no calendar synced)
+    // has no meaningful average — 0 would read as "earned nothing".
+    const noNights = row({ listingId: "b", month: "2026-05", revenueOnline: 50_000 });
+    expect(avgPerDay(noNights, "online")).toBeNull();
+    expect(avgPerDay(noNights, "both")).toBeNull();
+  });
+
+  it("is a weighted average across flats, not an average of averages", () => {
+    const rows = [
+      row({ listingId: "a", month: "2026-05", revenueOffline: 30_000, nightsOffline: 10 }), // ₹30/night
+      row({ listingId: "b", month: "2026-05", revenueOffline: 20_000, nightsOffline: 2 }), // ₹100/night
+    ];
+    const t = summarize(rows);
+    // 50_000 / 12, not (30_000/10 + 20_000/2) / 2.
+    expect(avgPerDay(t, "offline")).toBe(Math.round(50_000 / 12));
+  });
+
+  it("exposes nights and the daily rate on a scoped summary", () => {
+    const scoped = scopeSummary(summarize([r]), "online");
+    expect(scoped.nights).toBe(4);
+    expect(scoped.avgPerDay).toBe(10_000);
+  });
+
+  it("carries nights through the per-flat breakdown", () => {
+    const flats = perFlatBreakdown([
+      row({ listingId: "a", label: "A-101", month: "2026-05", revenueOffline: 30_000, nightsOffline: 3 }),
+      row({ listingId: "a", label: "A-101", month: "2026-06", revenueOffline: 10_000, nightsOffline: 1 }),
+    ]);
+    expect(flats).toHaveLength(1);
+    expect(sourceNights(flats[0], "offline")).toBe(4);
+    expect(avgPerDay(flats[0], "offline")).toBe(10_000);
+  });
+});
+
+describe("stayNights", () => {
+  it("counts nights, not calendar days touched", () => {
+    expect(stayNights(utc("2026-05-01"), utc("2026-05-04"))).toBe(3);
+  });
+
+  it("ignores the time of day on check-in/check-out", () => {
+    expect(stayNights(new Date("2026-05-01T18:30:00Z"), new Date("2026-05-04T05:00:00Z"))).toBe(3);
+  });
+
+  it("counts a same-day or malformed stay as one booked day", () => {
+    // A 0 here would fold revenue into the daily rate with nothing to divide by.
+    expect(stayNights(utc("2026-05-01"), utc("2026-05-01"))).toBe(1);
+    expect(stayNights(utc("2026-05-04"), utc("2026-05-01"))).toBe(1);
+  });
+
+  it("spans month and year boundaries", () => {
+    expect(stayNights(utc("2025-12-30"), utc("2026-01-02"))).toBe(3);
+  });
+});
+
+describe("eachNight", () => {
+  it("yields the occupied nights, excluding the check-out day", () => {
+    expect(eachNight(utc("2026-05-01"), utc("2026-05-04"))).toEqual([
+      utc("2026-05-01").getTime(),
+      utc("2026-05-02").getTime(),
+      utc("2026-05-03").getTime(),
+    ]);
+  });
+
+  it("yields nothing for a same-day stay so back-to-back stays never collide", () => {
+    expect(eachNight(utc("2026-05-01"), utc("2026-05-01"))).toEqual([]);
+  });
+});
+
+describe("icalNightsByMonth", () => {
+  const win = { from: monthStart("2026-05"), to: monthStart("2026-07") };
+
+  it("attributes nights to the month they actually fall in", () => {
+    const got = icalNightsByMonth(
+      [{ startDate: utc("2026-05-30"), endDate: utc("2026-06-03") }],
+      new Set(),
+      win.from,
+      win.to
+    );
+    // Revenue arrives as a monthly lump sum, so nights must split by calendar
+    // month too — not pile onto the check-in month.
+    expect(Object.fromEntries(got)).toEqual({ "2026-05": 2, "2026-06": 2 });
+  });
+
+  it("skips nights already covered by a booking we hold a record for", () => {
+    const recorded = new Set(eachNight(utc("2026-05-10"), utc("2026-05-13")));
+    const got = icalNightsByMonth(
+      [{ startDate: utc("2026-05-10"), endDate: utc("2026-05-15") }],
+      recorded,
+      win.from,
+      win.to
+    );
+    // The same Airbnb stay entered by hand AND imported over iCal must count once.
+    expect(got.get("2026-05")).toBe(2);
+  });
+
+  it("drops a fully duplicated stay entirely", () => {
+    const recorded = new Set(eachNight(utc("2026-05-10"), utc("2026-05-15")));
+    const got = icalNightsByMonth(
+      [{ startDate: utc("2026-05-10"), endDate: utc("2026-05-15") }],
+      recorded,
+      win.from,
+      win.to
+    );
+    expect(got.size).toBe(0);
+  });
+
+  it("clamps stays that overhang the reporting window", () => {
+    const got = icalNightsByMonth(
+      [{ startDate: utc("2026-04-28"), endDate: utc("2026-05-03") }],
+      new Set(),
+      win.from,
+      win.to
+    );
+    expect(Object.fromEntries(got)).toEqual({ "2026-05": 2 });
+  });
+
+  it("ignores stays entirely outside the window", () => {
+    const got = icalNightsByMonth(
+      [
+        { startDate: utc("2026-03-01"), endDate: utc("2026-03-05") },
+        { startDate: utc("2026-08-01"), endDate: utc("2026-08-05") },
+      ],
+      new Set(),
+      win.from,
+      win.to
+    );
+    expect(got.size).toBe(0);
+  });
+
+  it("accumulates across several stays in the same month", () => {
+    const got = icalNightsByMonth(
+      [
+        { startDate: utc("2026-05-01"), endDate: utc("2026-05-04") },
+        { startDate: utc("2026-05-20"), endDate: utc("2026-05-22") },
+      ],
+      new Set(),
+      win.from,
+      win.to
+    );
+    expect(got.get("2026-05")).toBe(5);
   });
 });

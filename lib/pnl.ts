@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/db";
 import { memo } from "@/lib/memo";
+import { eachNight, floorDayUtc, icalNightsByMonth, monthKeyOf, stayNights } from "@/lib/pnl-compute";
+import { ICAL_RESERVED_NOTE } from "@/lib/ical";
 
 // Profit & Loss data model. Everything is in MINOR units (paise).
 //
@@ -22,6 +24,14 @@ export interface PnlListingMonth {
   revenueDirect: number;
   revenueOffline: number;
   revenueOnline: number;
+  // Nights actually booked, paired with the revenue bucket above so that
+  // revenue / nights is a meaningful average daily rate. Booking-derived nights
+  // land in the CHECK-IN month (exactly where their revenue is booked), and
+  // iCal-imported Airbnb nights land in the month they fall in (exactly where
+  // the monthly OnlineEarning figure they belong to is booked).
+  nightsDirect: number;
+  nightsOffline: number;
+  nightsOnline: number;
   rent: number;
   staff: number;
   // Vacant days still available to book on the calendar: today-or-later days in
@@ -41,7 +51,7 @@ export interface PnlData {
 const MAX_MONTHS = 48;
 
 function monthKey(d: Date): string {
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+  return monthKeyOf(d.getTime());
 }
 function ymToIndex(key: string): number {
   const [y, m] = key.split("-").map(Number);
@@ -56,15 +66,17 @@ function splitYm(key: string): { year: number; monthIndex: number } {
   const [y, m] = key.split("-").map(Number);
   return { year: y, monthIndex: m - 1 };
 }
+/** UTC midnight on the 1st of a "YYYY-MM". */
+function monthStartMs(key: string): number {
+  const [y, m] = key.split("-").map(Number);
+  return Date.UTC(y, m - 1, 1);
+}
 function flatLabel(l: { title: string; flatNumber: string | null; block: string | null }) {
   const base = l.flatNumber?.trim() || l.title;
   return l.block?.trim() ? `${base}, ${l.block.trim()}` : base;
 }
 
 const DAY_MS = 86_400_000;
-function floorDayUtc(d: Date): number {
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-}
 
 /**
  * Count vacant (unbooked) days for one flat in one month: days with NO
@@ -108,15 +120,15 @@ export async function getPnlData(): Promise<PnlData> {
         }),
         prisma.booking.findMany({
           where: { status: "CONFIRMED" },
-          select: { listingId: true, checkIn: true, totalAmount: true },
+          select: { listingId: true, checkIn: true, checkOut: true, totalAmount: true },
         }),
         prisma.offlineBooking.findMany({
           where: { status: "CONFIRMED" },
-          select: { listingId: true, checkIn: true, totalPrice: true, source: true },
+          select: { listingId: true, checkIn: true, checkOut: true, totalPrice: true, source: true },
         }),
         prisma.onlineEarning.findMany({ select: { listingId: true, month: true, amount: true } }),
         prisma.staffPayroll.findMany({ select: { listingId: true, month: true, pay: true } }),
-        prisma.availabilityBlock.findMany({ select: { listingId: true, startDate: true, endDate: true } }),
+        prisma.availabilityBlock.findMany({ select: { listingId: true, startDate: true, endDate: true, kind: true, note: true } }),
       ]);
 
     const listingMeta = new Map(
@@ -175,6 +187,9 @@ export async function getPnlData(): Promise<PnlData> {
           revenueDirect: 0,
           revenueOffline: 0,
           revenueOnline: 0,
+          nightsDirect: 0,
+          nightsOffline: 0,
+          nightsOnline: 0,
           rent: 0,
           staff: 0,
           unbookedDays: 0,
@@ -184,22 +199,66 @@ export async function getPnlData(): Promise<PnlData> {
       return c;
     }
 
+    // Every night covered by a booking we hold a record for, so an Airbnb stay
+    // that was ALSO entered by hand isn't counted twice against the iCal feed.
+    const recordedNights = new Map<string, Set<number>>();
+    function markRecorded(listingId: string, checkIn: Date, checkOut: Date) {
+      let set = recordedNights.get(listingId);
+      if (!set) {
+        set = new Set<number>();
+        recordedNights.set(listingId, set);
+      }
+      for (const t of eachNight(checkIn, checkOut)) set.add(t);
+    }
+
     for (const b of directBookings) {
       const m = monthKey(b.checkIn);
-      if (monthSet.has(m) && listingMeta.has(b.listingId)) cell(b.listingId, m).revenueDirect += Math.max(0, b.totalAmount);
+      if (!monthSet.has(m) || !listingMeta.has(b.listingId)) continue;
+      const c = cell(b.listingId, m);
+      c.revenueDirect += Math.max(0, b.totalAmount);
+      c.nightsDirect += stayNights(b.checkIn, b.checkOut);
+      markRecorded(b.listingId, b.checkIn, b.checkOut);
     }
     for (const b of offlineBookings) {
       const m = monthKey(b.checkIn);
       if (!monthSet.has(m) || !listingMeta.has(b.listingId)) continue;
       const c = cell(b.listingId, m);
-      if (b.source === "AIRBNB") c.revenueOnline += Math.max(0, b.totalPrice);
-      else c.revenueOffline += Math.max(0, b.totalPrice);
+      const nights = stayNights(b.checkIn, b.checkOut);
+      if (b.source === "AIRBNB") {
+        c.revenueOnline += Math.max(0, b.totalPrice);
+        c.nightsOnline += nights;
+      } else {
+        c.revenueOffline += Math.max(0, b.totalPrice);
+        c.nightsOffline += nights;
+      }
+      markRecorded(b.listingId, b.checkIn, b.checkOut);
     }
     for (const e of onlineEarnings) {
       if (monthSet.has(e.month) && listingMeta.has(e.listingId)) cell(e.listingId, e.month).revenueOnline += Math.max(0, e.amount);
     }
     for (const s of staffPayroll) {
       if (monthSet.has(s.month) && listingMeta.has(s.listingId)) cell(s.listingId, s.month).staff += Math.max(0, s.pay);
+    }
+
+    // Airbnb reservations imported from the iCal feed carry no money of their own
+    // — that arrives as the monthly OnlineEarning figure — but they are the only
+    // record of how many nights that money covered, so they supply the denominator
+    // for the online average daily rate. Dates the host merely BLOCKED on Airbnb
+    // are imported too and must be excluded: they earned nothing, and counting
+    // them would silently drag the average rate down.
+    const windowStartMs = monthStartMs(months[0]);
+    const windowEndMs = monthStartMs(indexToYm(maxIdx + 1));
+    const icalByListing = new Map<string, { startDate: Date; endDate: Date }[]>();
+    for (const b of allBlocks) {
+      if (b.kind !== "ICAL" || b.note !== ICAL_RESERVED_NOTE || !listingMeta.has(b.listingId)) continue;
+      const list = icalByListing.get(b.listingId);
+      if (list) list.push(b);
+      else icalByListing.set(b.listingId, [b]);
+    }
+    for (const [listingId, blocks] of icalByListing) {
+      const recorded = recordedNights.get(listingId) ?? new Set<number>();
+      const byMonth = icalNightsByMonth(blocks, recorded, windowStartMs, windowEndMs);
+      for (const [m, nights] of byMonth) cell(listingId, m).nightsOnline += nights;
     }
 
     // Rent accrues monthly from the flat's first month through the current month

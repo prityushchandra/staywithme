@@ -8,6 +8,10 @@ export interface PnlSummary {
   revenueOffline: number;
   revenueOnline: number;
   revenueTotal: number;
+  nightsDirect: number;
+  nightsOffline: number;
+  nightsOnline: number;
+  nightsTotal: number;
   rent: number;
   staff: number;
   expenseTotal: number;
@@ -20,6 +24,66 @@ export interface PnlSummary {
 // direct/walk-in bookings; "online" is Airbnb; "both" is everything.
 export type PnlSource = "both" | "online" | "offline";
 
+const DAY_MS = 86_400_000;
+
+/** UTC midnight of the day `d` falls on. */
+export function floorDayUtc(d: Date): number {
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+/** "YYYY-MM" for a UTC timestamp. */
+export function monthKeyOf(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/**
+ * Nights in a stay. Clamped to at least 1 so a same-day (or malformed) record
+ * still counts as a booked day — a 0 would otherwise pull revenue into the
+ * average daily rate with nothing to divide it by.
+ */
+export function stayNights(checkIn: Date, checkOut: Date): number {
+  return Math.max(1, Math.round((floorDayUtc(checkOut) - floorDayUtc(checkIn)) / DAY_MS));
+}
+
+/** Every night a stay occupies, as UTC day timestamps. */
+export function eachNight(checkIn: Date, checkOut: Date): number[] {
+  const out: number[] = [];
+  const end = floorDayUtc(checkOut);
+  for (let t = floorDayUtc(checkIn); t < end; t += DAY_MS) out.push(t);
+  return out;
+}
+
+/**
+ * Nights per month from Airbnb reservations imported over iCal.
+ *
+ * Those blocks carry no money of their own — that arrives as the monthly
+ * OnlineEarning figure — but they are the only record of how many nights that
+ * money covered, so they supply the denominator for the online daily rate.
+ * Nights land in the month they actually fall in, matching how the monthly
+ * earning figure is booked. Days already covered by a booking we hold a record
+ * for are skipped, so an Airbnb stay that was ALSO entered by hand isn't
+ * counted twice.
+ */
+export function icalNightsByMonth(
+  blocks: { startDate: Date; endDate: Date }[],
+  recorded: Set<number>,
+  windowStartMs: number,
+  windowEndMs: number
+): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const b of blocks) {
+    const from = Math.max(floorDayUtc(b.startDate), windowStartMs);
+    const to = Math.min(floorDayUtc(b.endDate), windowEndMs);
+    for (let t = from; t < to; t += DAY_MS) {
+      if (recorded.has(t)) continue;
+      const key = monthKeyOf(t);
+      out.set(key, (out.get(key) ?? 0) + 1);
+    }
+  }
+  return out;
+}
+
 /** Revenue for the chosen channel from a summary's buckets. */
 export function sourceRevenue(
   s: { revenueOnline: number; revenueOffline: number; revenueDirect: number },
@@ -30,10 +94,46 @@ export function sourceRevenue(
   return s.revenueOnline + s.revenueOffline + s.revenueDirect;
 }
 
+/** Booked nights for the chosen channel — the denominator of the daily rate. */
+export function sourceNights(
+  s: { nightsOnline: number; nightsOffline: number; nightsDirect: number },
+  source: PnlSource
+): number {
+  if (source === "online") return s.nightsOnline;
+  if (source === "offline") return s.nightsOffline + s.nightsDirect;
+  return s.nightsOnline + s.nightsOffline + s.nightsDirect;
+}
+
+/**
+ * Average daily rate: what a booked day actually earned, in paise.
+ *
+ * `null` when nothing was booked — a flat with revenue but no recorded nights
+ * (e.g. an Airbnb payout entered with no calendar synced) has no meaningful
+ * average, and showing 0 would read as "earned nothing" rather than "unknown".
+ */
+export function avgPerDay(
+  s: {
+    revenueOnline: number;
+    revenueOffline: number;
+    revenueDirect: number;
+    nightsOnline: number;
+    nightsOffline: number;
+    nightsDirect: number;
+  },
+  source: PnlSource
+): number | null {
+  const nights = sourceNights(s, source);
+  if (nights <= 0) return null;
+  return Math.round(sourceRevenue(s, source) / nights);
+}
+
 export function summarize(rows: PnlListingMonth[]): PnlSummary {
   let revenueDirect = 0;
   let revenueOffline = 0;
   let revenueOnline = 0;
+  let nightsDirect = 0;
+  let nightsOffline = 0;
+  let nightsOnline = 0;
   let rent = 0;
   let staff = 0;
   let unbookedDays = 0;
@@ -41,23 +141,45 @@ export function summarize(rows: PnlListingMonth[]): PnlSummary {
     revenueDirect += r.revenueDirect;
     revenueOffline += r.revenueOffline;
     revenueOnline += r.revenueOnline;
+    nightsDirect += r.nightsDirect;
+    nightsOffline += r.nightsOffline;
+    nightsOnline += r.nightsOnline;
     rent += r.rent;
     staff += r.staff;
     unbookedDays += r.unbookedDays;
   }
   const revenueTotal = revenueDirect + revenueOffline + revenueOnline;
+  const nightsTotal = nightsDirect + nightsOffline + nightsOnline;
   const expenseTotal = rent + staff;
   const profit = revenueTotal - expenseTotal;
   const margin = revenueTotal > 0 ? (profit / revenueTotal) * 100 : 0;
-  return { revenueDirect, revenueOffline, revenueOnline, revenueTotal, rent, staff, expenseTotal, profit, margin, unbookedDays };
+  return {
+    revenueDirect,
+    revenueOffline,
+    revenueOnline,
+    revenueTotal,
+    nightsDirect,
+    nightsOffline,
+    nightsOnline,
+    nightsTotal,
+    rent,
+    staff,
+    expenseTotal,
+    profit,
+    margin,
+    unbookedDays,
+  };
 }
 
-/** Source-scoped {revenue, profit, margin} for a summary. Expenses are fixed. */
-export function scopeSummary(s: PnlSummary, source: PnlSource): { revenue: number; profit: number; margin: number } {
+/** Source-scoped {revenue, profit, margin, nights, avgPerDay} for a summary. Expenses are fixed. */
+export function scopeSummary(
+  s: PnlSummary,
+  source: PnlSource
+): { revenue: number; profit: number; margin: number; nights: number; avgPerDay: number | null } {
   const revenue = sourceRevenue(s, source);
   const profit = revenue - s.expenseTotal;
   const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
-  return { revenue, profit, margin };
+  return { revenue, profit, margin, nights: sourceNights(s, source), avgPerDay: avgPerDay(s, source) };
 }
 
 // --- Indian financial year (April 1 – March 31) ----------------------------

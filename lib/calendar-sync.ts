@@ -8,7 +8,7 @@ import dns from "node:dns/promises";
 import { revalidateTag } from "next/cache";
 import { prisma } from "./db";
 import { clearMemo } from "./memo";
-import { isSafeIcalUrl, isPrivateIp, parseIcalBusyRanges } from "./ical";
+import { isSafeIcalUrl, isPrivateIp, parseIcalBusyRanges, ICAL_RESERVED_NOTE, ICAL_BLOCKED_NOTE } from "./ical";
 
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_BYTES = 2_000_000;
@@ -106,7 +106,7 @@ export async function syncListingCalendar(listingId: string): Promise<SyncResult
               startDate: r.start,
               endDate: r.end,
               kind: "ICAL",
-              note: "Imported from Airbnb",
+              note: r.reserved ? ICAL_RESERVED_NOTE : ICAL_BLOCKED_NOTE,
             })),
           }),
         ]
