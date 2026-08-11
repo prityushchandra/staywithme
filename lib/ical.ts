@@ -101,6 +101,19 @@ export interface BusyRange {
 export const ICAL_RESERVED_NOTE = "Airbnb reservation";
 export const ICAL_BLOCKED_NOTE = "Blocked on Airbnb";
 
+/**
+ * The date from which a freshly-fetched feed is authoritative.
+ *
+ * Airbnb drops dates from its export once they're old enough, so replacing every
+ * imported block on each sync would erase past stays we still need — they record
+ * how many nights an already-banked payout covered. Imported blocks ending on or
+ * before this cutoff are kept as history; everything after it is the feed's to
+ * decide, so a cancelled or emptied calendar still frees those dates up.
+ */
+export function icalAuthoritativeFrom(ranges: BusyRange[], today: Date): Date {
+  return ranges.reduce<Date>((min, r) => (r.start < min ? r.start : min), today);
+}
+
 // Parse a DTSTART/DTEND property line to a UTC-midnight date. Handles DATE
 // ("YYYYMMDD"), DATE-TIME ("YYYYMMDDTHHMMSSZ"), and TZID-prefixed values — we
 // floor to the calendar day, which is the granularity availability needs.

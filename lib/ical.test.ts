@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isSafeIcalUrl, isPrivateIp, parseIcalBusyRanges, buildIcalFeed } from "./ical";
+import { isSafeIcalUrl, isPrivateIp, parseIcalBusyRanges, icalAuthoritativeFrom, buildIcalFeed } from "./ical";
 
 const ics = [
   "BEGIN:VCALENDAR",
@@ -165,5 +165,39 @@ describe("buildIcalFeed", () => {
     expect(empty).toContain("END:VCALENDAR");
     expect(empty).not.toContain("BEGIN:VEVENT");
     expect(parseIcalBusyRanges(empty)).toHaveLength(0);
+  });
+});
+
+describe("icalAuthoritativeFrom", () => {
+  const today = new Date("2026-08-12T00:00:00.000Z");
+  const range = (s: string, e: string) => ({
+    start: new Date(`${s}T00:00:00.000Z`),
+    end: new Date(`${e}T00:00:00.000Z`),
+    reserved: true,
+  });
+
+  it("starts at the feed's earliest event when that predates today", () => {
+    // Airbnb still reports Aug 5, so it is authoritative from there — anything
+    // older has aged out of the export and must be kept as history.
+    const cut = icalAuthoritativeFrom([range("2026-08-17", "2026-08-24"), range("2026-08-05", "2026-08-10")], today);
+    expect(cut.toISOString()).toBe("2026-08-05T00:00:00.000Z");
+  });
+
+  it("never reaches past today when every event is in the future", () => {
+    // Today onwards is always the feed's to decide, so dates it dropped still free up.
+    const cut = icalAuthoritativeFrom([range("2026-09-01", "2026-09-05")], today);
+    expect(cut.toISOString()).toBe("2026-08-12T00:00:00.000Z");
+  });
+
+  it("falls back to today for an emptied calendar", () => {
+    expect(icalAuthoritativeFrom([], today).toISOString()).toBe("2026-08-12T00:00:00.000Z");
+  });
+
+  it("keeps history that ends before the cutoff and yields to the feed after it", () => {
+    const cut = icalAuthoritativeFrom([range("2026-08-05", "2026-08-10")], today);
+    const endsBefore = (e: string) => new Date(`${e}T00:00:00.000Z`) <= cut;
+    expect(endsBefore("2026-07-28")).toBe(true); // aged-out July stay — kept
+    expect(endsBefore("2026-08-05")).toBe(true); // ends exactly at the cutoff — kept, no overlap
+    expect(endsBefore("2026-08-06")).toBe(false); // overlaps the feed — replaced
   });
 });

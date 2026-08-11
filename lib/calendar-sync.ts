@@ -1,14 +1,14 @@
 // External calendar (iCal) import. Fetches a listing's Airbnb/Vrbo/etc. .ics
 // export, parses busy ranges, and mirrors them as AvailabilityBlock rows of kind
 // "ICAL" so those dates show as unavailable here and can't be double-booked.
-// Re-syncing fully replaces the prior ICAL blocks (so a freed Airbnb date frees
-// up here too) without touching our own MANUAL/BOOKING blocks.
+// Re-syncing replaces the prior ICAL blocks the feed still covers (so a freed
+// Airbnb date frees up here too) without touching our own MANUAL/BOOKING blocks.
 
 import dns from "node:dns/promises";
 import { revalidateTag } from "next/cache";
 import { prisma } from "./db";
 import { clearMemo } from "./memo";
-import { isSafeIcalUrl, isPrivateIp, parseIcalBusyRanges, ICAL_RESERVED_NOTE, ICAL_BLOCKED_NOTE } from "./ical";
+import { isSafeIcalUrl, isPrivateIp, parseIcalBusyRanges, icalAuthoritativeFrom, ICAL_RESERVED_NOTE, ICAL_BLOCKED_NOTE } from "./ical";
 
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_BYTES = 2_000_000;
@@ -95,9 +95,15 @@ export async function syncListingCalendar(listingId: string): Promise<SyncResult
 
   const ranges = parseIcalBusyRanges(text);
 
-  // Replace all prior imported blocks atomically; leave MANUAL/BOOKING untouched.
+  // Keep imported dates the feed no longer speaks for (see icalAuthoritativeFrom).
+  const now = new Date();
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const earliest = icalAuthoritativeFrom(ranges, today);
+
+  // Replace the imported blocks the feed still speaks for; leave MANUAL/BOOKING
+  // and aged-out history untouched.
   await prisma.$transaction([
-    prisma.availabilityBlock.deleteMany({ where: { listingId, kind: "ICAL" } }),
+    prisma.availabilityBlock.deleteMany({ where: { listingId, kind: "ICAL", endDate: { gt: earliest } } }),
     ...(ranges.length
       ? [
           prisma.availabilityBlock.createMany({
