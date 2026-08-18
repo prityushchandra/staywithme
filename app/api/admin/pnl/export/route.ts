@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { getPnlData } from "@/lib/pnl";
+import { syncStaleCalendars } from "@/lib/calendar-sync";
 import {
   monthlyBreakdown,
   perFlatBreakdown,
@@ -46,6 +47,9 @@ export async function GET(req: Request) {
   }
 
   const url = new URL(req.url);
+  // Same refresh as the dashboard, so a downloaded sheet can't disagree with the
+  // page it was exported from. Usually a no-op: the dashboard view just synced.
+  await syncStaleCalendars(60_000);
   const data = await getPnlData();
 
   const fyList = financialYearsFromMonths(data.months);

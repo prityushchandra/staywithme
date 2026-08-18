@@ -127,6 +127,9 @@ export async function syncListingCalendar(listingId: string): Promise<SyncResult
   // Invalidate only THIS listing's cached blocks — syncing on every owner view
   // shouldn't wipe the whole in-process cache.
   clearMemo(`active-blocks:${listingId}`);
+  // The P&L counts available days off these same blocks, so a sync that changed
+  // them must not stay hidden behind that page's cached snapshot.
+  clearMemo("admin-pnl");
   return { ok: true, count: ranges.length };
 }
 
@@ -164,4 +167,38 @@ export async function runAllCalendarSync(): Promise<{ synced: number; failed: nu
     else failed++;
   }
   return { synced, failed };
+}
+
+/**
+ * Refresh every listing whose calendar is older than `maxAgeMs`, for pages that
+ * report on availability rather than display one listing's calendar.
+ *
+ * Unlike the cron's runAllCalendarSync these go out in parallel and are bounded
+ * by `budgetMs`, because a page is waiting on them: one unreachable feed must not
+ * hold up the render. Work that overruns the budget still lands in the database
+ * and shows up on the next load. Never throws.
+ */
+export async function syncStaleCalendars(maxAgeMs: number, budgetMs = 6_000): Promise<void> {
+  const cutoff = new Date(Date.now() - maxAgeMs);
+  const listings = await prisma.listing
+    .findMany({
+      where: {
+        icalUrl: { not: null },
+        OR: [{ icalSyncedAt: null }, { icalSyncedAt: { lt: cutoff } }],
+      },
+      select: { id: true },
+    })
+    .catch(() => []);
+  if (!listings.length) return;
+
+  const work = Promise.allSettled(listings.map((l) => syncListingCalendar(l.id)));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const budget = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, budgetMs);
+  });
+  try {
+    await Promise.race([work, budget]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
