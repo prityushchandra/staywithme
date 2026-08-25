@@ -128,48 +128,6 @@ export function countAvailableDays(
   return count;
 }
 
-/**
- * Count DOTS for one flat in one month — the backward-looking twin of
- * countAvailableDays. A dot is a day that is simply gone: the flat was live, it
- * earned nothing, and midnight passed. countAvailableDays counts days still left
- * to sell; this counts the ones already lost.
- *
- * A day is a dot when it is strictly BEFORE today, on/after the flat's first day,
- * and no money was made on it — `sold` holds every night covered by a booking or
- * an Airbnb reservation.
- *
- * The one exclusion is a MANUAL block: dates the host deliberately took off the
- * market in our own app were never for sale, so losing them isn't a loss.
- *
- * ICAL blocks deliberately do NOT excuse a day. Airbnb closes a date off once it
- * can no longer be sold, so by the time we look back, a day that quietly went
- * unsold can appear "blocked" — which is exactly the case this metric exists to
- * surface. Deciding on `sold` rather than on "has a block" means such a day is
- * still counted. When the host blocks Airbnb because they sold the flat direct,
- * the matching offline booking puts those nights in `sold`, so it is not a dot.
- */
-export function countDotDays(
-  monthKeyStr: string,
-  blocks: { startDate: Date; endDate: Date; kind: string }[],
-  sold: Set<number>,
-  todayMs: number,
-  listingStartMs: number
-): number {
-  const [y, m] = monthKeyStr.split("-").map(Number);
-  const startMs = Math.max(Date.UTC(y, m - 1, 1), listingStartMs);
-  const endMs = Math.min(Date.UTC(y, m, 1), todayMs); // elapsed days only
-
-  let count = 0;
-  for (let t = startMs; t < endMs; t += DAY_MS) {
-    if (sold.has(t)) continue;
-    const offMarket = blocks.some(
-      (b) => b.kind === "MANUAL" && b.startDate.getTime() <= t && t < b.endDate.getTime()
-    );
-    if (!offMarket) count++;
-  }
-  return count;
-}
-
 /** Revenue for the chosen channel from a summary's buckets. */
 export function sourceRevenue(
   s: { revenueOnline: number; revenueOffline: number; revenueDirect: number },

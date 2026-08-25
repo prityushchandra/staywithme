@@ -13,6 +13,7 @@ import {
   Pie,
   Cell,
 } from "recharts";
+import Link from "next/link";
 import { Download } from "lucide-react";
 import { formatINR } from "@/lib/pricing";
 import {
@@ -191,7 +192,7 @@ export function PnlDashboard({
         />
         <Kpi label="Total expenses" value={formatINR(total.expenseTotal)} sub="rent + staff" />
         <Kpi label="Net profit" value={formatINR(scoped.profit)} sub={`${scoped.margin.toFixed(1)}% margin`} valueClass={profitColor} />
-        <Kpi label="Unbooked days" value={String(total.unbookedDays)} sub="available, not booked" />
+        <Kpi label="Unbooked days" value={String(total.unbookedDays)} sub="still open + dots" />
         <Kpi label="Dots" value={String(total.dots)} sub="days gone unsold" valueClass={total.dots > 0 ? "text-amber-600" : undefined} />
       </div>
 
@@ -266,12 +267,12 @@ export function PnlDashboard({
         <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="font-semibold">Unbooked days · {scopeLabel}</h2>
           <span className="text-sm text-muted-foreground">
-            Total <span className="font-semibold text-foreground">{total.unbookedDays}</span> available days
+            Total <span className="font-semibold text-foreground">{total.unbookedDays}</span> days earning nothing
           </span>
         </div>
         <p className="mb-3 text-xs text-muted-foreground">
-          Days still open on each flat&apos;s calendar (today onward) with no booking. Past days and
-          blocked/booked days aren&apos;t counted — so a fully-booked or fully-blocked month shows 0.
+          Every day with no booking: days still open on each flat&apos;s calendar (today onward), plus the
+          dots below — days that already ran out of time. Booked and blocked days aren&apos;t counted.
         </p>
         {perFlat.length === 0 ? (
           <p className="text-sm text-muted-foreground">No flats to show for this period.</p>
@@ -311,9 +312,13 @@ export function PnlDashboard({
           </span>
         </div>
         <p className="mb-3 text-xs text-muted-foreground">
-          Days you can never get back: the flat was live, nobody booked it, and midnight passed. Counted
-          up to yesterday — today isn&apos;t lost yet. Dates you blocked yourself aren&apos;t counted, but a
-          date Airbnb closed off without ever selling it is.
+          Days you can never get back: the flat was on the market, nobody booked it, and the day ended.
+          You mark these yourself in{" "}
+          <Link href="/admin/dots" className="font-medium underline underline-offset-2">
+            Dot days
+          </Link>
+          , because once a date passes Airbnb closes it off whether it sold or not. Counted inside
+          unbooked days above as well.
         </p>
         {perFlat.length === 0 ? (
           <p className="text-sm text-muted-foreground">No flats to show for this period.</p>

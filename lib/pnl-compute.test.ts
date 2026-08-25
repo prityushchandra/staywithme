@@ -13,7 +13,6 @@ import {
   eachNight,
   icalNightsByMonth,
   countAvailableDays,
-  countDotDays,
   todayInIndia,
   scopeSummary,
   summarize,
@@ -298,20 +297,13 @@ describe("icalNightsByMonth", () => {
     expect(got.get("2026-05")).toBe(5);
   });
 });
-describe("countAvailableDays / countDotDays", () => {
+describe("countAvailableDays", () => {
   const today = Date.UTC(2026, 7, 25); // 25 Aug 2026
-  const live = Date.UTC(2026, 6, 23); //  flat went live 23 Jul 2026
   const blk = (from: string, to: string, kind: string) => ({
     startDate: utc(from),
     endDate: utc(to),
     kind,
   });
-  const sold = (from: string, to: string) => {
-    const out = new Set<number>();
-    for (let t = utc(from).getTime(); t < utc(to).getTime(); t += 86_400_000) out.add(t);
-    return out;
-  };
-  const none = new Set<number>();
 
   it("counts available days from today onward only", () => {
     expect(countAvailableDays("2026-08", [], today)).toBe(7); // 25..31 Aug
@@ -329,59 +321,6 @@ describe("countAvailableDays / countDotDays", () => {
     expect(countAvailableDays("2026-09", [blk("2026-09-01", "2026-09-06", "ICAL")], today)).toBe(25);
   });
 
-  it("counts every elapsed day a live flat earned nothing on", () => {
-    expect(countDotDays("2026-08", [], none, today, live)).toBe(24); // 1..24 Aug
-  });
-
-  it("never counts today or later as a dot", () => {
-    // 25 Aug is still sellable, so it is available — not yet lost.
-    expect(countDotDays("2026-09", [], none, today, live)).toBe(0);
-  });
-
-  it("starts counting on the flat's first day, not the 1st of the month", () => {
-    expect(countDotDays("2026-07", [], none, today, live)).toBe(9); // 23..31 Jul
-  });
-
-  it("counts nothing before the flat existed", () => {
-    expect(countDotDays("2026-06", [], none, today, live)).toBe(0);
-  });
-
-  it("does not count days that earned money", () => {
-    expect(countDotDays("2026-08", [], sold("2026-08-01", "2026-08-21"), today, live)).toBe(4);
-  });
-
-  it("excuses days the host took off the market by hand", () => {
-    const blocks = [blk("2026-08-01", "2026-08-21", "MANUAL")];
-    expect(countDotDays("2026-08", blocks, none, today, live)).toBe(4);
-  });
-
-  it("still counts a day Airbnb closed off that never actually sold", () => {
-    // The whole point of the metric: Airbnb shuts a date once it can no longer be
-    // sold, so an unsold day looks "blocked" in hindsight. It is still a dot.
-    const blocks = [blk("2026-08-01", "2026-08-21", "ICAL")];
-    expect(countDotDays("2026-08", blocks, none, today, live)).toBe(24);
-  });
-
-  it("does not count an Airbnb-blocked day that was sold direct", () => {
-    // Host blocks Airbnb because the flat went to a direct guest — the offline
-    // booking puts those nights in `sold`, so they are not lost days.
-    const blocks = [blk("2026-08-01", "2026-08-21", "ICAL")];
-    expect(countDotDays("2026-08", blocks, sold("2026-08-01", "2026-08-21"), today, live)).toBe(4);
-  });
-
-  it("counts a fully elapsed month end to end", () => {
-    expect(countDotDays("2026-07", [], none, today, Date.UTC(2026, 0, 1))).toBe(31);
-  });
-
-  it("dots and available days never both claim the same day", () => {
-    const blocks = [blk("2026-08-10", "2026-08-12", "ICAL")];
-    const s = sold("2026-08-10", "2026-08-12");
-    const dots = countDotDays("2026-08", blocks, s, today, live);
-    const open = countAvailableDays("2026-08", blocks, today);
-    expect(dots + open).toBeLessThanOrEqual(31);
-    expect(dots).toBe(22); // 24 elapsed − 2 sold
-    expect(open).toBe(7); // 25..31 Aug
-  });
 
   it("sums dots into the summary", () => {
     const s = summarize([

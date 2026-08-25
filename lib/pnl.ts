@@ -2,9 +2,7 @@ import { prisma } from "@/lib/db";
 import { memo } from "@/lib/memo";
 import {
   countAvailableDays,
-  countDotDays,
   eachNight,
-  floorDayUtc,
   icalNightsByMonth,
   monthKeyOf,
   stayNights,
@@ -43,11 +41,11 @@ export interface PnlListingMonth {
   nightsOnline: number;
   rent: number;
   staff: number;
-  // Vacant days still available to book on the calendar: today-or-later days in
-  // this month with no AvailabilityBlock. Past and blocked days aren't counted.
+  // Vacant days that earned nothing: days still open on the calendar (today
+  // onward) PLUS dots — days that already ran out of time. See countAvailableDays.
   unbookedDays: number;
-  // Days already lost: elapsed days in this month that the flat was live for and
-  // earned nothing on. The mirror image of unbookedDays — see countDotDays.
+  // Days already lost, marked by hand in the dot marker. Included in
+  // unbookedDays above, and also reported on their own.
   dots: number;
 }
 
@@ -90,7 +88,7 @@ function flatLabel(l: { title: string; flatNumber: string | null; block: string 
 
 export async function getPnlData(): Promise<PnlData> {
   return memo("admin-pnl", 30_000, async () => {
-    const [listings, directBookings, offlineBookings, onlineEarnings, staffPayroll, allBlocks] =
+    const [listings, directBookings, offlineBookings, onlineEarnings, staffPayroll, allBlocks, dotMonths] =
       await Promise.all([
         prisma.listing.findMany({
           select: { id: true, title: true, flatNumber: true, block: true, monthlyRent: true, createdAt: true },
@@ -106,6 +104,7 @@ export async function getPnlData(): Promise<PnlData> {
         prisma.onlineEarning.findMany({ select: { listingId: true, month: true, amount: true } }),
         prisma.staffPayroll.findMany({ select: { listingId: true, month: true, pay: true } }),
         prisma.availabilityBlock.findMany({ select: { listingId: true, startDate: true, endDate: true, kind: true, note: true } }),
+        prisma.listingDotMonth.findMany({ select: { listingId: true, month: true, days: true } }),
       ]);
 
     const listingMeta = new Map(
@@ -265,20 +264,19 @@ export async function getPnlData(): Promise<PnlData> {
       }
     }
 
-    // Dots — days already lost. Counted from the flat's first day through
-    // yesterday, so the current month fills in one day at a time as midnight
-    // passes and months still to come stay at 0. By this point recordedNights
-    // holds every night that earned something, from any channel.
-    for (const l of listings) {
-      const flatBlocks = blocksByListing.get(l.id) ?? [];
-      const sold = recordedNights.get(l.id) ?? new Set<number>();
-      const liveFromMs = floorDayUtc(l.createdAt);
-      const startIdx = Math.max(minIdx, ymToIndex(monthKey(l.createdAt)));
-      for (let i = startIdx; i <= Math.min(maxIdx, currentIdx); i++) {
-        const m = indexToYm(i);
-        cell(l.id, m).dots = countDotDays(m, flatBlocks, sold, todayMs, liveFromMs);
-      }
+    // Dots — days each flat lost, marked by hand in the dot marker. Not derived:
+    // Airbnb shuts a date off once it can no longer be sold, so after the fact
+    // the calendar can't tell "went unsold" from "was never offered".
+    for (const d of dotMonths) {
+      if (!monthSet.has(d.month) || !listingMeta.has(d.listingId)) continue;
+      cell(d.listingId, d.month).dots = d.days.length;
     }
+
+    // A dot is an unbooked day too — one that ran out of time. Rolling them in
+    // makes "unbooked days" every day that earned nothing, past and future.
+    // There's no overlap to double-count: available days are today onward, dots
+    // are strictly before today.
+    for (const r of grid.values()) r.unbookedDays += r.dots;
 
     const rows = [...grid.values()].sort(
       (a, b) => a.month.localeCompare(b.month) || a.label.localeCompare(b.label)

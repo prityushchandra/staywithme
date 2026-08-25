@@ -3,7 +3,7 @@
 // Listings carry NO contact/phone fields, ever — inquiry routing is global only.
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   // "native" for local dev; the rhel target is the Vercel serverless runtime so
   // the Query Engine is bundled for production (avoids "could not locate the
   // Query Engine for runtime rhel-openssl-3.0.x" at runtime on Vercel).
@@ -74,12 +74,12 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  accounts      Account[]
-  sessions      Session[]
-  listings      Listing[]
-  wishlists     Wishlist[]
-  reviews       Review[]
-  bookings      Booking[]
+  accounts  Account[]
+  sessions  Session[]
+  listings  Listing[]
+  wishlists Wishlist[]
+  reviews   Review[]
+  bookings  Booking[]
 }
 
 model Account {
@@ -160,15 +160,15 @@ model WhatsAppLogin {
 // ---------------------------------------------------------------------------
 
 model Listing {
-  id          String        @id @default(cuid())
+  id      String  @id @default(cuid())
   // Short, human-friendly reference shown to guests (e.g. "K7M2Q"). Used by the
   // WhatsApp bot to identify the flat instead of the long cuid.
-  refCode     String?       @unique
-  hostId      String
-  host        User          @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  refCode String? @unique
+  hostId  String
+  host    User    @relation(fields: [hostId], references: [id], onDelete: Cascade)
 
   title       String
-  description String        @db.Text
+  description String @db.Text
 
   // Name guests see as "Hosted by …". Falls back to the host's account name.
   hostDisplayName String?
@@ -184,22 +184,22 @@ model Listing {
 
   // Confidential exact-location fields. NEVER returned to guests (stripped from
   // every public read); visible only in the admin dashboard.
-  flatNumber  String?
-  block       String?
+  flatNumber String?
+  block      String?
 
-  bedrooms    Int           @default(1)
-  bathrooms   Int           @default(1)
-  beds        Int           @default(1)
-  maxGuests   Int           @default(2)
-  maxInfants  Int           @default(0)
+  bedrooms   Int @default(1)
+  bathrooms  Int @default(1)
+  beds       Int @default(1)
+  maxGuests  Int @default(2)
+  maxInfants Int @default(0)
 
-  basePrice   Int // minor units (paise), INR
+  basePrice    Int // minor units (paise), INR
   // Optional monthly rate (paise). When set, stays of 30+ nights are charged at
   // this rate pro-rated per night instead of the nightly basePrice.
   monthlyPrice Int?
   // Optional monthly RENT we pay to the flat owner (paise). This is OUR expense
   // (we sublet the flat) and feeds the Profit & Loss statement. Not guest-facing.
-  monthlyRent Int?
+  monthlyRent  Int?
 
   cancellationPolicy CancellationPolicy
 
@@ -212,9 +212,9 @@ model Listing {
   wifiName     String?
   wifiPassword String?
 
-  status         ListingStatus @default(DRAFT)
+  status          ListingStatus @default(DRAFT)
   rejectionReason String?
-  featured       Boolean       @default(false) // admin homepage curation
+  featured        Boolean       @default(false) // admin homepage curation
 
   // External calendar import (e.g. the host's Airbnb iCal export URL). Synced
   // dates land as AvailabilityBlock rows of kind "ICAL" so we never double-book.
@@ -222,18 +222,19 @@ model Listing {
   icalSyncedAt DateTime?
   icalError    String?
 
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  images      ListingImage[]
-  amenities   ListingAmenity[]
-  wishlistItems WishlistItem[]
-  reviews     Review[]
-  availability AvailabilityBlock[]
-  bookings    Booking[]
+  images          ListingImage[]
+  amenities       ListingAmenity[]
+  wishlistItems   WishlistItem[]
+  reviews         Review[]
+  availability    AvailabilityBlock[]
+  bookings        Booking[]
   offlineBookings OfflineBooking[]
   onlineEarnings  OnlineEarning[]
-  staffPayroll StaffPayroll[]
+  staffPayroll    StaffPayroll[]
+  dotMonths       ListingDotMonth[]
 
   @@index([status])
   @@index([city])
@@ -274,11 +275,11 @@ model ListingImage {
 }
 
 model Amenity {
-  id        String           @id @default(cuid())
-  key       String           @unique
-  label     String
-  icon      String?
-  listings  ListingAmenity[]
+  id       String           @id @default(cuid())
+  key      String           @unique
+  label    String
+  icon     String?
+  listings ListingAmenity[]
 }
 
 // Society blocks / towers (e.g. "Paradise"). Admin-managed so the host listing
@@ -304,35 +305,35 @@ model ListingAmenity {
 // ---------------------------------------------------------------------------
 
 model PlatformSettings {
-  id                 String @id @default("singleton")
-  whatsappNumber     String @default("+918789194107")
-  platformFeePercent Int    @default(10)
-  suggestedPriceMin  Int    @default(220000) // ₹2,200 in paise
-  suggestedPriceMax  Int    @default(250000) // ₹2,500 in paise
-  rankWeightView   Int @default(1)
-  rankWeightSave   Int @default(3)
-  rankWeightClick  Int @default(5)
+  id                   String   @id @default("singleton")
+  whatsappNumber       String   @default("+918789194107")
+  platformFeePercent   Int      @default(10)
+  suggestedPriceMin    Int      @default(220000) // ₹2,200 in paise
+  suggestedPriceMax    Int      @default(250000) // ₹2,500 in paise
+  rankWeightView       Int      @default(1)
+  rankWeightSave       Int      @default(3)
+  rankWeightClick      Int      @default(5)
   // When false (default), only guests who completed a stay at a listing may
   // review it; everyone else can read reviews but not write one. Admin can flip
   // this to open reviews to any signed-in guest.
-  reviewsOpenToAll Boolean @default(false)
+  reviewsOpenToAll     Boolean  @default(false)
   // When true (default), the playful "by chandra" signature shows under the
   // StayWithMe wordmark in the navbar. Admin can switch it off, which also
   // centres the wordmark against the logo.
-  showSignature    Boolean @default(true)
+  showSignature        Boolean  @default(true)
   // Booking-receipt footer instruction (smart lock / door PIN etc.).
-  smartLockNote    String  @default("We have a smart door lock — the door PIN will be shared with you on your check-in day.") @db.Text
+  smartLockNote        String   @default("We have a smart door lock — the door PIN will be shared with you on your check-in day.") @db.Text
   // UPI id guests pay to (shown in the WhatsApp share message).
-  upiId            String  @default("guestcollect@ybl")
+  upiId                String   @default("guestcollect@ybl")
   // Staff cleaning economics (paise). Default: ₹100 per flat per day, ₹3,000
   // monthly salary, 4 holidays/flat/month.
-  staffDailyRate     Int @default(10000)
-  staffMonthlySalary Int @default(300000)
-  staffMonthlyHolidays Int @default(4)
+  staffDailyRate       Int      @default(10000)
+  staffMonthlySalary   Int      @default(300000)
+  staffMonthlyHolidays Int      @default(4)
   // How many flats one staff member covers "at a time". Allowed monthly leaves =
   // staffMonthlyHolidays × staffFlatsPerStaff (e.g. 4 × 3 = 12).
-  staffFlatsPerStaff Int @default(3)
-  updatedAt          DateTime @updatedAt
+  staffFlatsPerStaff   Int      @default(3)
+  updatedAt            DateTime @updatedAt
 }
 
 model CancellationPolicyText {
@@ -368,15 +369,15 @@ model WishlistItem {
 }
 
 model Review {
-  id         String   @id @default(cuid())
-  listingId  String
-  authorId   String
-  listing    Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  author     User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  rating     Int // 1..5
-  body       String   @db.Text
-  status     String   @default("PENDING") // PENDING | APPROVED | REJECTED
-  createdAt  DateTime @default(now())
+  id        String   @id @default(cuid())
+  listingId String
+  authorId  String
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  rating    Int // 1..5
+  body      String   @db.Text
+  status    String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  createdAt DateTime @default(now())
 
   @@unique([listingId, authorId]) // one review per user per listing
   @@index([listingId])
@@ -387,11 +388,11 @@ model Review {
 // cancels it (in-app or via the WhatsApp bot). On confirm we block the dates and
 // notify host + guest over WhatsApp.
 model Booking {
-  id          String   @id @default(cuid())
-  listingId   String
-  listing     Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  guestId     String
-  guest       User     @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  id        String  @id @default(cuid())
+  listingId String
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  guestId   String
+  guest     User    @relation(fields: [guestId], references: [id], onDelete: Cascade)
 
   checkIn     DateTime // UTC midnight, inclusive
   checkOut    DateTime // UTC midnight, exclusive (checkout day)
@@ -399,14 +400,14 @@ model Booking {
   totalAmount Int      @default(0) // paise snapshot of the guest-facing total
   amountPaid  Int      @default(0) // paise received from the guest (rest is due)
 
-  status      String   @default("PENDING") // PENDING | CONFIRMED | CANCELLED
+  status         String    @default("PENDING") // PENDING | CONFIRMED | CANCELLED
   // The availability block created on confirm (so cancel can remove it).
-  blockId     String?
+  blockId        String?
   // Set when the 3-days-before-check-in reminder has been sent (dedup).
   reminderSentAt DateTime?
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([listingId])
   @@index([guestId])
@@ -454,37 +455,37 @@ model BotConversation {
 // Airbnb reservation whose payout we log manually since Airbnb's iCal never
 // carries the amount). Blocks its dates via a linked AvailabilityBlock.
 model OfflineBooking {
-  id          String   @id @default(cuid())
-  listingId   String
-  listing     Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  id        String  @id @default(cuid())
+  listingId String
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
 
-  guestName   String
-  guestPhone  String?
-  guests      Int      @default(1)
+  guestName  String
+  guestPhone String?
+  guests     Int     @default(1)
 
-  checkIn     DateTime // UTC midnight, inclusive
-  checkOut    DateTime // UTC midnight, exclusive
+  checkIn  DateTime // UTC midnight, inclusive
+  checkOut DateTime // UTC midnight, exclusive
 
-  totalPrice  Int      // paise — the agreed guest total
-  amountPaid  Int      @default(0) // paise received so far
-  due         Int      @default(0) // paise still owed (totalPrice - amountPaid)
+  totalPrice Int // paise — the agreed guest total
+  amountPaid Int @default(0) // paise received so far
+  due        Int @default(0) // paise still owed (totalPrice - amountPaid)
 
-  source      String   @default("OFFLINE") // OFFLINE | AIRBNB
-  status      String   @default("CONFIRMED") // CONFIRMED | CANCELLED
-  note        String?
+  source String  @default("OFFLINE") // OFFLINE | AIRBNB
+  status String  @default("CONFIRMED") // CONFIRMED | CANCELLED
+  note   String?
 
   // Unguessable token that lets the GUEST open their receipt via a shared link
   // (WhatsApp) without an admin session. Set on creation.
-  publicToken String?  @unique
+  publicToken String? @unique
 
   // The AvailabilityBlock created for these dates (so cancel can free them).
   blockId     String?
   createdById String?
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  receipts    Receipt[]
+  receipts Receipt[]
 
   @@index([listingId])
   @@index([source])
@@ -497,13 +498,13 @@ model OfflineBooking {
 // the admin records a monthly total per flat. Feeds the Earnings graph and the
 // Profit & Loss statement as "online" revenue. One figure per flat per month.
 model OnlineEarning {
-  id          String   @id @default(cuid())
-  listingId   String
-  listing     Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  id        String  @id @default(cuid())
+  listingId String
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
 
-  month       String   // "YYYY-MM"
-  amount      Int      // paise — total online earnings for the flat that month
-  note        String?
+  month  String // "YYYY-MM"
+  amount Int // paise — total online earnings for the flat that month
+  note   String?
 
   createdById String?
   createdAt   DateTime @default(now())
@@ -516,10 +517,10 @@ model OnlineEarning {
 
 // A cleaning-staff member.
 model Staff {
-  id         String            @id @default(cuid())
-  name       String
-  phone      String?
-  active     Boolean           @default(true)
+  id            String   @id @default(cuid())
+  name          String
+  phone         String?
+  active        Boolean  @default(true)
   // Fixed monthly salary for this staff member (paise), admin-entered. Absences
   // beyond the allowed leaves are docked from this. Null → platform default.
   monthlySalary Int?
@@ -529,10 +530,10 @@ model Staff {
   // How many flats this staff cleans. Used to DERIVE the per-flat-day deduction
   // rate (= monthlySalary ÷ (numberOfFlats × 30)). Null → platform default.
   numberOfFlats Int?
-  createdAt  DateTime          @default(now())
+  createdAt     DateTime @default(now())
 
-  payroll    StaffPayroll[]
-  months     StaffMonth[]
+  payroll StaffPayroll[]
+  months  StaffMonth[]
 
   @@index([active])
 }
@@ -544,26 +545,26 @@ model Staff {
 // stable if the settings later change.
 //   pay = monthlySalary − max(0, absences − allowedLeaves) × deductionPerDay
 model StaffMonth {
-  id              String   @id @default(cuid())
-  staffId         String
-  staff           Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  id      String @id @default(cuid())
+  staffId String
+  staff   Staff  @relation(fields: [staffId], references: [id], onDelete: Cascade)
 
-  month           String   // "YYYY-MM"
+  month       String // "YYYY-MM"
   // The specific day-of-month numbers (1..31) with at least one flat missed.
-  absentDays      Int[]    @default([])
+  absentDays  Int[]  @default([])
   // Map of day-of-month → the listing IDs (flats) missed that day, e.g.
   // { "5": ["clx..","cly.."], "6": ["clx.."] }. `absences` = total flat-days.
-  absentByDay     Json     @default("{}")
-  absences        Int      @default(0) // total FLAT-DAYS missed (sum of absentByDay lengths)
+  absentByDay Json   @default("{}")
+  absences    Int    @default(0) // total FLAT-DAYS missed (sum of absentByDay lengths)
 
-  monthlySalary   Int      // paise — snapshot of the staff's salary that month
-  allowedLeaves   Int      // snapshot (= leavesPerFlat × flatsPerStaff)
-  deductionPerDay Int      // paise — snapshot of the per-extra-absent-day dock
-  pay             Int      // paise — computed net pay
+  monthlySalary   Int // paise — snapshot of the staff's salary that month
+  allowedLeaves   Int // snapshot (= leavesPerFlat × flatsPerStaff)
+  deductionPerDay Int // paise — snapshot of the per-extra-absent-day dock
+  pay             Int // paise — computed net pay
   note            String?
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([staffId, month])
   @@index([month])
@@ -577,26 +578,26 @@ model StaffMonth {
 // if the settings later change.
 //   pay = monthlySalary − max(0, absences − allowedHolidays) × deductionPerDay
 model StaffPayroll {
-  id              String   @id @default(cuid())
-  staffId         String
-  staff           Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
-  listingId       String
-  listing         Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  id        String  @id @default(cuid())
+  staffId   String
+  staff     Staff   @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  listingId String
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
 
-  month           String   // "YYYY-MM"
-  absences        Int      @default(0)
+  month      String // "YYYY-MM"
+  absences   Int    @default(0)
   // The specific day-of-month numbers (1..31) marked absent, so the calendar UI
   // can be reloaded and edited. `absences` mirrors this array's length.
-  absentDays      Int[]    @default([])
+  absentDays Int[]  @default([])
 
-  monthlySalary   Int      // paise — snapshot of the base monthly salary for the flat
-  allowedHolidays Int      // snapshot of the free holidays for the month
-  deductionPerDay Int      // paise — snapshot of the per-extra-absent-day dock
-  pay             Int      // paise — computed net pay
+  monthlySalary   Int // paise — snapshot of the base monthly salary for the flat
+  allowedHolidays Int // snapshot of the free holidays for the month
+  deductionPerDay Int // paise — snapshot of the per-extra-absent-day dock
+  pay             Int // paise — computed net pay
   note            String?
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([staffId, listingId, month])
   @@index([month])
@@ -609,13 +610,35 @@ model StaffPayroll {
 model Receipt {
   id               String          @id @default(cuid())
   number           String          @unique // human-friendly, e.g. "SWM-2026-0001"
-  type             String          // BOOKING | STAFF
+  type             String // BOOKING | STAFF
   offlineBookingId String?
   offlineBooking   OfflineBooking? @relation(fields: [offlineBookingId], references: [id], onDelete: SetNull)
-  refId            String?         // free-form ref for non-booking receipts (e.g. staff payout period)
-  data             Json            // snapshot used to render the receipt image
+  refId            String? // free-form ref for non-booking receipts (e.g. staff payout period)
+  data             Json // snapshot used to render the receipt image
   createdAt        DateTime        @default(now())
 
   @@index([type])
   @@index([createdAt])
+}
+
+// Days an admin marked as DOTS for a flat: days the flat was live and on the
+// market, nobody booked it, and the day ended. Marked by hand rather than
+// derived, because only the host knows whether a date was genuinely on sale —
+// Airbnb shuts a date off once it can no longer be sold, which destroys the
+// evidence after the fact.
+model ListingDotMonth {
+  id        String  @id @default(cuid())
+  listingId String
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  month String // "YYYY-MM"
+  // Day-of-month numbers (1..31) marked as dots, so the marker calendar can be
+  // reloaded and edited. The dot count for the month is this array's length.
+  days  Int[]  @default([])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([listingId, month])
+  @@index([month])
 }
