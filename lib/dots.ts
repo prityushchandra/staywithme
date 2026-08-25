@@ -75,10 +75,20 @@ export function dayStatuses(
   return out;
 }
 
-/** Keep only real day numbers for the month, deduped and sorted. */
-export function cleanDays(days: number[], month: string): number[] {
+/**
+ * Keep only real day numbers for the month, deduped and sorted.
+ *
+ * Pass `todayMs` to also drop days that haven't ended yet. Those are already
+ * counted as still-open in the P&L, so calling them dots as well would count
+ * them twice — and a day that can still be booked hasn't been lost.
+ */
+export function cleanDays(days: number[], month: string, todayMs?: number): number[] {
   const max = daysInMonth(month);
-  return [...new Set(days)].filter((d) => Number.isInteger(d) && d >= 1 && d <= max).sort((a, b) => a - b);
+  const start = monthStartMs(month);
+  return [...new Set(days)]
+    .filter((d) => Number.isInteger(d) && d >= 1 && d <= max)
+    .filter((d) => todayMs === undefined || start + (d - 1) * DAY_MS < todayMs)
+    .sort((a, b) => a - b);
 }
 
 function flatLabel(l: { title: string; flatNumber: string | null; block: string | null }) {

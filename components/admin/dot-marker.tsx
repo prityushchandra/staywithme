@@ -48,6 +48,7 @@ export function DotMarker({
   };
   const [statuses, setStatuses] = useState<Record<string, DayStatus[]>>({});
   const [modalDay, setModalDay] = useState<number | null>(null);
+  const [override, setOverride] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -273,14 +274,26 @@ export function DotMarker({
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <p className="mb-3 text-xs text-muted-foreground">
+            <p className="mb-2 text-xs text-muted-foreground">
               Tick each flat that stayed empty on this day.
             </p>
+            <label className="mb-3 flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={override}
+                onChange={(e) => setOverride(e.target.checked)}
+                className="h-3.5 w-3.5 accent-amber-500"
+              />
+              Let me tick any flat, even ones that look booked or blocked
+            </label>
             <ul className="max-h-[50vh] space-y-1 overflow-y-auto">
               {listings.map((l) => {
                 const status = statusOf(l.id, modalDay);
                 const checked = modalSet.has(l.id);
-                const canTick = status === "open";
+                // A day still ahead of us is already counted as open in the P&L,
+                // so calling it a dot too would count it twice. Everything else
+                // is yours to overrule.
+                const canTick = status === "open" || (override && status !== "upcoming");
                 return (
                   <li key={l.id}>
                     <label
@@ -297,9 +310,16 @@ export function DotMarker({
                         className="h-4 w-4 accent-amber-500"
                       />
                       <span className={cn("flex-1", checked && "font-medium text-amber-600")}>{l.label}</span>
-                      {!canTick && (
-                        <span className="text-[11px] text-muted-foreground">
-                          {STATUS_NOTE[status as Exclude<DayStatus, "open">]}
+                      {status !== "open" && (
+                        <span
+                          className={cn(
+                            "text-[11px]",
+                            checked ? "text-amber-600" : "text-muted-foreground"
+                          )}
+                        >
+                          {status === "upcoming"
+                            ? "Day isn't over"
+                            : STATUS_NOTE[status as Exclude<DayStatus, "open">]}
                         </span>
                       )}
                     </label>

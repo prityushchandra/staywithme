@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { clearMemo } from "@/lib/memo";
 import { cleanDays, getDotMonthData, isValidMonth } from "@/lib/dots";
+import { todayInIndia } from "@/lib/pnl-compute";
 
 async function requireAdmin() {
   const session = await auth();
@@ -45,11 +46,12 @@ export async function POST(req: Request) {
   if (!isValidMonth(month)) return NextResponse.json({ error: "Invalid month" }, { status: 400 });
 
   const listings = await prisma.listing.findMany({ select: { id: true } });
+  const todayMs = todayInIndia(new Date());
 
   let total = 0;
   const writes = [];
   for (const { id } of listings) {
-    const days = cleanDays(daysByListing[id] ?? [], month);
+    const days = cleanDays(daysByListing[id] ?? [], month, todayMs);
     total += days.length;
     writes.push(
       days.length === 0

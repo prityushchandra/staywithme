@@ -47,6 +47,21 @@ describe("cleanDays", () => {
   it("drops non-integers", () => {
     expect(cleanDays([1.5, 2, NaN], "2026-08")).toEqual([2]);
   });
+
+  it("drops days that haven't ended when given today", () => {
+    const today = Date.UTC(2026, 7, 25); // 25 Aug 2026
+    expect(cleanDays([23, 24, 25, 26, 31], "2026-08", today)).toEqual([23, 24]);
+  });
+
+  it("keeps a whole past month when given today", () => {
+    const today = Date.UTC(2026, 7, 25);
+    expect(cleanDays([1, 15, 31], "2026-07", today)).toEqual([1, 15, 31]);
+  });
+
+  it("drops a whole future month when given today", () => {
+    const today = Date.UTC(2026, 7, 25);
+    expect(cleanDays([1, 15, 30], "2026-09", today)).toEqual([]);
+  });
 });
 
 describe("dayStatuses", () => {
