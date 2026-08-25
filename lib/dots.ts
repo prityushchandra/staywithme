@@ -78,17 +78,30 @@ export function dayStatuses(
 /**
  * Keep only real day numbers for the month, deduped and sorted.
  *
- * Pass `todayMs` to also drop days that haven't ended yet. Those are already
- * counted as still-open in the P&L, so calling them dots as well would count
- * them twice — and a day that can still be booked hasn't been lost.
+ * Pass `todayMs` to also drop days that haven't arrived yet. A day still ahead
+ * of us hasn't been lost — it can still sell — so it can't be a dot. Today
+ * itself is allowed: by the time you're writing a day off, it's nearly over.
  */
 export function cleanDays(days: number[], month: string, todayMs?: number): number[] {
   const max = daysInMonth(month);
   const start = monthStartMs(month);
   return [...new Set(days)]
     .filter((d) => Number.isInteger(d) && d >= 1 && d <= max)
-    .filter((d) => todayMs === undefined || start + (d - 1) * DAY_MS < todayMs)
+    .filter((d) => todayMs === undefined || start + (d - 1) * DAY_MS <= todayMs)
     .sort((a, b) => a - b);
+}
+
+/**
+ * The last day of the month that may be marked as a dot — today, or the whole
+ * month if it's already behind us, or 0 if it's entirely ahead.
+ *
+ * The marker needs this separately from the per-day statuses because a day can
+ * be BOTH booked and in the future, and "booked" would otherwise hide the fact
+ * that it hasn't happened yet.
+ */
+export function markableThrough(month: string, todayMs: number): number {
+  const idx = Math.floor((todayMs - monthStartMs(month)) / DAY_MS);
+  return idx < 0 ? 0 : Math.min(daysInMonth(month), idx + 1);
 }
 
 function flatLabel(l: { title: string; flatNumber: string | null; block: string | null }) {
@@ -99,6 +112,8 @@ function flatLabel(l: { title: string; flatNumber: string | null; block: string 
 export interface DotMonthData {
   month: string;
   daysInMonth: number;
+  /** Last day of this month that may be marked — see markableThrough. */
+  markableThrough: number;
   listings: { id: string; label: string }[];
   /** listingId → day-of-month numbers already marked as dots. */
   marked: Record<string, number[]>;
@@ -169,6 +184,7 @@ export async function getDotMonthData(month: string): Promise<DotMonthData> {
   return {
     month,
     daysInMonth: daysInMonth(month),
+    markableThrough: markableThrough(month, todayMs),
     listings: listings
       .map((l) => ({ id: l.id, label: flatLabel(l) }))
       .sort((a, b) => a.label.localeCompare(b.label)),

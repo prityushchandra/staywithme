@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { memo } from "@/lib/memo";
 import {
-  countAvailableDays,
+  availableDaysOf,
   eachNight,
   icalNightsByMonth,
   monthKeyOf,
@@ -256,27 +256,31 @@ export async function getPnlData(): Promise<PnlData> {
     // through the end of the window (future months in this FY). Past months are
     // left at 0 (nothing is "available" to book in the past).
     const todayMs = todayInIndia(now);
+    const availableDays = new Map<string, number[]>();
     for (const l of listings) {
       const flatBlocks = blocksByListing.get(l.id) ?? [];
       for (let i = Math.max(minIdx, currentIdx); i <= maxIdx; i++) {
         const m = indexToYm(i);
-        cell(l.id, m).unbookedDays = countAvailableDays(m, flatBlocks, todayMs);
+        const days = availableDaysOf(m, flatBlocks, todayMs);
+        cell(l.id, m).unbookedDays = days.length;
+        availableDays.set(`${l.id}|${m}`, days);
       }
     }
 
     // Dots — days each flat lost, marked by hand in the dot marker. Not derived:
     // Airbnb shuts a date off once it can no longer be sold, so after the fact
     // the calendar can't tell "went unsold" from "was never offered".
+    //
+    // A dot is an unbooked day too, so it joins the available days to make
+    // "unbooked" mean every day that earned nothing, past and future. Taking the
+    // union rather than the sum matters: today can be BOTH still-bookable and
+    // already written off by hand, and it must only count once.
     for (const d of dotMonths) {
       if (!monthSet.has(d.month) || !listingMeta.has(d.listingId)) continue;
-      cell(d.listingId, d.month).dots = d.days.length;
+      const c = cell(d.listingId, d.month);
+      c.dots = d.days.length;
+      c.unbookedDays = new Set([...(availableDays.get(`${d.listingId}|${d.month}`) ?? []), ...d.days]).size;
     }
-
-    // A dot is an unbooked day too — one that ran out of time. Rolling them in
-    // makes "unbooked days" every day that earned nothing, past and future.
-    // There's no overlap to double-count: available days are today onward, dots
-    // are strictly before today.
-    for (const r of grid.values()) r.unbookedDays += r.dots;
 
     const rows = [...grid.values()].sort(
       (a, b) => a.month.localeCompare(b.month) || a.label.localeCompare(b.label)

@@ -49,10 +49,15 @@ export async function POST(req: Request) {
   const todayMs = todayInIndia(new Date());
 
   let total = 0;
+  let dropped = 0;
+  const stored: Record<string, number[]> = {};
   const writes = [];
   for (const { id } of listings) {
-    const days = cleanDays(daysByListing[id] ?? [], month, todayMs);
+    const asked = daysByListing[id] ?? [];
+    const days = cleanDays(asked, month, todayMs);
     total += days.length;
+    dropped += cleanDays(asked, month).length - days.length;
+    stored[id] = days;
     writes.push(
       days.length === 0
         ? prisma.listingDotMonth.deleteMany({ where: { listingId: id, month } })
@@ -69,5 +74,7 @@ export async function POST(req: Request) {
   // hide the change for half a minute after saving.
   clearMemo("admin-pnl");
 
-  return NextResponse.json({ ok: true, month, total });
+  // Hand back what actually landed, not what was asked for. The marker replaces
+  // its state with this, so a day we refused can't sit on screen looking saved.
+  return NextResponse.json({ ok: true, month, total, dropped, marked: stored });
 }

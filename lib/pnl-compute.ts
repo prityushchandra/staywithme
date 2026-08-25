@@ -101,31 +101,47 @@ export function icalNightsByMonth(
 }
 
 /**
- * Count AVAILABLE (still-bookable) days for one flat in one month: days that are
- * today-or-later and NOT covered by any AvailabilityBlock — i.e. exactly the
- * "open" days a guest could still book on the calendar. Past days aren't
- * available (you can't book them), and blocked/booked days aren't available, so
- * neither is counted. A fully-blocked or fully-past month yields 0.
- *
- * Deliberately NOT the complement of booked nights: this looks forward from
- * today while nights look at the whole month, and dates blocked without a
- * booking are neither available nor booked.
+ * Count AVAILABLE (still-bookable) days for one flat in one month. See
+ * availableDaysOf — this is just how many there are.
  */
 export function countAvailableDays(
   monthKeyStr: string,
   blocks: { startDate: Date; endDate: Date }[],
   todayMs: number
 ): number {
+  return availableDaysOf(monthKeyStr, blocks, todayMs).length;
+}
+
+/**
+ * The AVAILABLE (still-bookable) days of one flat in one month, as day-of-month
+ * numbers: days that are today-or-later and NOT covered by any
+ * AvailabilityBlock — i.e. exactly the "open" days a guest could still book.
+ * Past days aren't available (you can't book them), and blocked/booked days
+ * aren't available, so neither is counted. A fully-blocked or fully-past month
+ * yields none.
+ *
+ * Returned as days rather than a count so callers can spot overlap with other
+ * day sets (dots) instead of adding the two and double-counting.
+ *
+ * Deliberately NOT the complement of booked nights: this looks forward from
+ * today while nights look at the whole month, and dates blocked without a
+ * booking are neither available nor booked.
+ */
+export function availableDaysOf(
+  monthKeyStr: string,
+  blocks: { startDate: Date; endDate: Date }[],
+  todayMs: number
+): number[] {
   const [y, m] = monthKeyStr.split("-").map(Number);
   const startMs = Math.max(Date.UTC(y, m - 1, 1), todayMs); // today onward only
   const endMs = Date.UTC(y, m, 1);
 
-  let count = 0;
+  const out: number[] = [];
   for (let t = startMs; t < endMs; t += DAY_MS) {
     const blocked = blocks.some((b) => b.startDate.getTime() <= t && t < b.endDate.getTime());
-    if (!blocked) count++;
+    if (!blocked) out.push(new Date(t).getUTCDate());
   }
-  return count;
+  return out;
 }
 
 /** Revenue for the chosen channel from a summary's buckets. */

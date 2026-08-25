@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { cleanDays, dayStatuses, daysInMonth, isValidMonth, monthStartMs } from "./dots";
+import { cleanDays, dayStatuses, daysInMonth, isValidMonth, markableThrough, monthStartMs } from "./dots";
 
 const utc = (s: string) => new Date(`${s}T00:00:00.000Z`);
 const blk = (from: string, to: string, kind: string) => ({
@@ -48,9 +48,10 @@ describe("cleanDays", () => {
     expect(cleanDays([1.5, 2, NaN], "2026-08")).toEqual([2]);
   });
 
-  it("drops days that haven't ended when given today", () => {
+  it("drops days that haven't arrived when given today", () => {
     const today = Date.UTC(2026, 7, 25); // 25 Aug 2026
-    expect(cleanDays([23, 24, 25, 26, 31], "2026-08", today)).toEqual([23, 24]);
+    // Today itself survives — by the time you write a day off it's nearly over.
+    expect(cleanDays([23, 24, 25, 26, 31], "2026-08", today)).toEqual([23, 24, 25]);
   });
 
   it("keeps a whole past month when given today", () => {
@@ -61,6 +62,35 @@ describe("cleanDays", () => {
   it("drops a whole future month when given today", () => {
     const today = Date.UTC(2026, 7, 25);
     expect(cleanDays([1, 15, 30], "2026-09", today)).toEqual([]);
+  });
+});
+
+describe("markableThrough", () => {
+  const today = Date.UTC(2026, 7, 25); // 25 Aug 2026
+
+  it("stops at today in the current month", () => {
+    expect(markableThrough("2026-08", today)).toBe(25);
+  });
+
+  it("allows a whole month that has passed", () => {
+    expect(markableThrough("2026-07", today)).toBe(31);
+    expect(markableThrough("2026-06", today)).toBe(30);
+  });
+
+  it("allows nothing in a month still ahead", () => {
+    expect(markableThrough("2026-09", today)).toBe(0);
+    expect(markableThrough("2027-01", today)).toBe(0);
+  });
+
+  it("agrees with cleanDays about the cut-off", () => {
+    // The UI gates on markableThrough and the API gates on cleanDays. If these
+    // ever disagree, a day looks tickable and then silently fails to save.
+    for (const month of ["2026-06", "2026-07", "2026-08", "2026-09"]) {
+      const all = Array.from({ length: daysInMonth(month) }, (_, i) => i + 1);
+      const kept = cleanDays(all, month, today);
+      const limit = markableThrough(month, today);
+      expect(kept).toEqual(all.filter((d) => d <= limit));
+    }
   });
 });
 
@@ -134,5 +164,14 @@ describe("dayStatuses", () => {
 
   it("marks a whole month before the flat existed", () => {
     expect(on("2026-06").every((x) => x === "preLive")).toBe(true);
+  });
+
+  it("labels a booked future day 'sold', which is why arrival is checked separately", () => {
+    // The regression: a future booking reads as "sold", not "upcoming". Gating
+    // the marker on the label let a future day be ticked and then refused by
+    // the server. markableThrough is the real gate.
+    const s = on("2026-08", { sold: soldRange("2026-08-28", "2026-08-30") });
+    expect(s[27]).toBe("sold");
+    expect(markableThrough("2026-08", today)).toBeLessThan(28);
   });
 });

@@ -12,10 +12,9 @@ import type { DayStatus } from "@/lib/dots";
 
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
 
-const STATUS_NOTE: Record<Exclude<DayStatus, "open">, string> = {
+const STATUS_NOTE: Record<Exclude<DayStatus, "open" | "upcoming">, string> = {
   sold: "Booked",
   offMarket: "You blocked it",
-  upcoming: "Still to come",
   preLive: "Not live yet",
 };
 
@@ -47,6 +46,9 @@ export function DotMarker({
     setDots(next);
   };
   const [statuses, setStatuses] = useState<Record<string, DayStatus[]>>({});
+  // How far into this month we're allowed to mark. A day can be booked AND in
+  // the future, so its status alone can't tell us whether it has arrived.
+  const [markableThrough, setMarkableThrough] = useState(0);
   const [modalDay, setModalDay] = useState<number | null>(null);
   const [override, setOverride] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -73,6 +75,7 @@ export function DotMarker({
         setDots(byDay);
         dotsRef.current = byDay;
         setStatuses(data.statuses ?? {});
+        setMarkableThrough(data.markableThrough ?? 0);
       })
       .catch(() => {
         if (!cancelled) setError("Could not load this month.");
@@ -128,10 +131,26 @@ export function DotMarker({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ month, daysByListing }),
       });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
         setError(data.error ?? "Could not save — your last change is not stored.");
         return;
+      }
+      // Take the server's word for what was stored, so nothing can linger on
+      // screen looking saved when it wasn't.
+      const byDay = new Map<number, Set<string>>();
+      for (const [id, days] of Object.entries(data.marked ?? {})) {
+        for (const d of (days as number[]) ?? []) {
+          const set = byDay.get(d) ?? new Set<string>();
+          set.add(id);
+          byDay.set(d, set);
+        }
+      }
+      applyDots(byDay);
+      if (data.dropped > 0) {
+        setError(
+          `${data.dropped} day${data.dropped > 1 ? "s" : ""} skipped — a day that hasn't arrived yet can still sell, so it isn't lost.`
+        );
       }
       router.refresh();
     } catch {
@@ -290,10 +309,11 @@ export function DotMarker({
               {listings.map((l) => {
                 const status = statusOf(l.id, modalDay);
                 const checked = modalSet.has(l.id);
-                // A day still ahead of us is already counted as open in the P&L,
-                // so calling it a dot too would count it twice. Everything else
-                // is yours to overrule.
-                const canTick = status === "open" || (override && status !== "upcoming");
+                // Gate on whether the day has ARRIVED, not on how it looks. A
+                // booked future date reads as "sold", which would otherwise
+                // sneak past and then be refused by the server.
+                const arrived = modalDay <= markableThrough;
+                const canTick = arrived && (status === "open" || override);
                 return (
                   <li key={l.id}>
                     <label
@@ -310,16 +330,18 @@ export function DotMarker({
                         className="h-4 w-4 accent-amber-500"
                       />
                       <span className={cn("flex-1", checked && "font-medium text-amber-600")}>{l.label}</span>
-                      {status !== "open" && (
+                      {(!arrived || status !== "open") && (
                         <span
                           className={cn(
                             "text-[11px]",
                             checked ? "text-amber-600" : "text-muted-foreground"
                           )}
                         >
-                          {status === "upcoming"
-                            ? "Day isn't over"
-                            : STATUS_NOTE[status as Exclude<DayStatus, "open">]}
+                          {!arrived
+                            ? "Not here yet"
+                            : status === "upcoming"
+                              ? "Still open"
+                              : STATUS_NOTE[status as Exclude<DayStatus, "open" | "upcoming">]}
                         </span>
                       )}
                     </label>
