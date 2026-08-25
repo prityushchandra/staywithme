@@ -1,6 +1,15 @@
 import { prisma } from "@/lib/db";
 import { memo } from "@/lib/memo";
-import { eachNight, floorDayUtc, icalNightsByMonth, monthKeyOf, stayNights } from "@/lib/pnl-compute";
+import {
+  countAvailableDays,
+  countDotDays,
+  eachNight,
+  floorDayUtc,
+  icalNightsByMonth,
+  monthKeyOf,
+  stayNights,
+  todayInIndia,
+} from "@/lib/pnl-compute";
 import { ICAL_RESERVED_NOTE } from "@/lib/ical";
 
 // Profit & Loss data model. Everything is in MINOR units (paise).
@@ -37,6 +46,9 @@ export interface PnlListingMonth {
   // Vacant days still available to book on the calendar: today-or-later days in
   // this month with no AvailabilityBlock. Past and blocked days aren't counted.
   unbookedDays: number;
+  // Days already lost: elapsed days in this month that the flat was live for and
+  // earned nothing on. The mirror image of unbookedDays — see countDotDays.
+  dots: number;
 }
 
 export interface PnlData {
@@ -76,39 +88,6 @@ function flatLabel(l: { title: string; flatNumber: string | null; block: string 
   return l.block?.trim() ? `${base}, ${l.block.trim()}` : base;
 }
 
-const DAY_MS = 86_400_000;
-
-/**
- * Count AVAILABLE (still-bookable) days for one flat in one month: days that are
- * today-or-later and NOT covered by any AvailabilityBlock — i.e. exactly the
- * "open" days a guest could still book on the calendar. Past days aren't
- * available (you can't book them), and blocked/booked days aren't available, so
- * neither is counted. A fully-blocked or fully-past month yields 0.
- *
- * Deliberately NOT the complement of booked nights: this looks forward from
- * today while nights look at the whole month, and dates blocked without a
- * booking are neither available nor booked.
- */
-function countAvailableDays(
-  monthKeyStr: string,
-  blocks: { startDate: Date; endDate: Date }[],
-  todayMs: number
-): number {
-  const [y, m] = monthKeyStr.split("-").map(Number);
-  const monthStart = Date.UTC(y, m - 1, 1);
-  const monthEndExclusive = Date.UTC(y, m, 1);
-  const startMs = Math.max(monthStart, todayMs); // today onward only
-  const endMs = monthEndExclusive;
-  if (endMs <= startMs) return 0;
-
-  let count = 0;
-  for (let t = startMs; t < endMs; t += DAY_MS) {
-    const blocked = blocks.some((b) => b.startDate.getTime() <= t && t < b.endDate.getTime());
-    if (!blocked) count++;
-  }
-  return count;
-}
-
 export async function getPnlData(): Promise<PnlData> {
   return memo("admin-pnl", 30_000, async () => {
     const [listings, directBookings, offlineBookings, onlineEarnings, staffPayroll, allBlocks] =
@@ -136,12 +115,12 @@ export async function getPnlData(): Promise<PnlData> {
       ])
     );
 
-    // Group availability blocks by flat for the unbooked-day scan.
-    const blocksByListing = new Map<string, { startDate: Date; endDate: Date }[]>();
+    // Group availability blocks by flat for the unbooked-day and dot scans.
+    const blocksByListing = new Map<string, { startDate: Date; endDate: Date; kind: string }[]>();
     for (const b of allBlocks) {
       const list = blocksByListing.get(b.listingId);
-      if (list) list.push({ startDate: b.startDate, endDate: b.endDate });
-      else blocksByListing.set(b.listingId, [{ startDate: b.startDate, endDate: b.endDate }]);
+      if (list) list.push(b);
+      else blocksByListing.set(b.listingId, [b]);
     }
 
     const now = new Date();
@@ -191,6 +170,7 @@ export async function getPnlData(): Promise<PnlData> {
           rent: 0,
           staff: 0,
           unbookedDays: 0,
+          dots: 0,
         };
         grid.set(k, c);
       }
@@ -257,6 +237,9 @@ export async function getPnlData(): Promise<PnlData> {
       const recorded = recordedNights.get(listingId) ?? new Set<number>();
       const byMonth = icalNightsByMonth(blocks, recorded, windowStartMs, windowEndMs);
       for (const [m, nights] of byMonth) cell(listingId, m).nightsOnline += nights;
+      // These nights earned money as well, so record them too — otherwise the dot
+      // scan below would read an Airbnb-sold day as a day that went unsold.
+      for (const b of blocks) markRecorded(listingId, b.startDate, b.endDate);
     }
 
     // Rent accrues monthly from the flat's first month through the current month
@@ -273,12 +256,27 @@ export async function getPnlData(): Promise<PnlData> {
     // Available (still-bookable) days per flat per month — from the current month
     // through the end of the window (future months in this FY). Past months are
     // left at 0 (nothing is "available" to book in the past).
-    const todayMs = floorDayUtc(now);
+    const todayMs = todayInIndia(now);
     for (const l of listings) {
       const flatBlocks = blocksByListing.get(l.id) ?? [];
       for (let i = Math.max(minIdx, currentIdx); i <= maxIdx; i++) {
         const m = indexToYm(i);
         cell(l.id, m).unbookedDays = countAvailableDays(m, flatBlocks, todayMs);
+      }
+    }
+
+    // Dots — days already lost. Counted from the flat's first day through
+    // yesterday, so the current month fills in one day at a time as midnight
+    // passes and months still to come stay at 0. By this point recordedNights
+    // holds every night that earned something, from any channel.
+    for (const l of listings) {
+      const flatBlocks = blocksByListing.get(l.id) ?? [];
+      const sold = recordedNights.get(l.id) ?? new Set<number>();
+      const liveFromMs = floorDayUtc(l.createdAt);
+      const startIdx = Math.max(minIdx, ymToIndex(monthKey(l.createdAt)));
+      for (let i = startIdx; i <= Math.min(maxIdx, currentIdx); i++) {
+        const m = indexToYm(i);
+        cell(l.id, m).dots = countDotDays(m, flatBlocks, sold, todayMs, liveFromMs);
       }
     }
 

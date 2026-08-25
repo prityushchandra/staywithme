@@ -18,6 +18,7 @@ export interface PnlSummary {
   profit: number;
   margin: number; // profit / revenue, as a percentage (0 when no revenue)
   unbookedDays: number;
+  dots: number;
 }
 
 // Revenue-channel filter used across the P&L tab. "offline" bundles our own
@@ -35,6 +36,21 @@ export function floorDayUtc(d: Date): number {
 export function monthKeyOf(ms: number): string {
   const d = new Date(ms);
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+/**
+ * The day it currently is in India, as the UTC-midnight timestamp we key days by.
+ *
+ * Day counters have to roll over when the day actually ends for the host, not at
+ * 05:30 their time (UTC midnight). This is what makes a date stop being sellable
+ * and become a dot the moment midnight passes in India — exactly the "still free
+ * at 11:55pm means the day was lost" rule.
+ */
+export function todayInIndia(now: Date): number {
+  const ist = new Date(now.getTime() + IST_OFFSET_MS);
+  return Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate());
 }
 
 /**
@@ -82,6 +98,76 @@ export function icalNightsByMonth(
     }
   }
   return out;
+}
+
+/**
+ * Count AVAILABLE (still-bookable) days for one flat in one month: days that are
+ * today-or-later and NOT covered by any AvailabilityBlock — i.e. exactly the
+ * "open" days a guest could still book on the calendar. Past days aren't
+ * available (you can't book them), and blocked/booked days aren't available, so
+ * neither is counted. A fully-blocked or fully-past month yields 0.
+ *
+ * Deliberately NOT the complement of booked nights: this looks forward from
+ * today while nights look at the whole month, and dates blocked without a
+ * booking are neither available nor booked.
+ */
+export function countAvailableDays(
+  monthKeyStr: string,
+  blocks: { startDate: Date; endDate: Date }[],
+  todayMs: number
+): number {
+  const [y, m] = monthKeyStr.split("-").map(Number);
+  const startMs = Math.max(Date.UTC(y, m - 1, 1), todayMs); // today onward only
+  const endMs = Date.UTC(y, m, 1);
+
+  let count = 0;
+  for (let t = startMs; t < endMs; t += DAY_MS) {
+    const blocked = blocks.some((b) => b.startDate.getTime() <= t && t < b.endDate.getTime());
+    if (!blocked) count++;
+  }
+  return count;
+}
+
+/**
+ * Count DOTS for one flat in one month — the backward-looking twin of
+ * countAvailableDays. A dot is a day that is simply gone: the flat was live, it
+ * earned nothing, and midnight passed. countAvailableDays counts days still left
+ * to sell; this counts the ones already lost.
+ *
+ * A day is a dot when it is strictly BEFORE today, on/after the flat's first day,
+ * and no money was made on it — `sold` holds every night covered by a booking or
+ * an Airbnb reservation.
+ *
+ * The one exclusion is a MANUAL block: dates the host deliberately took off the
+ * market in our own app were never for sale, so losing them isn't a loss.
+ *
+ * ICAL blocks deliberately do NOT excuse a day. Airbnb closes a date off once it
+ * can no longer be sold, so by the time we look back, a day that quietly went
+ * unsold can appear "blocked" — which is exactly the case this metric exists to
+ * surface. Deciding on `sold` rather than on "has a block" means such a day is
+ * still counted. When the host blocks Airbnb because they sold the flat direct,
+ * the matching offline booking puts those nights in `sold`, so it is not a dot.
+ */
+export function countDotDays(
+  monthKeyStr: string,
+  blocks: { startDate: Date; endDate: Date; kind: string }[],
+  sold: Set<number>,
+  todayMs: number,
+  listingStartMs: number
+): number {
+  const [y, m] = monthKeyStr.split("-").map(Number);
+  const startMs = Math.max(Date.UTC(y, m - 1, 1), listingStartMs);
+  const endMs = Math.min(Date.UTC(y, m, 1), todayMs); // elapsed days only
+
+  let count = 0;
+  for (let t = startMs; t < endMs; t += DAY_MS) {
+    if (sold.has(t)) continue;
+    const offMarket = blocks.some(
+      (b) => b.kind === "MANUAL" && b.startDate.getTime() <= t && t < b.endDate.getTime()
+    );
+    if (!offMarket) count++;
+  }
+  return count;
 }
 
 /** Revenue for the chosen channel from a summary's buckets. */
@@ -137,6 +223,7 @@ export function summarize(rows: PnlListingMonth[]): PnlSummary {
   let rent = 0;
   let staff = 0;
   let unbookedDays = 0;
+  let dots = 0;
   for (const r of rows) {
     revenueDirect += r.revenueDirect;
     revenueOffline += r.revenueOffline;
@@ -147,6 +234,7 @@ export function summarize(rows: PnlListingMonth[]): PnlSummary {
     rent += r.rent;
     staff += r.staff;
     unbookedDays += r.unbookedDays;
+    dots += r.dots;
   }
   const revenueTotal = revenueDirect + revenueOffline + revenueOnline;
   const nightsTotal = nightsDirect + nightsOffline + nightsOnline;
@@ -168,6 +256,7 @@ export function summarize(rows: PnlListingMonth[]): PnlSummary {
     profit,
     margin,
     unbookedDays,
+    dots,
   };
 }
 

@@ -182,7 +182,7 @@ export function PnlDashboard({
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 gap-4 xl:grid-cols-5">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
         <Kpi label="Total revenue" value={formatINR(scoped.revenue)} sub={SOURCE_LABEL[source]} />
         <Kpi
           label="Avg per day"
@@ -192,6 +192,7 @@ export function PnlDashboard({
         <Kpi label="Total expenses" value={formatINR(total.expenseTotal)} sub="rent + staff" />
         <Kpi label="Net profit" value={formatINR(scoped.profit)} sub={`${scoped.margin.toFixed(1)}% margin`} valueClass={profitColor} />
         <Kpi label="Unbooked days" value={String(total.unbookedDays)} sub="available, not booked" />
+        <Kpi label="Dots" value={String(total.dots)} sub="days gone unsold" valueClass={total.dots > 0 ? "text-amber-600" : undefined} />
       </div>
 
       {/* Revenue vs expenses trend */}
@@ -290,6 +291,48 @@ export function PnlDashboard({
                     <tr key={f.listingId} className="border-b last:border-0">
                       <td className="py-2 font-medium">{f.label}</td>
                       <td className="py-2 text-right">{f.unbookedDays}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* Dots — elapsed days that went unsold, flat-wise */}
+      <section className="rounded-xl border p-5">
+        <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="flex items-center gap-2 font-semibold">
+            <span className="inline-block h-2.5 w-2.5 rounded-full bg-amber-500" />
+            Dots · {scopeLabel}
+          </h2>
+          <span className="text-sm text-muted-foreground">
+            Total <span className="font-semibold text-foreground">{total.dots}</span> days gone unsold
+          </span>
+        </div>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Days you can never get back: the flat was live, nobody booked it, and midnight passed. Counted
+          up to yesterday — today isn&apos;t lost yet. Dates you blocked yourself aren&apos;t counted, but a
+          date Airbnb closed off without ever selling it is.
+        </p>
+        {perFlat.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No flats to show for this period.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[360px] text-sm">
+              <thead className="text-left text-muted-foreground">
+                <tr className="border-b">
+                  <th className="py-2 font-medium">Flat</th>
+                  <th className="py-2 text-right font-medium">Dots</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...perFlat]
+                  .sort((a, b) => b.dots - a.dots)
+                  .map((f) => (
+                    <tr key={f.listingId} className="border-b last:border-0">
+                      <td className="py-2 font-medium">{f.label}</td>
+                      <td className={`py-2 text-right ${f.dots > 0 ? "text-amber-600" : ""}`}>{f.dots}</td>
                     </tr>
                   ))}
               </tbody>

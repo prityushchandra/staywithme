@@ -96,16 +96,17 @@ export async function GET(req: Request) {
     ["Total expenses", rupees(total.expenseTotal)],
     ["Net profit", rupees(scopedTotal.profit)],
     ["Net margin", pct(scopedTotal.margin)],
-    ["Unbooked (available) days", `${total.unbookedDays}`]
+    ["Unbooked (available) days", `${total.unbookedDays}`],
+    ["Dots (days gone unsold)", `${total.dots}`]
   );
 
   // --- Monthly sheet ---
-  const monthlyHeader = ["Month", "Revenue", "Rent", "Staff", "Total expenses", "Net profit", "Margin", "Unbooked days"];
+  const monthlyHeader = ["Month", "Revenue", "Rent", "Staff", "Total expenses", "Net profit", "Margin", "Unbooked days", "Dots"];
   const monthlyBody: XlsxValue[][] = monthly.map((m) => {
     const rev = sourceRevenue(m, source);
     const profit = rev - m.expenseTotal;
     const margin = rev > 0 ? (profit / rev) * 100 : 0;
-    return [m.label, rupees(rev), rupees(m.rent), rupees(m.staff), rupees(m.expenseTotal), rupees(profit), pct(margin), m.unbookedDays];
+    return [m.label, rupees(rev), rupees(m.rent), rupees(m.staff), rupees(m.expenseTotal), rupees(profit), pct(margin), m.unbookedDays, m.dots];
   });
   const monthlyTotal: XlsxValue[] = [
     "Total",
@@ -116,10 +117,11 @@ export async function GET(req: Request) {
     rupees(scopedTotal.profit),
     pct(scopedTotal.margin),
     total.unbookedDays,
+    total.dots,
   ];
 
   // --- By-flat sheet ---
-  const flatHeader = ["Flat", "Revenue", "Days booked", "Avg / day", "Rent", "Staff", "Total expenses", "Net profit", "Margin", "Unbooked days"];
+  const flatHeader = ["Flat", "Revenue", "Days booked", "Avg / day", "Rent", "Staff", "Total expenses", "Net profit", "Margin", "Unbooked days", "Dots"];
   const flatBody: XlsxValue[][] = perFlat.map((f) => {
     const rev = sourceRevenue(f, source);
     const profit = rev - f.expenseTotal;
@@ -136,6 +138,7 @@ export async function GET(req: Request) {
       rupees(profit),
       pct(margin),
       f.unbookedDays,
+      f.dots,
     ];
   });
   const flatTotal: XlsxValue[] = [
@@ -149,6 +152,7 @@ export async function GET(req: Request) {
     rupees(scopedTotal.profit),
     pct(scopedTotal.margin),
     total.unbookedDays,
+    total.dots,
   ];
 
   const xlsx = buildXlsx([
@@ -158,14 +162,14 @@ export async function GET(req: Request) {
       rows: [monthlyHeader, ...monthlyBody, monthlyTotal],
       headerRow: true,
       moneyColumns: [1, 2, 3, 4, 5],
-      colWidths: [16, 15, 12, 12, 15, 13, 9, 14],
+      colWidths: [16, 15, 12, 12, 15, 13, 9, 14, 9],
     },
     {
       name: "By flat",
       rows: [flatHeader, ...flatBody, flatTotal],
       headerRow: true,
       moneyColumns: [1, 3, 4, 5, 6, 7],
-      colWidths: [26, 15, 13, 13, 12, 12, 15, 13, 9, 14],
+      colWidths: [26, 15, 13, 13, 12, 12, 15, 13, 9, 14, 9],
     },
   ]);
 
