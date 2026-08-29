@@ -54,7 +54,6 @@ export async function POST(req: Request) {
       maxInfants: d.maxInfants,
       basePrice: d.basePriceRupees * 100, // rupees -> paise
       monthlyPrice: d.monthlyPriceRupees > 0 ? d.monthlyPriceRupees * 100 : null,
-      monthlyRent: d.monthlyRentRupees > 0 ? d.monthlyRentRupees * 100 : null,
       cancellationPolicy: d.cancellationPolicy,
       checkInTime: d.checkInTime || null,
       checkOutTime: d.checkOutTime || null,

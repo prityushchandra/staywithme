@@ -1,4 +1,5 @@
 import type { PnlListingMonth } from "./pnl";
+import { EXPENSE_TYPES, type ExpenseType } from "./expenses";
 
 // Pure P&L aggregation (no DB) so the admin page and the Excel export produce
 // identical numbers. All money is in paise.
@@ -12,7 +13,14 @@ export interface PnlSummary {
   nightsOffline: number;
   nightsOnline: number;
   nightsTotal: number;
+  // Costs, split the way they were recorded. `rent` is pulled out because it
+  // dwarfs the rest and is the one people look for; `expenseByType` carries the
+  // full split including rent, so nothing is lost.
   rent: number;
+  expenseByType: Record<ExpenseType, number>;
+  // Every recorded expense that isn't rent. Staff pay is NOT in here — it comes
+  // from payroll, not the expense book, and is reported on its own.
+  expenseOther: number;
   staff: number;
   expenseTotal: number;
   profit: number;
@@ -187,6 +195,11 @@ export function avgPerDay(
   return Math.round(sourceRevenue(s, source) / nights);
 }
 
+/** A zeroed per-type expense bucket. Every type is present so callers can add without checking. */
+export function emptyExpenseByType(): Record<ExpenseType, number> {
+  return Object.fromEntries(EXPENSE_TYPES.map((t) => [t, 0])) as Record<ExpenseType, number>;
+}
+
 export function summarize(rows: PnlListingMonth[]): PnlSummary {
   let revenueDirect = 0;
   let revenueOffline = 0;
@@ -194,10 +207,10 @@ export function summarize(rows: PnlListingMonth[]): PnlSummary {
   let nightsDirect = 0;
   let nightsOffline = 0;
   let nightsOnline = 0;
-  let rent = 0;
   let staff = 0;
   let unbookedDays = 0;
   let dots = 0;
+  const expenseByType = emptyExpenseByType();
   for (const r of rows) {
     revenueDirect += r.revenueDirect;
     revenueOffline += r.revenueOffline;
@@ -205,14 +218,16 @@ export function summarize(rows: PnlListingMonth[]): PnlSummary {
     nightsDirect += r.nightsDirect;
     nightsOffline += r.nightsOffline;
     nightsOnline += r.nightsOnline;
-    rent += r.rent;
     staff += r.staff;
     unbookedDays += r.unbookedDays;
     dots += r.dots;
+    for (const t of EXPENSE_TYPES) expenseByType[t] += r.expenseByType[t] ?? 0;
   }
   const revenueTotal = revenueDirect + revenueOffline + revenueOnline;
   const nightsTotal = nightsDirect + nightsOffline + nightsOnline;
-  const expenseTotal = rent + staff;
+  const rent = expenseByType.RENT;
+  const expenseOther = EXPENSE_TYPES.reduce((s, t) => (t === "RENT" ? s : s + expenseByType[t]), 0);
+  const expenseTotal = rent + expenseOther + staff;
   const profit = revenueTotal - expenseTotal;
   const margin = revenueTotal > 0 ? (profit / revenueTotal) * 100 : 0;
   return {
@@ -225,6 +240,8 @@ export function summarize(rows: PnlListingMonth[]): PnlSummary {
     nightsOnline,
     nightsTotal,
     rent,
+    expenseByType,
+    expenseOther,
     staff,
     expenseTotal,
     profit,

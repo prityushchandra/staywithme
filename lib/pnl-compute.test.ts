@@ -17,6 +17,7 @@ import {
   scopeSummary,
   summarize,
   perFlatBreakdown,
+  emptyExpenseByType,
 } from "./pnl-compute";
 
 const utc = (s: string) => new Date(`${s}T00:00:00.000Z`);
@@ -25,8 +26,12 @@ const monthStart = (ym: string) => {
   return Date.UTC(y, m - 1, 1);
 };
 
-function row(partial: Partial<PnlListingMonth> & { listingId: string; month: string }): PnlListingMonth {
+function row(
+  partial: Partial<PnlListingMonth> & { listingId: string; month: string; rent?: number }
+): PnlListingMonth {
   const [y, m] = partial.month.split("-").map(Number);
+  const expenseByType = partial.expenseByType ?? emptyExpenseByType();
+  if (partial.rent) expenseByType.RENT += partial.rent;
   return {
     listingId: partial.listingId,
     label: partial.label ?? partial.listingId,
@@ -39,7 +44,7 @@ function row(partial: Partial<PnlListingMonth> & { listingId: string; month: str
     nightsDirect: partial.nightsDirect ?? 0,
     nightsOffline: partial.nightsOffline ?? 0,
     nightsOnline: partial.nightsOnline ?? 0,
-    rent: partial.rent ?? 0,
+    expenseByType,
     staff: partial.staff ?? 0,
     unbookedDays: partial.unbookedDays ?? 0,
     dots: partial.dots ?? 0,

@@ -197,10 +197,6 @@ model Listing {
   // Optional monthly rate (paise). When set, stays of 30+ nights are charged at
   // this rate pro-rated per night instead of the nightly basePrice.
   monthlyPrice Int?
-  // Optional monthly RENT we pay to the flat owner (paise). This is OUR expense
-  // (we sublet the flat) and feeds the Profit & Loss statement. Not guest-facing.
-  monthlyRent  Int?
-
   cancellationPolicy CancellationPolicy
 
   // Host-set "things to know" details
@@ -235,6 +231,7 @@ model Listing {
   onlineEarnings  OnlineEarning[]
   staffPayroll    StaffPayroll[]
   dotMonths       ListingDotMonth[]
+  expenses        Expense[]
 
   @@index([status])
   @@index([city])
@@ -641,4 +638,48 @@ model ListingDotMonth {
 
   @@unique([listingId, month])
   @@index([month])
+}
+
+// What a running cost was for. Rent is the big recurring one; the rest are the
+// day-to-day costs of keeping a flat guest-ready.
+enum ExpenseType {
+  RENT
+  ELECTRICITY
+  GROCERY
+  GAS
+  WIFI
+  REPAIR
+  OTHER
+}
+
+// A single cost against one flat, on one date. Replaces the old
+// Listing.monthlyRent: rent is now just an expense of type RENT, so a month the
+// rent changed (or was skipped) tells the truth instead of being back-projected
+// from whatever the current figure happens to be.
+model Expense {
+  id        String  @id @default(cuid())
+  listingId String
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  type   ExpenseType
+  amount Int // paise
+  // The day the cost belongs to. Free-dated on purpose: a bill can be recorded
+  // late, or ahead of time for rent that is already committed.
+  date   DateTime
+  // "YYYY-MM" derived from `date`, stored so the P&L can group by month without
+  // reading every row. Always kept in step with `date` on write.
+  month  String
+  // Who paid. Only meaningful for shared costs (groceries) where it decides who
+  // is owed; null for costs that come out of the business itself.
+  paidBy String?
+  note   String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([listingId])
+  @@index([month])
+  @@index([date])
+  @@index([type])
 }

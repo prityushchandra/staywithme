@@ -33,7 +33,6 @@ const publicListingArgs = {
     addressLine: true,
     lat: true,
     lng: true,
-    monthlyRent: true,
     wifiName: true,
     wifiPassword: true,
     rejectionReason: true,

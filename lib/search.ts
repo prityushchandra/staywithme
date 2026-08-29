@@ -138,7 +138,6 @@ const searchArgs = {
     addressLine: true,
     lat: true,
     lng: true,
-    monthlyRent: true,
     wifiName: true,
     wifiPassword: true,
     rejectionReason: true,

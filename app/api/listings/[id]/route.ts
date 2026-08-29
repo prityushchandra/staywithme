@@ -67,7 +67,6 @@ export async function PATCH(
         maxInfants: d.maxInfants,
         basePrice: d.basePriceRupees * 100,
         monthlyPrice: d.monthlyPriceRupees > 0 ? d.monthlyPriceRupees * 100 : null,
-        monthlyRent: d.monthlyRentRupees > 0 ? d.monthlyRentRupees * 100 : null,
         cancellationPolicy: d.cancellationPolicy,
         checkInTime: d.checkInTime || null,
         checkOutTime: d.checkOutTime || null,

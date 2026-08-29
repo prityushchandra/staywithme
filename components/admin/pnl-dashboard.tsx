@@ -35,11 +35,23 @@ import {
 import type { PnlListingMonth } from "@/lib/pnl";
 import { SelectItem } from "@/components/ui/select";
 import { ToggleSelect } from "@/components/ui/toggle-select";
+import { EXPENSE_TYPES, EXPENSE_TYPE_LABEL, type ExpenseType } from "@/lib/expenses";
 
 const REVENUE = "#2f9e6f";
 const EXPENSE = "#C8705E";
 const RENT = "#C8705E";
 const STAFF = "#E0A99B";
+
+// One colour per expense type, warm-to-pale so rent (the big one) reads first.
+const EXPENSE_COLOR: Record<ExpenseType, string> = {
+  RENT: RENT,
+  ELECTRICITY: "#D98F5F",
+  GROCERY: "#C4926B",
+  GAS: "#B87A6A",
+  WIFI: "#A98C7D",
+  REPAIR: "#D4A59A",
+  OTHER: "#BFB0A8",
+};
 
 const inr0 = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
 const toRupees = (paise: number) => Math.round(paise) / 100;
@@ -137,10 +149,19 @@ export function PnlDashboard({
     return out;
   }, [total, source]);
 
-  const expensePie = [
-    { name: "Rent", value: toRupees(total.rent) },
-    { name: "Staff", value: toRupees(total.staff) },
-  ].filter((d) => d.value > 0);
+  // Only types that actually cost something show up, so a flat with just rent
+  // doesn't get a legend full of zeroes.
+  const expenseRows = useMemo(() => {
+    const rows = EXPENSE_TYPES.filter((t) => total.expenseByType[t] > 0).map((t) => ({
+      name: EXPENSE_TYPE_LABEL[t],
+      value: total.expenseByType[t],
+      color: EXPENSE_COLOR[t],
+    }));
+    if (total.staff > 0) rows.push({ name: "Staff salaries", value: total.staff, color: STAFF });
+    return rows;
+  }, [total]);
+
+  const expensePie = expenseRows.map((r) => ({ ...r, value: toRupees(r.value) }));
 
   const fyLabel = financialYearLabel(fy);
   const scopeLabel = month === "all" ? fyLabel : monthLabel(month);
@@ -153,7 +174,7 @@ export function PnlDashboard({
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Profit &amp; Loss</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {SOURCE_LABEL[source]} revenue minus rent &amp; staff costs — {scopeLabel}.
+            {SOURCE_LABEL[source]} revenue minus expenses &amp; staff costs — {scopeLabel}.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -190,7 +211,7 @@ export function PnlDashboard({
           value={scoped.avgPerDay === null ? "—" : formatINR(scoped.avgPerDay)}
           sub={scoped.nights > 0 ? `over ${scoped.nights} booked ${scoped.nights === 1 ? "day" : "days"}` : "no booked days yet"}
         />
-        <Kpi label="Total expenses" value={formatINR(total.expenseTotal)} sub="rent + staff" />
+        <Kpi label="Total expenses" value={formatINR(total.expenseTotal)} sub="all expenses + staff" />
         <Kpi label="Net profit" value={formatINR(scoped.profit)} sub={`${scoped.margin.toFixed(1)}% margin`} valueClass={profitColor} />
         <Kpi label="Unbooked days" value={String(total.unbookedDays)} sub="still open + dots" />
         <Kpi label="Dots" value={String(total.dots)} sub="days gone unsold" valueClass={total.dots > 0 ? "text-amber-600" : undefined} />
@@ -243,21 +264,23 @@ export function PnlDashboard({
               <ResponsiveContainer width="45%" height={160}>
                 <PieChart>
                   <Pie data={expensePie} dataKey="value" nameKey="name" innerRadius={46} outerRadius={72} paddingAngle={3} stroke="none" isAnimationActive={false}>
-                    <Cell fill={RENT} />
-                    <Cell fill={STAFF} />
+                    {expensePie.map((d) => (
+                      <Cell key={d.name} fill={d.color} />
+                    ))}
                   </Pie>
                   <Tooltip content={<ChartTooltip />} trigger="click" isAnimationActive={false} />
                 </PieChart>
               </ResponsiveContainer>
               <div className="flex-1">
-                <StatRow label="Rent" value={total.rent} strong dot={RENT} />
-                <StatRow label="Staff salaries" value={total.staff} strong dot={STAFF} />
+                {expenseRows.map((r) => (
+                  <StatRow key={r.name} label={r.name} value={r.value} strong dot={r.color} />
+                ))}
                 <div className="my-2 border-t" />
                 <StatRow label="Total expenses" value={total.expenseTotal} bold />
               </div>
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">No rent or staff costs recorded for this period.</p>
+            <p className="text-sm text-muted-foreground">No expenses or staff costs recorded for this period.</p>
           )}
         </div>
       </div>

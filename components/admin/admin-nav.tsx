@@ -14,6 +14,7 @@ import {
   Sparkles,
   TrendingUp,
   CircleDot,
+  Receipt,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -31,6 +32,7 @@ const NAV: NavItem[] = [
   { href: "/admin/listings", label: "Listings", Icon: ListChecks, badge: "listings" },
   { href: "/admin/bookings", label: "Bookings", Icon: CalendarCheck },
   { href: "/admin/earnings", label: "Airbnb earnings", Icon: IndianRupee },
+  { href: "/admin/expenses", label: "Expense tracker", Icon: Receipt },
   { href: "/admin/pnl", label: "P&L", Icon: TrendingUp },
   { href: "/admin/dots", label: "Dot days", Icon: CircleDot },
   { href: "/admin/staff", label: "Staff", Icon: Sparkles },

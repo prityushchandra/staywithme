@@ -16,6 +16,7 @@ import {
   type PnlSource,
 } from "@/lib/pnl-compute";
 import { buildXlsx, type XlsxValue } from "@/lib/xlsx";
+import { EXPENSE_TYPES, EXPENSE_TYPE_LABEL } from "@/lib/expenses";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -90,8 +91,13 @@ export async function GET(req: Request) {
     // Day counts are NOT currency, so keep them strings so the ₹ number format
     // on this column doesn't apply to them.
     ["Days booked", `${scopedTotal.nights}`],
-    ["Avg per booked day", scopedTotal.avgPerDay === null ? "—" : rupees(scopedTotal.avgPerDay)],
-    ["Rent", rupees(total.rent)],
+    ["Avg per booked day", scopedTotal.avgPerDay === null ? "—" : rupees(scopedTotal.avgPerDay)]
+  );
+  // Mirror the dashboard exactly: only expense types that actually cost
+  // something get a line, in the same order.
+  const usedTypes = EXPENSE_TYPES.filter((t) => total.expenseByType[t] > 0);
+  for (const t of usedTypes) summaryRows.push([EXPENSE_TYPE_LABEL[t], rupees(total.expenseByType[t])]);
+  summaryRows.push(
     ["Staff salaries", rupees(total.staff)],
     ["Total expenses", rupees(total.expenseTotal)],
     ["Net profit", rupees(scopedTotal.profit)],
@@ -100,18 +106,32 @@ export async function GET(req: Request) {
     ["Dots (days gone unsold)", `${total.dots}`]
   );
 
+  const typeLabels = usedTypes.map((t) => EXPENSE_TYPE_LABEL[t]);
+  const typeWidths = usedTypes.map(() => 13);
+  const nTypes = usedTypes.length;
+
   // --- Monthly sheet ---
-  const monthlyHeader = ["Month", "Revenue", "Rent", "Staff", "Total expenses", "Net profit", "Margin", "Unbooked days", "Dots"];
+  const monthlyHeader = ["Month", "Revenue", ...typeLabels, "Staff", "Total expenses", "Net profit", "Margin", "Unbooked days", "Dots"];
   const monthlyBody: XlsxValue[][] = monthly.map((m) => {
     const rev = sourceRevenue(m, source);
     const profit = rev - m.expenseTotal;
     const margin = rev > 0 ? (profit / rev) * 100 : 0;
-    return [m.label, rupees(rev), rupees(m.rent), rupees(m.staff), rupees(m.expenseTotal), rupees(profit), pct(margin), m.unbookedDays, m.dots];
+    return [
+      m.label,
+      rupees(rev),
+      ...usedTypes.map((t) => rupees(m.expenseByType[t])),
+      rupees(m.staff),
+      rupees(m.expenseTotal),
+      rupees(profit),
+      pct(margin),
+      m.unbookedDays,
+      m.dots,
+    ];
   });
   const monthlyTotal: XlsxValue[] = [
     "Total",
     rupees(scopedTotal.revenue),
-    rupees(total.rent),
+    ...usedTypes.map((t) => rupees(total.expenseByType[t])),
     rupees(total.staff),
     rupees(total.expenseTotal),
     rupees(scopedTotal.profit),
@@ -121,7 +141,7 @@ export async function GET(req: Request) {
   ];
 
   // --- By-flat sheet ---
-  const flatHeader = ["Flat", "Revenue", "Days booked", "Avg / day", "Rent", "Staff", "Total expenses", "Net profit", "Margin", "Unbooked days", "Dots"];
+  const flatHeader = ["Flat", "Revenue", "Days booked", "Avg / day", ...typeLabels, "Staff", "Total expenses", "Net profit", "Margin", "Unbooked days", "Dots"];
   const flatBody: XlsxValue[][] = perFlat.map((f) => {
     const rev = sourceRevenue(f, source);
     const profit = rev - f.expenseTotal;
@@ -132,7 +152,7 @@ export async function GET(req: Request) {
       rupees(rev),
       sourceNights(f, source),
       adr === null ? "—" : rupees(adr),
-      rupees(f.rent),
+      ...usedTypes.map((t) => rupees(f.expenseByType[t])),
       rupees(f.staff),
       rupees(f.expenseTotal),
       rupees(profit),
@@ -146,7 +166,7 @@ export async function GET(req: Request) {
     rupees(scopedTotal.revenue),
     scopedTotal.nights,
     scopedTotal.avgPerDay === null ? "—" : rupees(scopedTotal.avgPerDay),
-    rupees(total.rent),
+    ...usedTypes.map((t) => rupees(total.expenseByType[t])),
     rupees(total.staff),
     rupees(total.expenseTotal),
     rupees(scopedTotal.profit),
@@ -155,21 +175,25 @@ export async function GET(req: Request) {
     total.dots,
   ];
 
+  // Money columns shift with however many expense types are in play.
+  const monthlyMoney = [1, ...Array.from({ length: nTypes + 3 }, (_, i) => 2 + i)];
+  const flatMoney = [1, 3, ...Array.from({ length: nTypes + 3 }, (_, i) => 4 + i)];
+
   const xlsx = buildXlsx([
     { name: "Summary", rows: summaryRows, headerRow: false, moneyColumns: [1], colWidths: [30, 16] },
     {
       name: "Monthly",
       rows: [monthlyHeader, ...monthlyBody, monthlyTotal],
       headerRow: true,
-      moneyColumns: [1, 2, 3, 4, 5],
-      colWidths: [16, 15, 12, 12, 15, 13, 9, 14, 9],
+      moneyColumns: monthlyMoney,
+      colWidths: [16, 15, ...typeWidths, 12, 15, 13, 9, 14, 9],
     },
     {
       name: "By flat",
       rows: [flatHeader, ...flatBody, flatTotal],
       headerRow: true,
-      moneyColumns: [1, 3, 4, 5, 6, 7],
-      colWidths: [26, 15, 13, 13, 12, 12, 15, 13, 9, 14, 9],
+      moneyColumns: flatMoney,
+      colWidths: [26, 15, 13, 13, ...typeWidths, 12, 15, 13, 9, 14, 9],
     },
   ]);
 

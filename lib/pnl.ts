@@ -3,11 +3,13 @@ import { memo } from "@/lib/memo";
 import {
   availableDaysOf,
   eachNight,
+  emptyExpenseByType,
   icalNightsByMonth,
   monthKeyOf,
   stayNights,
   todayInIndia,
 } from "@/lib/pnl-compute";
+import { isExpenseType, type ExpenseType } from "@/lib/expenses";
 import { ICAL_RESERVED_NOTE } from "@/lib/ical";
 
 // Profit & Loss data model. Everything is in MINOR units (paise).
@@ -18,9 +20,9 @@ import { ICAL_RESERVED_NOTE } from "@/lib/ical";
 //   - Online   : OnlineEarning monthly entries (Airbnb/Booking.com/…) +
 //                confirmed OfflineBookings, source AIRBNB — by month
 // Expenses:
-//   - Rent   : Listing.monthlyRent, accrued every month from the flat's first
-//              month (createdAt) through the current month
-//   - Staff  : StaffPayroll.pay for that flat + month
+//   - Recorded expenses : Expense rows (rent, electricity, grocery, …) dated to
+//                         the month they belong to, entered in the expense tracker
+//   - Staff             : StaffPayroll.pay for that flat + month
 
 export interface PnlListingMonth {
   listingId: string;
@@ -39,7 +41,9 @@ export interface PnlListingMonth {
   nightsDirect: number;
   nightsOffline: number;
   nightsOnline: number;
-  rent: number;
+  // Recorded expenses for this flat + month, split by type. Rent is one of
+  // these types, not a special case.
+  expenseByType: Record<ExpenseType, number>;
   staff: number;
   // Vacant days that earned nothing: days still open on the calendar (today
   // onward) PLUS dots — days that already ran out of time. See countAvailableDays.
@@ -88,10 +92,18 @@ function flatLabel(l: { title: string; flatNumber: string | null; block: string 
 
 export async function getPnlData(): Promise<PnlData> {
   return memo("admin-pnl", 30_000, async () => {
-    const [listings, directBookings, offlineBookings, onlineEarnings, staffPayroll, allBlocks, dotMonths] =
-      await Promise.all([
+    const [
+      listings,
+      directBookings,
+      offlineBookings,
+      onlineEarnings,
+      staffPayroll,
+      allBlocks,
+      dotMonths,
+      expenses,
+    ] = await Promise.all([
         prisma.listing.findMany({
-          select: { id: true, title: true, flatNumber: true, block: true, monthlyRent: true, createdAt: true },
+          select: { id: true, title: true, flatNumber: true, block: true, createdAt: true },
         }),
         prisma.booking.findMany({
           where: { status: "CONFIRMED" },
@@ -105,13 +117,11 @@ export async function getPnlData(): Promise<PnlData> {
         prisma.staffPayroll.findMany({ select: { listingId: true, month: true, pay: true } }),
         prisma.availabilityBlock.findMany({ select: { listingId: true, startDate: true, endDate: true, kind: true, note: true } }),
         prisma.listingDotMonth.findMany({ select: { listingId: true, month: true, days: true } }),
+        prisma.expense.findMany({ select: { listingId: true, month: true, type: true, amount: true } }),
       ]);
 
     const listingMeta = new Map(
-      listings.map((l) => [
-        l.id,
-        { label: flatLabel(l), monthlyRent: l.monthlyRent ?? 0, createdAt: l.createdAt },
-      ])
+      listings.map((l) => [l.id, { label: flatLabel(l), createdAt: l.createdAt }])
     );
 
     // Group availability blocks by flat for the unbooked-day and dot scans.
@@ -166,7 +176,7 @@ export async function getPnlData(): Promise<PnlData> {
           nightsDirect: 0,
           nightsOffline: 0,
           nightsOnline: 0,
-          rent: 0,
+          expenseByType: emptyExpenseByType(),
           staff: 0,
           unbookedDays: 0,
           dots: 0,
@@ -241,15 +251,12 @@ export async function getPnlData(): Promise<PnlData> {
       for (const b of blocks) markRecorded(listingId, b.startDate, b.endDate);
     }
 
-    // Rent accrues monthly from the flat's first month through the current month
-    // (we don't project rent into future months that carry only upcoming revenue).
-    for (const l of listings) {
-      const rent = l.monthlyRent ?? 0;
-      if (rent <= 0) continue;
-      const startIdx = Math.max(minIdx, ymToIndex(monthKey(l.createdAt)));
-      for (let i = startIdx; i <= Math.min(maxIdx, currentIdx); i++) {
-        cell(l.id, indexToYm(i)).rent += rent;
-      }
+    // Recorded expenses land in the month they were dated to. Unlike the old
+    // rent field, nothing is projected — a month reports what it actually cost.
+    for (const e of expenses) {
+      if (!monthSet.has(e.month) || !listingMeta.has(e.listingId)) continue;
+      if (!isExpenseType(e.type)) continue;
+      cell(e.listingId, e.month).expenseByType[e.type] += e.amount;
     }
 
     // Available (still-bookable) days per flat per month — from the current month

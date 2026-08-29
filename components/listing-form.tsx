@@ -54,7 +54,6 @@ export interface ListingFormInitial {
   maxInfants?: number;
   basePriceRupees: number;
   monthlyPriceRupees?: number;
-  monthlyRentRupees?: number;
   cancellationPolicy: string;
   checkInTime?: string;
   checkOutTime?: string;
@@ -108,7 +107,6 @@ export function ListingForm({
     maxInfants: initial?.maxInfants ?? 0,
     basePriceRupees: initial?.basePriceRupees ?? 0,
     monthlyPriceRupees: initial?.monthlyPriceRupees ?? 0,
-    monthlyRentRupees: initial?.monthlyRentRupees ?? 0,
     cancellationPolicy: initial?.cancellationPolicy ?? policies[0]?.policy ?? "FLEXIBLE",
     checkInTime: initial?.checkInTime ?? "",
     checkOutTime: initial?.checkOutTime ?? "",
@@ -547,22 +545,6 @@ export function ListingForm({
             For long stays. When set, bookings of 30 nights or more are charged at
             this monthly rate (pro-rated per night) instead of the nightly price.
             Leave blank if you don&apos;t offer monthly stays.
-          </p>
-        </div>
-
-        <div className="space-y-1">
-          <Label htmlFor="monthlyRent">Monthly rent you pay (₹) — optional</Label>
-          <Input
-            id="monthlyRent"
-            type="number"
-            min={0}
-            value={form.monthlyRentRupees || ""}
-            onChange={(e) => set("monthlyRentRupees", Number(e.target.value) || 0)}
-            placeholder="30000"
-          />
-          <p className="text-xs text-muted-foreground">
-            Your monthly cost for this flat (the rent you pay the owner). Used only
-            in the admin Profit &amp; Loss statement — never shown to guests.
           </p>
         </div>
       </section>
