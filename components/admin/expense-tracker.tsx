@@ -35,6 +35,37 @@ function dayLabel(date: string): string {
   });
 }
 
+function RowActions({
+  row,
+  onEdit,
+  onRemove,
+}: {
+  row: ExpenseRow;
+  onEdit: (r: ExpenseRow) => void;
+  onRemove: (r: ExpenseRow) => void;
+}) {
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => onEdit(row)}
+        className="rounded-md p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+        aria-label="Edit expense"
+      >
+        <Pencil className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        onClick={() => onRemove(row)}
+        className="rounded-md p-1.5 text-muted-foreground transition hover:bg-muted hover:text-destructive"
+        aria-label="Delete expense"
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
+    </>
+  );
+}
+
 export function ExpenseTracker({
   flats,
   expenses,
@@ -338,57 +369,78 @@ export function ExpenseTracker({
           </p>
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-sm">
+            {/* Phone: one card per entry. A seven-column table can only be read
+                by dragging it sideways, which leaves half of every row cropped. */}
+            <ul className="space-y-2 md:hidden">
+              {rows.map((r) => (
+                <li key={r.id} className="rounded-lg border p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-medium">{EXPENSE_TYPE_LABEL[r.type]}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {dayLabel(r.date)} · {r.label}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-0.5">
+                      <span className="mr-1 font-semibold">{formatINR(r.amount)}</span>
+                      <RowActions row={r} onEdit={startEdit} onRemove={remove} />
+                    </div>
+                  </div>
+                  {(r.paidBy || r.note) && (
+                    <p className="mt-2 break-words border-t pt-2 text-xs text-muted-foreground">
+                      {r.paidBy && <span className="font-medium text-foreground">{r.paidBy}</span>}
+                      {r.paidBy && r.note ? " · " : ""}
+                      {r.note}
+                    </p>
+                  )}
+                </li>
+              ))}
+              <li className="flex items-center justify-between rounded-lg bg-muted px-3 py-2 font-semibold">
+                <span>
+                  Total · {rows.length} {rows.length === 1 ? "entry" : "entries"}
+                </span>
+                <span>{formatINR(total)}</span>
+              </li>
+            </ul>
+
+            <div className="hidden overflow-x-auto md:block">
+              <table className="w-full min-w-[620px] text-sm">
                 <thead className="text-left text-muted-foreground">
                   <tr className="border-b">
-                    <th className="py-2 font-medium">Date</th>
-                    <th className="py-2 font-medium">Flat</th>
-                    <th className="py-2 font-medium">Type</th>
-                    <th className="py-2 font-medium">Paid by</th>
-                    <th className="py-2 font-medium">Note</th>
-                    <th className="py-2 text-right font-medium">Amount</th>
+                    <th className="py-2 pr-4 font-medium">Date</th>
+                    <th className="py-2 pr-4 font-medium">Flat</th>
+                    <th className="py-2 pr-4 font-medium">Type</th>
+                    <th className="py-2 pr-4 font-medium">Paid by</th>
+                    <th className="py-2 pr-4 font-medium">Note</th>
+                    <th className="py-2 pr-4 text-right font-medium">Amount</th>
                     <th className="py-2" />
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((r) => (
-                    <tr key={r.id} className="border-b last:border-0">
-                      <td className="whitespace-nowrap py-2">{dayLabel(r.date)}</td>
-                      <td className="py-2">{r.label}</td>
-                      <td className="py-2">{EXPENSE_TYPE_LABEL[r.type]}</td>
-                      <td className="py-2 text-muted-foreground">{r.paidBy ?? "—"}</td>
-                      <td className="max-w-[220px] truncate py-2 text-muted-foreground" title={r.note ?? ""}>
+                    <tr key={r.id} className="border-b align-top last:border-0">
+                      <td className="whitespace-nowrap py-2 pr-4">{dayLabel(r.date)}</td>
+                      <td className="whitespace-nowrap py-2 pr-4">{r.label}</td>
+                      <td className="whitespace-nowrap py-2 pr-4">{EXPENSE_TYPE_LABEL[r.type]}</td>
+                      <td className="whitespace-nowrap py-2 pr-4 text-muted-foreground">{r.paidBy ?? "—"}</td>
+                      {/* Notes wrap rather than truncate — a note you can't read
+                          is the same as a note you never wrote. */}
+                      <td className="w-full min-w-[140px] break-words py-2 pr-4 text-muted-foreground">
                         {r.note ?? "—"}
                       </td>
-                      <td className="whitespace-nowrap py-2 text-right font-medium">{formatINR(r.amount)}</td>
+                      <td className="whitespace-nowrap py-2 pr-4 text-right font-medium">{formatINR(r.amount)}</td>
                       <td className="whitespace-nowrap py-2 text-right">
-                        <button
-                          type="button"
-                          onClick={() => startEdit(r)}
-                          className="rounded-md p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                          aria-label="Edit expense"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => remove(r)}
-                          className="rounded-md p-1.5 text-muted-foreground transition hover:bg-muted hover:text-destructive"
-                          aria-label="Delete expense"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        <RowActions row={r} onEdit={startEdit} onRemove={remove} />
                       </td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
                   <tr className="border-t-2">
-                    <td className="py-2 font-semibold" colSpan={5}>
+                    <td className="py-2 pr-4 font-semibold" colSpan={5}>
                       Total · {rows.length} {rows.length === 1 ? "entry" : "entries"}
                     </td>
-                    <td className="py-2 text-right font-bold">{formatINR(total)}</td>
+                    <td className="whitespace-nowrap py-2 pr-4 text-right font-bold">{formatINR(total)}</td>
                     <td />
                   </tr>
                 </tfoot>
