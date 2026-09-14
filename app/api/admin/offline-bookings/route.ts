@@ -4,7 +4,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { addBlock, toUtcDate } from "@/lib/availability";
-import { nextReceiptNumber } from "@/lib/receipts";
+import { withReceiptNumber } from "@/lib/receipts";
 import { syncOfflineBooking, syncReceipt } from "@/lib/google-sheets";
 
 async function requireAdmin() {
@@ -117,54 +117,55 @@ export async function POST(req: Request) {
   }
 
   try {
-    const receiptNumber = await nextReceiptNumber();
-    const booking = await prisma.$transaction(async (tx) => {
-      const created = await tx.offlineBooking.create({
-        data: {
-          listingId: input.listingId,
-          guestName: input.guestName,
-          guestPhone: input.guestPhone || null,
-          guests: input.guests,
-          checkIn,
-          checkOut,
-          totalPrice,
-          amountPaid,
-          due,
-          source: input.source,
-          status: "CONFIRMED",
-          note: input.note || null,
-          blockId: blockResult.block.id,
-          publicToken: crypto.randomUUID().replace(/-/g, ""),
-          createdById: session?.user?.id ?? null,
-        },
-      });
-
-      await tx.receipt.create({
-        data: {
-          number: receiptNumber,
-          type: "BOOKING",
-          offlineBookingId: created.id,
-          refId: created.id,
+    const { result: booking, receiptNumber } = await withReceiptNumber((receiptNumber) =>
+      prisma.$transaction(async (tx) => {
+        const created = await tx.offlineBooking.create({
           data: {
+            listingId: input.listingId,
             guestName: input.guestName,
             guestPhone: input.guestPhone || null,
-            listingTitle: listing.title,
-            flat: flatLabel(listing),
-            checkIn: checkIn.toISOString(),
-            checkOut: checkOut.toISOString(),
-            checkInTime: listing.checkInTime,
-            checkOutTime: listing.checkOutTime,
             guests: input.guests,
+            checkIn,
+            checkOut,
             totalPrice,
             amountPaid,
             due,
             source: input.source,
+            status: "CONFIRMED",
+            note: input.note || null,
+            blockId: blockResult.block.id,
+            publicToken: crypto.randomUUID().replace(/-/g, ""),
+            createdById: session?.user?.id ?? null,
           },
-        },
-      });
+        });
 
-      return created;
-    });
+        await tx.receipt.create({
+          data: {
+            number: receiptNumber,
+            type: "BOOKING",
+            offlineBookingId: created.id,
+            refId: created.id,
+            data: {
+              guestName: input.guestName,
+              guestPhone: input.guestPhone || null,
+              listingTitle: listing.title,
+              flat: flatLabel(listing),
+              checkIn: checkIn.toISOString(),
+              checkOut: checkOut.toISOString(),
+              checkInTime: listing.checkInTime,
+              checkOutTime: listing.checkOutTime,
+              guests: input.guests,
+              totalPrice,
+              amountPaid,
+              due,
+              source: input.source,
+            },
+          },
+        });
+
+        return created;
+      })
+    );
 
     after(async () => {
       await Promise.allSettled([
@@ -191,6 +192,9 @@ export async function POST(req: Request) {
     revalidateTag("listings");
     return NextResponse.json({ id: booking.id, receiptNumber, receiptUrl: `/api/receipts/booking/${booking.id}` }, { status: 201 });
   } catch (e) {
+    // The block was written before the booking, so drop it or the dates stay
+    // held by a booking that does not exist.
+    console.error("[offline-bookings] could not record booking", e);
     await prisma.availabilityBlock.delete({ where: { id: blockResult.block.id } }).catch(() => {});
     return NextResponse.json({ error: "Could not record booking" }, { status: 500 });
   }
