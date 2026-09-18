@@ -79,6 +79,49 @@ export function eachNight(checkIn: Date, checkOut: Date): number[] {
 }
 
 /**
+ * A stay split across the months it actually occupies.
+ *
+ * A booking is paid for once but can run over a month boundary, and each month
+ * should only carry the part of the stay that happened in it — otherwise a
+ * 26 Sep → 31 Oct stay reports every rupee in September and leaves October
+ * looking empty. Money follows nights: a month gets the share of the total that
+ * its nights represent.
+ *
+ * Rounding is cumulative rather than per-month, so the parts always add back up
+ * to the total exactly and no paise is created or lost at a boundary.
+ */
+export function splitStayByMonth(
+  checkIn: Date,
+  checkOut: Date,
+  total: number
+): Map<string, { nights: number; amount: number }> {
+  const nightsByMonth = new Map<string, number>();
+  for (const t of eachNight(checkIn, checkOut)) {
+    const key = monthKeyOf(t);
+    nightsByMonth.set(key, (nightsByMonth.get(key) ?? 0) + 1);
+  }
+
+  // A same-day (or malformed) stay still counts as one night in its check-in
+  // month, matching how stayNights clamps.
+  if (nightsByMonth.size === 0) {
+    return new Map([[monthKeyOf(floorDayUtc(checkIn)), { nights: 1, amount: total }]]);
+  }
+
+  const totalNights = [...nightsByMonth.values()].reduce((a, b) => a + b, 0);
+  const out = new Map<string, { nights: number; amount: number }>();
+  let coveredNights = 0;
+  let allocated = 0;
+  for (const key of [...nightsByMonth.keys()].sort()) {
+    const nights = nightsByMonth.get(key)!;
+    coveredNights += nights;
+    const upto = Math.round((total * coveredNights) / totalNights);
+    out.set(key, { nights, amount: upto - allocated });
+    allocated = upto;
+  }
+  return out;
+}
+
+/**
  * Nights per month from Airbnb reservations imported over iCal.
  *
  * Those blocks carry no money of their own — that arrives as the monthly

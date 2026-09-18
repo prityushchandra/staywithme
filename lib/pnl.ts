@@ -6,7 +6,7 @@ import {
   emptyExpenseByType,
   icalNightsByMonth,
   monthKeyOf,
-  stayNights,
+  splitStayByMonth,
   todayInIndia,
 } from "@/lib/pnl-compute";
 import { isExpenseType, type ExpenseType } from "@/lib/expenses";
@@ -15,10 +15,14 @@ import { ICAL_RESERVED_NOTE } from "@/lib/ical";
 // Profit & Loss data model. Everything is in MINOR units (paise).
 //
 // Revenue buckets:
-//   - Direct   : confirmed on-platform Bookings (WhatsApp) — by check-in month
-//   - Offline  : confirmed OfflineBookings, source OFFLINE — by check-in month
+//   - Direct   : confirmed on-platform Bookings (WhatsApp)
+//   - Offline  : confirmed OfflineBookings, source OFFLINE
 //   - Online   : OnlineEarning monthly entries (Airbnb/Booking.com/…) +
-//                confirmed OfflineBookings, source AIRBNB — by month
+//                confirmed OfflineBookings, source AIRBNB
+//
+// A stay that crosses a month boundary is split across the months it occupies,
+// pro rata by night, so each month reports the business that actually happened
+// in it rather than crediting everything to the month of check-in.
 // Expenses:
 //   - Recorded expenses : Expense rows (rent, electricity, grocery, …) dated to
 //                         the month they belong to, entered in the expense tracker
@@ -34,10 +38,10 @@ export interface PnlListingMonth {
   revenueOffline: number;
   revenueOnline: number;
   // Nights actually booked, paired with the revenue bucket above so that
-  // revenue / nights is a meaningful average daily rate. Booking-derived nights
-  // land in the CHECK-IN month (exactly where their revenue is booked), and
-  // iCal-imported Airbnb nights land in the month they fall in (exactly where
-  // the monthly OnlineEarning figure they belong to is booked).
+  // revenue / nights is a meaningful average daily rate. Every night lands in
+  // the month it falls in — booking nights alongside the pro-rata share of the
+  // stay's money, and iCal-imported Airbnb nights alongside the monthly
+  // OnlineEarning figure they belong to.
   nightsDirect: number;
   nightsOffline: number;
   nightsOnline: number;
@@ -135,10 +139,21 @@ export async function getPnlData(): Promise<PnlData> {
     const now = new Date();
     const currentMonth = monthKey(now);
 
+    // Split every stay across the months it spans before sizing the grid, so a
+    // booking that runs past the end of the window still gets a month to land in.
+    const directStays = directBookings.map((b) => ({
+      booking: b,
+      parts: splitStayByMonth(b.checkIn, b.checkOut, Math.max(0, b.totalAmount)),
+    }));
+    const offlineStays = offlineBookings.map((b) => ({
+      booking: b,
+      parts: splitStayByMonth(b.checkIn, b.checkOut, Math.max(0, b.totalPrice)),
+    }));
+
     // Determine the [min..max] month window from all activity.
     const keys = [currentMonth];
-    for (const b of directBookings) keys.push(monthKey(b.checkIn));
-    for (const b of offlineBookings) keys.push(monthKey(b.checkIn));
+    for (const s of directStays) keys.push(...s.parts.keys());
+    for (const s of offlineStays) keys.push(...s.parts.keys());
     for (const e of onlineEarnings) keys.push(e.month);
     for (const s of staffPayroll) keys.push(s.month);
     for (const l of listings) keys.push(monthKey(l.createdAt));
@@ -198,25 +213,28 @@ export async function getPnlData(): Promise<PnlData> {
       for (const t of eachNight(checkIn, checkOut)) set.add(t);
     }
 
-    for (const b of directBookings) {
-      const m = monthKey(b.checkIn);
-      if (!monthSet.has(m) || !listingMeta.has(b.listingId)) continue;
-      const c = cell(b.listingId, m);
-      c.revenueDirect += Math.max(0, b.totalAmount);
-      c.nightsDirect += stayNights(b.checkIn, b.checkOut);
+    for (const { booking: b, parts } of directStays) {
+      if (!listingMeta.has(b.listingId)) continue;
+      for (const [m, part] of parts) {
+        if (!monthSet.has(m)) continue;
+        const c = cell(b.listingId, m);
+        c.revenueDirect += part.amount;
+        c.nightsDirect += part.nights;
+      }
       markRecorded(b.listingId, b.checkIn, b.checkOut);
     }
-    for (const b of offlineBookings) {
-      const m = monthKey(b.checkIn);
-      if (!monthSet.has(m) || !listingMeta.has(b.listingId)) continue;
-      const c = cell(b.listingId, m);
-      const nights = stayNights(b.checkIn, b.checkOut);
-      if (b.source === "AIRBNB") {
-        c.revenueOnline += Math.max(0, b.totalPrice);
-        c.nightsOnline += nights;
-      } else {
-        c.revenueOffline += Math.max(0, b.totalPrice);
-        c.nightsOffline += nights;
+    for (const { booking: b, parts } of offlineStays) {
+      if (!listingMeta.has(b.listingId)) continue;
+      for (const [m, part] of parts) {
+        if (!monthSet.has(m)) continue;
+        const c = cell(b.listingId, m);
+        if (b.source === "AIRBNB") {
+          c.revenueOnline += part.amount;
+          c.nightsOnline += part.nights;
+        } else {
+          c.revenueOffline += part.amount;
+          c.nightsOffline += part.nights;
+        }
       }
       markRecorded(b.listingId, b.checkIn, b.checkOut);
     }

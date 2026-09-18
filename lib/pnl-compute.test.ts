@@ -11,6 +11,7 @@ import {
   avgPerDay,
   stayNights,
   eachNight,
+  splitStayByMonth,
   icalNightsByMonth,
   countAvailableDays,
   todayInIndia,
@@ -363,5 +364,72 @@ describe("todayInIndia", () => {
   it("rolls the month and year over correctly", () => {
     expect(d("2026-08-31T18:30:00.000Z")).toBe(day(2026, 9, 1));
     expect(d("2026-12-31T18:30:00.000Z")).toBe(day(2027, 1, 1));
+  });
+});
+
+describe("splitting a stay across months", () => {
+  const d = (s: string) => new Date(`${s}T00:00:00.000Z`);
+  const split = (from: string, to: string, total: number) =>
+    [...splitStayByMonth(d(from), d(to), total)].map(([m, p]) => [m, p.nights, p.amount]);
+
+  it("leaves a stay inside one month alone", () => {
+    expect(split("2026-09-10", "2026-09-15", 50_000)).toEqual([["2026-09", 5, 50_000]]);
+  });
+
+  it("splits 26 Sep -> 31 Oct across both months, pro rata by night", () => {
+    // Nights 26-30 Sep are September's five; the other 30 belong to October.
+    const parts = split("2026-09-26", "2026-10-31", 350_000);
+    expect(parts).toEqual([
+      ["2026-09", 5, 50_000],
+      ["2026-10", 30, 300_000],
+    ]);
+  });
+
+  it("gives the checkout month nothing when the guest leaves on the 1st", () => {
+    // Checkout day is not a night, so a 29 Aug -> 1 Sep stay is entirely August.
+    expect(split("2026-08-29", "2026-09-01", 9_000)).toEqual([["2026-08", 3, 9_000]]);
+  });
+
+  it("spans three months", () => {
+    const parts = split("2026-08-30", "2026-10-02", 3_300);
+    expect(parts.map(([m]) => m)).toEqual(["2026-08", "2026-09", "2026-10"]);
+    expect(parts.map(([, n]) => n)).toEqual([2, 30, 1]);
+  });
+
+  it("always adds back up to the total exactly", () => {
+    for (const total of [1, 7, 999, 100_001, 123_457]) {
+      const parts = split("2026-09-26", "2026-10-31", total);
+      const sum = parts.reduce((a, [, , amount]) => a + (amount as number), 0);
+      expect(sum).toBe(total);
+    }
+  });
+
+  it("never loses a paise at a boundary, over any span", () => {
+    const total = 1_000_003;
+    for (let len = 1; len <= 70; len++) {
+      const end = new Date(d("2026-09-20").getTime() + len * 86_400_000);
+      const parts = [...splitStayByMonth(d("2026-09-20"), end, total)];
+      const sum = parts.reduce((a, [, p]) => a + p.amount, 0);
+      const nights = parts.reduce((a, [, p]) => a + p.nights, 0);
+      expect(sum).toBe(total);
+      expect(nights).toBe(len);
+    }
+  });
+
+  it("splits nights the same way stayNights counts them", () => {
+    const parts = splitStayByMonth(d("2026-09-26"), d("2026-10-31"), 0);
+    const nights = [...parts.values()].reduce((a, p) => a + p.nights, 0);
+    expect(nights).toBe(stayNights(d("2026-09-26"), d("2026-10-31")));
+  });
+
+  it("treats a same-day booking as one night in the check-in month", () => {
+    expect(split("2026-09-26", "2026-09-26", 4_000)).toEqual([["2026-09", 1, 4_000]]);
+  });
+
+  it("carries a zero total without inventing money", () => {
+    expect(split("2026-09-26", "2026-10-31", 0)).toEqual([
+      ["2026-09", 5, 0],
+      ["2026-10", 30, 0],
+    ]);
   });
 });
