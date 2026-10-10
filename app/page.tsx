@@ -48,7 +48,7 @@ export default async function HomePage() {
               </span>
             </div>
           </div>
-          <h1 className="text-balance text-center text-3xl font-semibold leading-tight tracking-tight text-foreground sm:text-5xl">
+          <h1 className="text-balance text-center text-[clamp(2rem,12.5vw,3rem)] font-semibold leading-[1.1] tracking-tight text-foreground sm:text-5xl">
             <span className="block sm:inline">
               Book a <span className="font-bold text-brand">Stay</span>
             </span>{" "}
