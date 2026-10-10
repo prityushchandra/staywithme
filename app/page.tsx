@@ -48,13 +48,9 @@ export default async function HomePage() {
               </span>
             </div>
           </div>
-          <h1 className="text-balance text-center text-[clamp(2rem,12.5vw,3rem)] font-semibold leading-[1.1] tracking-tight text-foreground sm:text-5xl">
-            <span className="block sm:inline">
-              Book a <span className="font-bold text-brand">Stay</span>
-            </span>{" "}
-            <span className="block sm:inline">
-              in a <span className="italic text-brand">Society</span>
-            </span>
+          <h1 className="text-balance text-center text-[clamp(1.375rem,7.4vw,3rem)] font-semibold leading-[1.15] tracking-tight text-foreground sm:text-5xl">
+            Book a <span className="font-bold text-brand">Stay</span> in a{" "}
+            <span className="italic text-brand">Society</span>
           </h1>
           <p className="mx-auto mt-3 max-w-2xl text-pretty text-center text-base text-muted-foreground sm:text-lg">
             Find comfortable homes in residential communities for short stays,
