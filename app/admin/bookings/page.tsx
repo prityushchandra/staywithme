@@ -20,6 +20,26 @@ const VARIANT: Record<string, "warning" | "success" | "destructive" | "secondary
   CANCELLED: "destructive",
 };
 
+const FIELD =
+  "block h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
+const DAY_MS = 86_400_000;
+
+/** Reads a yyyy-mm-dd filter value as UTC midnight; ignores anything malformed. */
+function parseDay(value: string | undefined): Date | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const d = new Date(`${value}T00:00:00.000Z`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** Rebuilds the page URL, dropping any filter that isn't set. */
+function bookingsHref(params: Record<string, string | undefined>) {
+  const q = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) if (value) q.set(key, value);
+  const s = q.toString();
+  return s ? `/admin/bookings?${s}` : "/admin/bookings";
+}
+
 function fmt(d: Date) {
   return d.toLocaleDateString("en-US", {
     day: "numeric",
@@ -48,16 +68,37 @@ function waLink(phone: string | null, text: string): string | null {
 export default async function AdminBookingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string }>;
+  searchParams: Promise<{ status?: string; from?: string; to?: string; flat?: string }>;
 }) {
-  const { status } = await searchParams;
+  const { status, from, to, flat } = await searchParams;
   const active = STATUSES.includes((status as (typeof STATUSES)[number]) ?? "ALL")
     ? (status as string) ?? "ALL"
     : "ALL";
 
+  const fromDay = parseDay(from);
+  const toDay = parseDay(to);
+  const fromStr = fromDay ? from! : "";
+  const toStr = toDay ? to! : "";
+  const flatId = flat || "";
+
+  // A stay matches the date filter when it overlaps the range rather than when
+  // it starts inside it, so a long stay still shows up in every month it runs
+  // through. `to` is inclusive, hence the morning after; the checkout day isn't
+  // a night, so a stay ending on `from` doesn't count as overlapping.
+  const stayWhere: { checkIn?: { lt: Date }; checkOut?: { gt: Date } } = {};
+  if (toDay) stayWhere.checkIn = { lt: new Date(toDay.getTime() + DAY_MS) };
+  if (fromDay) stayWhere.checkOut = { gt: fromDay };
+
+  const flatWhere = flatId ? { listingId: flatId } : {};
+  const filtersOn = Boolean(fromStr || toStr || flatId);
+
   const [bookings, listings, offlineBookings, settings] = await Promise.all([
     prisma.booking.findMany({
-      where: active && active !== "ALL" ? { status: active } : {},
+      where: {
+        ...(active && active !== "ALL" ? { status: active } : {}),
+        ...flatWhere,
+        ...stayWhere,
+      },
       include: {
         listing: { select: { id: true, title: true } },
         guest: { select: { name: true, phone: true } },
@@ -70,6 +111,7 @@ export default async function AdminBookingsPage({
       orderBy: { title: "asc" },
     }),
     prisma.offlineBooking.findMany({
+      where: { ...flatWhere, ...stayWhere },
       include: {
         listing: {
           select: {
@@ -115,11 +157,56 @@ export default async function AdminBookingsPage({
         <OfflineBookingForm listings={listingOptions} />
       </section>
 
+      <section className="rounded-xl border p-4">
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <h2 className="text-sm font-semibold tracking-tight">Filters</h2>
+          <p className="text-xs text-muted-foreground">
+            Applies to both lists below. Dates match any stay overlapping the range.
+          </p>
+        </div>
+        <form method="get" action="/admin/bookings" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {active !== "ALL" && <input type="hidden" name="status" value={active} />}
+          <div className="space-y-1">
+            <label htmlFor="f-flat" className="text-sm font-medium">Flat</label>
+            <select id="f-flat" name="flat" defaultValue={flatId} className={FIELD}>
+              <option value="">All flats</option>
+              {listingOptions.map((o) => (
+                <option key={o.id} value={o.id}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label htmlFor="f-from" className="text-sm font-medium">From</label>
+            <input id="f-from" type="date" name="from" defaultValue={fromStr} className={FIELD} />
+          </div>
+          <div className="space-y-1">
+            <label htmlFor="f-to" className="text-sm font-medium">To</label>
+            <input id="f-to" type="date" name="to" defaultValue={toStr} className={FIELD} />
+          </div>
+          <div className="flex items-end gap-2">
+            <button
+              type="submit"
+              className="h-10 rounded-lg bg-foreground px-4 text-sm font-medium text-background transition hover:opacity-90"
+            >
+              Apply
+            </button>
+            {filtersOn && (
+              <Link
+                href={bookingsHref({ status: active === "ALL" ? undefined : active })}
+                className="flex h-10 items-center rounded-lg border px-4 text-sm font-medium transition hover:border-foreground"
+              >
+                Clear
+              </Link>
+            )}
+          </div>
+        </form>
+      </section>
+
       <section className="space-y-3">
         <h2 className="text-xl font-semibold tracking-tight">Offline bookings</h2>
         {offline.length === 0 ? (
           <div className="rounded-xl border border-dashed p-8 text-center text-muted-foreground">
-            No offline bookings yet.
+            No offline bookings {filtersOn ? "match these filters." : "yet."}
           </div>
         ) : (
           <div className="space-y-3">
@@ -279,7 +366,12 @@ export default async function AdminBookingsPage({
 
       <div className="flex flex-wrap gap-2">
         {STATUSES.map((s) => {
-          const href = s === "ALL" ? "/admin/bookings" : `/admin/bookings?status=${s}`;
+          const href = bookingsHref({
+            status: s === "ALL" ? undefined : s,
+            from: fromStr,
+            to: toStr,
+            flat: flatId,
+          });
           const isActive = active === s;
           return (
             <Link
