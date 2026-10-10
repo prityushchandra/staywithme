@@ -105,6 +105,11 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+  /* The rule above freezes the sheen sweep mid-button instead of running it off
+     the edge, so drop the band entirely on the "Get started" CTA. */
+  .cta-sheen {
+    display: none;
+  }
 }
 
 /* Mobile Safari/Chrome auto-zoom when focusing a form control whose text is

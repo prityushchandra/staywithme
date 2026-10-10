@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useSession, signOut } from "next-auth/react";
 import {
@@ -24,6 +24,7 @@ export function Navbar({
 }) {
   const { data: session } = useSession();
   const router = useRouter();
+  const pathname = usePathname();
   const user = session?.user;
   const firstName = user?.firstName ?? user?.name?.split(" ")[0] ?? null;
   // Only show the hosting dashboard once they've actually listed a property
@@ -31,6 +32,9 @@ export function Navbar({
   const isHostUser = !!user?.roles?.includes("HOST");
 
   // "Book on WhatsApp" quick action — opens WhatsApp with a ready-to-send note.
+  // The homepage leads with search instead, so it's hidden there only; every
+  // other page keeps it.
+  const showWhatsApp = pathname !== "/";
   const waDigits = (whatsappNumber || "+918789194107").replace(/\D/g, "");
   const waHref = `https://wa.me/${waDigits}?text=${encodeURIComponent(
     "Hi Chandra! I would like to book a stay with you."
@@ -99,33 +103,42 @@ export function Navbar({
         {/* Logged out: a single entry point — sign-in figures out log in vs sign up. */}
         {!user ? (
           <div className="flex items-center gap-2 sm:gap-3">
-            <a
-              href={waHref}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Book a stay on WhatsApp"
-              className="wa-cta group relative inline-flex items-center gap-2 overflow-hidden rounded-full bg-gradient-to-br from-[#25D366] to-[#075E54] px-3.5 py-2.5 text-sm font-semibold text-white transition-transform duration-200 ease-ios hover:scale-[1.04] active:scale-[0.97]"
-            >
-              <span className="wa-shine" aria-hidden="true" />
-              <WhatsAppGlyph className="relative z-[1] h-[18px] w-[18px] shrink-0" />
-              <span className="relative z-[1] hidden sm:inline">WhatsApp</span>
-            </a>
+            {showWhatsApp && (
+              <a
+                href={waHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Book a stay on WhatsApp"
+                className="wa-cta group relative inline-flex items-center gap-2 overflow-hidden rounded-full bg-gradient-to-br from-[#25D366] to-[#075E54] px-3.5 py-2.5 text-sm font-semibold text-white transition-transform duration-200 ease-ios hover:scale-[1.04] active:scale-[0.97]"
+              >
+                <span className="wa-shine" aria-hidden="true" />
+                <WhatsAppGlyph className="relative z-[1] h-[18px] w-[18px] shrink-0" />
+                <span className="relative z-[1] hidden sm:inline">WhatsApp</span>
+              </a>
+            )}
             <Link
               href="/sign-in"
-              className="rounded-full bg-brand-gradient px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition duration-200 ease-ios hover:brightness-110 active:scale-[0.97]"
+              className="relative inline-flex items-center overflow-hidden rounded-full bg-brand-gradient px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition duration-200 ease-ios hover:-translate-y-0.5 hover:shadow-md hover:brightness-110 active:translate-y-0 active:scale-[0.97]"
             >
-              Get started
+              {/* Same sheen sweep as the hero banner pill. */}
+              <span
+                className="cta-sheen animate-banner-sheen pointer-events-none absolute inset-y-0 left-0 w-1/4 bg-gradient-to-r from-transparent via-white/40 to-transparent"
+                aria-hidden="true"
+              />
+              <span className="relative">Get started</span>
             </Link>
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            {/* Anyone can host */}
-            <Link
-              href="/host/listings/new"
-              className="hidden rounded-full px-3 py-2 text-sm font-medium hover:bg-muted sm:block"
-            >
-              List your property
-            </Link>
+            {/* Listing a property is an admin-only workflow. */}
+            {user.isAdmin && (
+              <Link
+                href="/host/listings/new"
+                className="hidden rounded-full px-3 py-2 text-sm font-medium hover:bg-muted sm:block"
+              >
+                List your property
+              </Link>
+            )}
 
             <span className="hidden text-sm text-muted-foreground sm:inline">
               Hi, <span className="font-medium text-foreground">{firstName ?? "there"}</span>
@@ -162,9 +175,11 @@ export function Navbar({
                   <MenuLink href="/account" Icon={User} onClick={close}>
                     Account
                   </MenuLink>
-                  <MenuLink href="/host/listings/new" Icon={Plus} onClick={close}>
-                    List your property
-                  </MenuLink>
+                  {user.isAdmin && (
+                    <MenuLink href="/host/listings/new" Icon={Plus} onClick={close}>
+                      List your property
+                    </MenuLink>
+                  )}
                   {isHostUser && (
                     <MenuLink href="/host" Icon={Home} onClick={close}>
                       Hosting dashboard
