@@ -34,7 +34,10 @@ export function Navbar({
   // "Book on WhatsApp" quick action — opens WhatsApp with a ready-to-send note.
   // The homepage leads with search instead, so it's hidden there only; every
   // other page keeps it.
-  const showWhatsApp = pathname !== "/";
+  // `pathname` is null while a route renders dynamically on the server, so a
+  // bare `!== "/"` reports true on the homepage and leaks the pill into the
+  // served HTML. Default to hiding until the route is actually known.
+  const showWhatsApp = pathname != null && pathname !== "/";
   const waDigits = (whatsappNumber || "+918789194107").replace(/\D/g, "");
   const waHref = `https://wa.me/${waDigits}?text=${encodeURIComponent(
     "Hi Chandra! I would like to book a stay with you."
