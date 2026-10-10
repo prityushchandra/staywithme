@@ -13,19 +13,26 @@ import type { Prisma } from "@prisma/client";
 const REVIEWS_CACHE = { tags: ["reviews"], revalidate: 60 };
 
 export interface RatingSummary {
-  /** Mean rating rounded to 1 decimal; 0 when there are no reviews. */
+  /** Mean rating rounded to 2 decimals; 0 when there are no reviews. */
   average: number;
   count: number;
 }
 
+/** Shared rounding so every read path reports the identical number. */
+const roundAverage = (value: number) => Math.round(value * 100) / 100;
+
 /**
  * Pure rating aggregation — the single source of truth for how an average is
  * computed and rounded. DB-free so it can be unit-tested like computePricing.
+ *
+ * Rounded to 2 decimals (Airbnb-style): a listing sitting at 4.97 must not be
+ * flattened to "5" in the UI, and "4.3" would hide the difference between 4.25
+ * and 4.34 on listings with few reviews.
  */
 export function computeRatingSummary(ratings: number[]): RatingSummary {
   if (ratings.length === 0) return { average: 0, count: 0 };
   const sum = ratings.reduce((a, r) => a + r, 0);
-  const average = Math.round((sum / ratings.length) * 10) / 10;
+  const average = roundAverage(sum / ratings.length);
   return { average, count: ratings.length };
 }
 
@@ -107,7 +114,9 @@ const getRatingSummaryEntries = unstable_cache(
     return groups.map((g) => [
       g.listingId,
       {
-        average: Math.round((g._avg.rating ?? 0) * 10) / 10,
+        // Must match computeRatingSummary exactly — a card showing a different
+        // number from the detail page would be a visible bug.
+        average: roundAverage(g._avg.rating ?? 0),
         count: g._count.rating,
       },
     ]);

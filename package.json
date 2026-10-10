@@ -12,6 +12,7 @@
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed-reviews": "tsx scripts/seed-reviews.ts",
     "db:migrate": "prisma migrate dev",
     "pwa:assets": "tsx scripts/generate-pwa-assets.ts",
     "native:assets": "node scripts/sync-native-assets.mjs"
