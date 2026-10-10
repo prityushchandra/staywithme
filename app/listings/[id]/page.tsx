@@ -13,11 +13,15 @@ import { TrackView } from "@/components/track-view";
 import { getActiveBlocks } from "@/lib/availability";
 import { syncListingCalendar } from "@/lib/calendar-sync";
 import { getApprovedReviews, getRatingSummary, hasCompletedStay } from "@/lib/reviews";
+import { relativeTime } from "@/lib/relative-time";
 import { ReviewList } from "@/components/review-list";
 import { ReviewForm } from "@/components/review-form";
 import { BookingProvider } from "@/components/booking-context";
 import { AvailabilitySection } from "@/components/availability-section";
 import { AmenitiesList } from "@/components/amenities-list";
+import { CollapsibleText } from "@/components/collapsible-text";
+import { MapPreview } from "@/components/map-preview";
+import { GuestFavoriteBanner } from "@/components/guest-favorite-banner";
 import { MobileBookingBar } from "@/components/mobile-booking-bar";
 
 export const dynamic = "force-dynamic";
@@ -143,6 +147,18 @@ export default async function ListingPage({
       ? `${ratingSummary.average} · ${plural(ratingSummary.count, "review")}`
       : "New";
 
+  // Relative timestamps are resolved here rather than in the client component:
+  // the page is force-dynamic, so a value fixed at request time stays stable for
+  // the life of the HTML instead of drifting during hydration.
+  const now = new Date();
+  const reviewItems = reviews.map((r) => ({
+    id: r.id,
+    name: r.author.name ?? "Guest",
+    rating: r.rating,
+    body: r.body,
+    timeAgo: relativeTime(r.createdAt, now),
+  }));
+
   return (
     <div className="container pb-28 pt-6 lg:pb-6">
       {!isPreview && <TrackView listingId={listing.id} />}
@@ -186,6 +202,13 @@ export default async function ListingPage({
         <div className="mt-8 grid grid-cols-1 gap-x-12 gap-y-10 lg:grid-cols-3">
           {/* Left: details */}
           <div className="lg:col-span-2">
+            {listing.guestFavorite && (
+              <GuestFavoriteBanner
+                average={ratingSummary.average}
+                count={ratingSummary.count}
+              />
+            )}
+
             {/* Place summary. Host identity is intentionally NOT shown to guests. */}
             <section className="border-b pb-6">
               <h2 className="text-xl font-semibold sm:text-2xl">
@@ -202,9 +225,7 @@ export default async function ListingPage({
             {/* About */}
             <section className="border-b py-6">
               <h3 className="mb-2 text-lg font-semibold">About this place</h3>
-              <p className="whitespace-pre-line text-sm leading-relaxed text-muted-foreground">
-                {listing.description}
-              </p>
+              <CollapsibleText text={listing.description} />
             </section>
 
             {/* Amenities */}
@@ -214,6 +235,18 @@ export default async function ListingPage({
               </h3>
               <AmenitiesList amenities={amenities} />
             </section>
+
+            {/* Where you'll be — renders only when an admin has added a map link */}
+            {listing.mapsUrl && (
+              <section className="border-b py-6">
+                <h3 className="mb-4 text-lg font-semibold">Where you&apos;ll be</h3>
+                <MapPreview
+                  mapsUrl={listing.mapsUrl}
+                  address={`${listing.city}, ${listing.country}`}
+                  locality={`${listing.city}, ${listing.country}`}
+                />
+              </section>
+            )}
 
             {/* Availability calendar (interactive, synced with the booking card) */}
             <section className="border-b py-6">
@@ -227,7 +260,7 @@ export default async function ListingPage({
                 {ratingSummary.count > 0 ? ratingLabel : "Reviews"}
               </h3>
               <div className="mt-4 space-y-6">
-                <ReviewList reviews={reviews} />
+                <ReviewList reviews={reviewItems} />
                 {canReview && <ReviewForm listingId={listing.id} />}
               </div>
             </section>
