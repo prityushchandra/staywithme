@@ -59,11 +59,14 @@ export default async function HostDashboard() {
           <h1 className="text-2xl font-bold tracking-tight">Host dashboard</h1>
           <p className="text-muted-foreground">Welcome back, {session!.user.name ?? "host"}.</p>
         </div>
-        <Button asChild variant="brand">
-          <Link href="/host/listings/new">
-            <Plus className="h-4 w-4" /> Create listing
-          </Link>
-        </Button>
+        {/* Creating a listing is an admin-only workflow. */}
+        {session!.user.isAdmin && (
+          <Button asChild variant="brand">
+            <Link href="/host/listings/new">
+              <Plus className="h-4 w-4" /> Create listing
+            </Link>
+          </Button>
+        )}
       </div>
 
       {/* KPIs */}

@@ -1,3 +1,5 @@
+import { redirect } from "next/navigation";
+import { auth } from "@/lib/auth";
 import { getPlatformSettings } from "@/lib/settings";
 import { getFormAmenities, getFormBlocks, getCancellationPolicies } from "@/lib/data-access";
 import { ListingForm } from "@/components/listing-form";
@@ -6,6 +8,11 @@ export const metadata = { title: "Create a listing" };
 export const dynamic = "force-dynamic";
 
 export default async function NewListingPage() {
+  // Server-side admin guard. The middleware only requires sign-in for /host/*,
+  // so without this any signed-in user could open the create form directly.
+  const session = await auth();
+  if (!session?.user?.isAdmin) redirect("/");
+
   const [amenities, blocks, policies, settings] = await Promise.all([
     getFormAmenities(),
     getFormBlocks(),

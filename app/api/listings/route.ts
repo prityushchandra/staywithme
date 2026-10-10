@@ -3,17 +3,21 @@ import { revalidateTag } from "next/cache";
 import { clearMemo } from "@/lib/memo";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { listingInputSchema } from "@/lib/validation";
+import { listingInputSchema, isDuplicateRefCodeError } from "@/lib/validation";
 import { getAmenityIdByKey } from "@/lib/search";
 import { createUniqueRefCode } from "@/lib/refcode";
 import { notifyAdminNewListing } from "@/lib/bookings";
 
-// Create a listing. Any signed-in user may list a property — doing so makes
-// them a host. New listings enter the moderation queue as PENDING.
+// Create a listing. Admin-only: listing a property is an internal workflow, so
+// an ordinary signed-in user must not be able to POST one. New listings still
+// enter the moderation queue as PENDING.
 export async function POST(req: Request) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+  if (!session.user.isAdmin) {
+    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
   const body = await req.json().catch(() => null);
@@ -32,48 +36,62 @@ export async function POST(req: Request) {
     .map((k) => amenityMap[k])
     .filter((id): id is string => !!id);
 
-  const refCode = await createUniqueRefCode();
-  const listing = await prisma.listing.create({
-    data: {
-      hostId: session.user.id,
-      refCode,
-      title: d.title,
-      description: d.description,
-      hostDisplayName: d.hostDisplayName || null,
-      propertyType: d.propertyType,
-      roomType: d.roomType,
-      addressLine: d.addressLine,
-      city: d.city,
-      country: d.country,
-      flatNumber: d.flatNumber,
-      block: d.block,
-      bedrooms: d.bedrooms,
-      bathrooms: d.bathrooms,
-      beds: d.beds,
-      maxGuests: d.maxGuests,
-      maxInfants: d.maxInfants,
-      basePrice: d.basePriceRupees * 100, // rupees -> paise
-      monthlyPrice: d.monthlyPriceRupees > 0 ? d.monthlyPriceRupees * 100 : null,
-      cancellationPolicy: d.cancellationPolicy,
-      checkInTime: d.checkInTime || null,
-      checkOutTime: d.checkOutTime || null,
-      houseRules: d.houseRules || null,
-      wifiName: d.wifiName || null,
-      wifiPassword: d.wifiPassword || null,
-      status: "PENDING", // submitted for admin approval
-      images: {
-        create: d.imageUrls.map((url, idx) => ({
-          url,
-          order: idx,
-          isCover: idx === 0,
-        })),
+  // The Property ID may be chosen explicitly; blank means "generate one for me".
+  const refCode = d.refCode || (await createUniqueRefCode());
+  let listing;
+  try {
+    listing = await prisma.listing.create({
+      data: {
+        hostId: session.user.id,
+        refCode,
+        title: d.title,
+        description: d.description,
+        hostDisplayName: d.hostDisplayName || null,
+        propertyType: d.propertyType,
+        roomType: d.roomType,
+        addressLine: d.addressLine,
+        city: d.city,
+        country: d.country,
+        flatNumber: d.flatNumber,
+        block: d.block,
+        mapsUrl: d.mapsUrl || null,
+        // Only an admin may set the curation badge; a host's value is ignored.
+        guestFavorite: session.user.isAdmin ? d.guestFavorite : false,
+        bedrooms: d.bedrooms,
+        bathrooms: d.bathrooms,
+        beds: d.beds,
+        maxGuests: d.maxGuests,
+        maxInfants: d.maxInfants,
+        basePrice: d.basePriceRupees * 100, // rupees -> paise
+        monthlyPrice: d.monthlyPriceRupees > 0 ? d.monthlyPriceRupees * 100 : null,
+        cancellationPolicy: d.cancellationPolicy,
+        checkInTime: d.checkInTime || null,
+        checkOutTime: d.checkOutTime || null,
+        houseRules: d.houseRules || null,
+        wifiName: d.wifiName || null,
+        wifiPassword: d.wifiPassword || null,
+        status: "PENDING", // submitted for admin approval
+        images: {
+          create: d.imageUrls.map((url, idx) => ({
+            url,
+            order: idx,
+            isCover: idx === 0,
+          })),
+        },
+        amenities: { create: amenityIds.map((id) => ({ amenityId: id })) },
       },
-      amenities: { create: amenityIds.map((id) => ({ amenityId: id })) },
-    },
-  });
+    });
+  } catch (e) {
+    if (isDuplicateRefCodeError(e)) {
+      return NextResponse.json(
+        { error: `Property ID "${refCode}" is already used by another listing.` },
+        { status: 409 }
+      );
+    }
+    throw e;
+  }
 
-  // Listing your first property makes you a host (recorded for correctness;
-  // the UI lets any signed-in user reach the create flow regardless).
+  // The creator is the listing's host of record, so keep the HOST role in sync.
   if (!session.user.roles?.includes("HOST")) {
     await prisma.user.update({
       where: { id: session.user.id },
