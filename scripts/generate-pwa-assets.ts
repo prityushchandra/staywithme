@@ -10,7 +10,7 @@ import { mkdir } from "node:fs/promises";
 import { APPLE_SPLASH_DEVICES, appleSplashFileName } from "../lib/apple-splash";
 
 const TILE = "#000000";
-const TERRA = "#FC7C66";
+const TERRA = "#C8705E";
 const INTRO_BG = "#140F0D";
 
 /** iOS' superellipse corner radius, as a fraction of the icon's width. */

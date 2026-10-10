@@ -25,7 +25,7 @@ export interface StaffReceiptData {
   note: string | null;
 }
 
-const C = { brand: "#FC7C66", ink: "#111827", muted: "#6b7280", line: "#e5e7eb", soft: "#f9fafb", warn: "#b91c1c" };
+const C = { brand: "#C8705E", ink: "#111827", muted: "#6b7280", line: "#e5e7eb", soft: "#f9fafb", warn: "#b91c1c" };
 
 const s = StyleSheet.create({
   page: { padding: 28, fontFamily: RECEIPT_FONT, fontSize: 11, color: C.ink },

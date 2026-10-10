@@ -4,7 +4,7 @@
     <color name="splashBackground">#140F0D</color>
 
     <!-- Override Capacitor's default indigo/pink with the StayWithMe palette. -->
-    <color name="colorPrimary">#FC7C66</color>
+    <color name="colorPrimary">#C8705E</color>
     <color name="colorPrimaryDark">#A84D3A</color>
     <color name="colorAccent">#E8A020</color>
 </resources>

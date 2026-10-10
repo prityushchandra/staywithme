@@ -8,7 +8,7 @@ import sharp from "sharp";
 import { mkdir } from "node:fs/promises";
 
 const TILE = "#000000";
-const TERRA = "#FC7C66";
+const TERRA = "#C8705E";
 const SPLASH_BG = "#140F0D";
 
 const ICONSET = "ios/App/App/Assets.xcassets/AppIcon.appiconset";

@@ -52,7 +52,7 @@ public class RetroIntroView extends View {
 
     private static final int BG = 0xFF140F0D;
     private static final int GOLD = 0xFFE8A020;
-    private static final int TERRA = 0xFFFC7C66;
+    private static final int TERRA = 0xFFC8705E;
     private static final int TEXT_SHADOW = 0xFF7D3527;
     private static final int TEXT_COLOR = 0xFFFFF6EE;
 

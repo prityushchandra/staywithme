@@ -22,7 +22,7 @@ const config: Config = {
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
         brand: {
-          DEFAULT: "#FC7C66",
+          DEFAULT: "#C8705E",
           dark: "#A84D3A",
           accent: "#E8A020",
         },
