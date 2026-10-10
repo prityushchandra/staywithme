@@ -1,11 +1,17 @@
 "use client";
 
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { nextRangeSelection, type DateRange } from "@/lib/dates";
+import type { InquiryDetails } from "@/lib/whatsapp";
 
 // Shared booking state so the on-page availability calendar and the sticky
 // booking card stay in sync (like Airbnb — picking dates in either updates both).
 // Dates are "yyyy-mm-dd" strings.
+//
+// It also carries the page's single Reserve call-to-action: the booking card
+// owns the listing data, so it publishes the CTA here and whichever surface is
+// active (the card on desktop, the floating tab on mobile) renders it. Without
+// this both surfaces rendered their own Reserve button and the guest saw two.
 
 function pad(n: number) {
   return String(n).padStart(2, "0");
@@ -20,6 +26,18 @@ function parseYmd(s: string): Date | null {
   return new Date(y, m - 1, d);
 }
 
+/** What the one Reserve button must do, in the order the card resolves it. */
+export type ReserveCta = { label: string; shortLabel: string } & (
+  /** Trip details are missing — tapping Reserve explains what. */
+  | { kind: "incomplete"; missing: string[] }
+  /** The chosen nights are already booked. */
+  | { kind: "unavailable" }
+  /** Signed-out guest: send them to sign-in first. */
+  | { kind: "login"; href: string }
+  /** Everything is set — open WhatsApp with the pre-filled enquiry. */
+  | { kind: "ready"; whatsappNumber: string; details: InquiryDetails }
+);
+
 type BookingState = {
   checkIn: string;
   checkOut: string;
@@ -30,9 +48,31 @@ type BookingState = {
   setInfants: (n: number) => void;
   /** Range-aware single-date click used by the calendar (start, then end). */
   pickDate: (ymd: string) => void;
+  /** True below Tailwind's `lg`, where the floating tab owns the Reserve CTA. */
+  isCompactLayout: boolean;
+  /** The single Reserve CTA, published by the booking card. */
+  reserveCta: ReserveCta | null;
+  setReserveCta: (cta: ReserveCta | null) => void;
+  /** Shared so the validation dialog can open the card's date picker. */
+  pickerOpen: boolean;
+  setPickerOpen: (open: boolean) => void;
 };
 
 const BookingCtx = createContext<BookingState | null>(null);
+
+// Matches Tailwind's `lg` breakpoint. Starts false so the server render and the
+// first client render agree (desktop markup), then corrects after hydration.
+function useIsCompactLayout(): boolean {
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1023.98px)");
+    const sync = () => setCompact(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+  return compact;
+}
 
 export function BookingProvider({
   children,
@@ -52,6 +92,9 @@ export function BookingProvider({
   const [checkOut, setCheckOut] = useState(initialCheckOut);
   const [guests, setGuests] = useState(initialGuests);
   const [infants, setInfants] = useState(0);
+  const [reserveCta, setReserveCta] = useState<ReserveCta | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const isCompactLayout = useIsCompactLayout();
 
   const blockDates = useMemo<DateRange[]>(
     () =>
@@ -87,7 +130,21 @@ export function BookingProvider({
 
   return (
     <BookingCtx.Provider
-      value={{ checkIn, checkOut, guests, infants, setRange, setGuests, setInfants, pickDate }}
+      value={{
+        checkIn,
+        checkOut,
+        guests,
+        infants,
+        setRange,
+        setGuests,
+        setInfants,
+        pickDate,
+        isCompactLayout,
+        reserveCta,
+        setReserveCta,
+        pickerOpen,
+        setPickerOpen,
+      }}
     >
       {children}
     </BookingCtx.Provider>

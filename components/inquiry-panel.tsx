@@ -1,20 +1,19 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import Link from "next/link";
+import { useEffect, useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { PricingBreakdown } from "@/components/pricing-breakdown";
-import { WhatsAppContactButton } from "@/components/whatsapp-contact-button";
-import { useBooking } from "@/components/booking-context";
+import { ReserveButton } from "@/components/reserve-button";
+import { useBooking, type ReserveCta } from "@/components/booking-context";
 import { computePricing, computeStayBase, formatINR } from "@/lib/pricing";
 import { isRangeAvailable, toUtcDate } from "@/lib/dates";
 
 // Sticky booking card. Dates & guests come from the shared booking context, so
-// it stays in sync with the on-page availability calendar. "Reserve" opens the
-// date picker when no dates are chosen; once valid dates are set it opens
-// WhatsApp with a pre-filled reservation message. No booking, no payment.
+// it stays in sync with the on-page availability calendar. It also resolves the
+// page's single "Reserve" action and publishes it to the context — on mobile the
+// floating booking tab renders that one button instead of this card, so there is
+// never a second Reserve button on screen.
 export function InquiryPanel({
   propertyId,
   refCode,
@@ -48,8 +47,19 @@ export function InquiryPanel({
   blockedRanges?: { startDate: string; endDate: string }[];
   isAuthenticated?: boolean;
 }) {
-  const { checkIn, checkOut, guests, infants, setRange, setGuests, setInfants } = useBooking();
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const {
+    checkIn,
+    checkOut,
+    guests,
+    infants,
+    setRange,
+    setGuests,
+    setInfants,
+    isCompactLayout,
+    pickerOpen,
+    setPickerOpen,
+    setReserveCta,
+  } = useBooking();
   const loginHref = `/sign-in?callbackUrl=${encodeURIComponent(`/listings/${propertyId}`)}`;
 
   // A valid stay needs checkout strictly after check-in (guards reversed/equal
@@ -77,6 +87,70 @@ export function InquiryPanel({
   const total = computePricing(computeStayBase(basePrice, monthlyPrice, nights), {
     platformFeePercent,
   }).total;
+
+  // The single Reserve action for the whole page, resolved here because this is
+  // the only component with the full listing + pricing context.
+  const cta = useMemo<ReserveCta>(() => {
+    if (!hasDates) {
+      const missing: string[] = [];
+      if (!checkIn) missing.push("Check-in date");
+      if (!checkOut) missing.push("Check-out date");
+      // Both set but the stay is zero/negative nights (e.g. stale URL params).
+      else if (checkIn) missing.push("A check-out date after your check-in");
+      return { kind: "incomplete", label: "Reserve", shortLabel: "Reserve", missing };
+    }
+    if (datesUnavailable) {
+      return { kind: "unavailable", label: "Choose other dates", shortLabel: "New dates" };
+    }
+    if (!isAuthenticated) {
+      return { kind: "login", label: "Log in to reserve", shortLabel: "Log in", href: loginHref };
+    }
+    return {
+      kind: "ready",
+      label: "Reserve on WhatsApp",
+      shortLabel: "Reserve",
+      whatsappNumber,
+      details: {
+        propertyName,
+        propertyId,
+        refCode,
+        guestName,
+        guestPhone,
+        checkIn,
+        checkOut,
+        checkInTime,
+        checkOutTime,
+        nights,
+        guests,
+        infants,
+        totalMinorUnits: total,
+      },
+    };
+  }, [
+    hasDates,
+    datesUnavailable,
+    isAuthenticated,
+    loginHref,
+    whatsappNumber,
+    propertyName,
+    propertyId,
+    refCode,
+    guestName,
+    guestPhone,
+    checkIn,
+    checkOut,
+    checkInTime,
+    checkOutTime,
+    nights,
+    guests,
+    infants,
+    total,
+  ]);
+
+  useEffect(() => {
+    setReserveCta(cta);
+    return () => setReserveCta(null);
+  }, [cta, setReserveCta]);
 
   return (
     <Card className="sticky top-24">
@@ -133,57 +207,16 @@ export function InquiryPanel({
           />
         )}
 
-        {!hasDates ? (
-          <Button
-            variant="brand"
-            size="lg"
-            className="w-full"
-            onClick={() => setPickerOpen(true)}
-          >
-            Reserve
-          </Button>
-        ) : datesUnavailable ? (
-          <div className="space-y-2">
-            <div className="rounded-lg bg-amber-50 p-3 text-center text-sm text-amber-800">
-              These dates aren&apos;t available — booked dates are greyed out in
-              the calendar.
-            </div>
-            <Button
-              variant="brand"
-              size="lg"
-              className="w-full"
-              onClick={() => setPickerOpen(true)}
-            >
-              Choose other dates
-            </Button>
+        {datesUnavailable && (
+          <div className="rounded-lg bg-amber-50 p-3 text-center text-sm text-amber-800">
+            These dates aren&apos;t available — booked dates are greyed out in the
+            calendar.
           </div>
-        ) : !isAuthenticated ? (
-          <Button asChild variant="brand" size="lg" className="w-full">
-            <Link href={loginHref}>Log in to reserve</Link>
-          </Button>
-        ) : (
-          <WhatsAppContactButton
-            className="w-full"
-            variant="brand"
-            label="Reserve on WhatsApp"
-            whatsappNumber={whatsappNumber}
-            details={{
-              propertyName,
-              propertyId,
-              refCode,
-              guestName,
-              guestPhone,
-              checkIn,
-              checkOut,
-              checkInTime,
-              checkOutTime,
-              nights,
-              guests,
-              infants,
-              totalMinorUnits: total,
-            }}
-          />
         )}
+
+        {/* On compact screens the floating booking tab renders this same button,
+            so the card hides its copy to keep exactly one Reserve on screen. */}
+        {!isCompactLayout && <ReserveButton cta={cta} className="w-full" />}
 
         <p className="text-center text-xs text-muted-foreground">
           {hasDates && !datesUnavailable

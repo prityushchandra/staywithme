@@ -14,7 +14,10 @@ export interface InquiryDetails {
   propertyName: string;
   /** Real listing id (cuid) — used for tracking/links, NOT shown to the guest. */
   propertyId: string;
-  /** Short human ref shown as "Ref:" (e.g. "K7M2Q"). Falls back to propertyId. */
+  /**
+   * Short human property id shown as "Property ID / Ref:" (e.g. "K7M2Q").
+   * Falls back to a plain "Ref:" line with the propertyId when unset.
+   */
   refCode?: string;
   /** Name of the guest making the reservation (from their account). */
   guestName?: string;
@@ -37,6 +40,27 @@ export interface InquiryDetails {
 /** Strip everything but digits from a stored number like "+91 8789194107". */
 export function normalizeWhatsAppNumber(raw: string): string {
   return raw.replace(/\D/g, "");
+}
+
+/**
+ * Turn a `wa.me` web link into a `whatsapp://` app deep link.
+ *
+ * Opening the app through the custom scheme does NOT navigate the current tab,
+ * so a page that is waiting on a WhatsApp confirmation stays mounted and keeps
+ * polling while the user is in the WhatsApp app. Returns null when the input
+ * isn't a usable wa.me URL, so callers can fall back to the plain https link.
+ */
+export function toWhatsAppAppLink(waLink: string | null | undefined): string | null {
+  if (!waLink) return null;
+  try {
+    const url = new URL(waLink);
+    const phone = normalizeWhatsAppNumber(url.pathname);
+    if (!phone) return null;
+    const text = url.searchParams.get("text") ?? "";
+    return `whatsapp://send?phone=${phone}&text=${encodeURIComponent(text)}`;
+  } catch {
+    return null;
+  }
 }
 
 /** Format a "yyyy-mm-dd" value as e.g. "Jun 20, 2026"; leave other strings as-is. */
@@ -73,13 +97,19 @@ export function buildInquiryMessage(details: InquiryDetails): string {
   const name = details.guestName?.trim();
   const ci = details.checkInTime?.trim() ? ` (${details.checkInTime.trim()})` : "";
   const co = details.checkOutTime?.trim() ? ` (${details.checkOutTime.trim()})` : "";
+  // The guest-facing label is "Property ID", but the "Ref:" token must stay on
+  // the line: the webhook parses forwarded enquiries with /Ref:\s*([a-z0-9]{5,})/i.
+  // Without a refCode we keep the bare "Ref: <id>" the bot already resolves.
+  const propertyRef = details.refCode?.trim();
   const lines = [
     `Hi Chandra${name ? `, this is *${name}*` : ""}.`,
     "",
     "I'd like to book this stay:",
     "",
     `*${details.propertyName}*`,
-    `Ref: ${details.refCode ?? details.propertyId}`,
+    propertyRef
+      ? `Property ID / Ref: ${propertyRef}`
+      : `Ref: ${details.propertyId}`,
     "",
     `Check-in: ${details.checkIn || "—"}${ci}`,
     `Check-out: ${details.checkOut || "—"}${co}`,

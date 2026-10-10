@@ -3,6 +3,7 @@ import {
   buildInquiryMessage,
   buildWhatsAppLink,
   normalizeWhatsAppNumber,
+  toWhatsAppAppLink,
 } from "./whatsapp";
 
 const details = {
@@ -22,6 +23,39 @@ describe("normalizeWhatsAppNumber", () => {
   });
 });
 
+describe("toWhatsAppAppLink", () => {
+  it("converts a wa.me link into a whatsapp:// deep link, keeping the prefilled text", () => {
+    const link = toWhatsAppAppLink(
+      "https://wa.me/918789194107?text=Verify%20my%20StayWithMe%20login%3A%20K7M2QX"
+    );
+    expect(link).toBe(
+      "whatsapp://send?phone=918789194107&text=Verify%20my%20StayWithMe%20login%3A%20K7M2QX"
+    );
+  });
+
+  it("round-trips through the built link so the sent message is unchanged", () => {
+    const code = "K7M2QX";
+    const message = `Verify my StayWithMe login: ${code}`;
+    const waLink = `https://wa.me/918789194107?text=${encodeURIComponent(message)}`;
+    const deepLink = toWhatsAppAppLink(waLink)!;
+    const text = new URLSearchParams(deepLink.split("?")[1]).get("text");
+    expect(text).toBe(message);
+  });
+
+  it("handles a link with no prefilled text", () => {
+    expect(toWhatsAppAppLink("https://wa.me/918789194107")).toBe(
+      "whatsapp://send?phone=918789194107&text="
+    );
+  });
+
+  it("returns null for missing, malformed, or phone-less links", () => {
+    expect(toWhatsAppAppLink(null)).toBeNull();
+    expect(toWhatsAppAppLink("")).toBeNull();
+    expect(toWhatsAppAppLink("not a url")).toBeNull();
+    expect(toWhatsAppAppLink("https://wa.me/")).toBeNull();
+  });
+});
+
 describe("buildInquiryMessage", () => {
   it("greets the contact and includes the reservation details", () => {
     const msg = buildInquiryMessage(details);
@@ -35,9 +69,27 @@ describe("buildInquiryMessage", () => {
     expect(msg).toContain("Total: *₹8,800*");
   });
 
-  it("shows refCode as the Ref when provided, else the propertyId", () => {
-    expect(buildInquiryMessage({ ...details, refCode: "K7M2Q" })).toContain("Ref: K7M2Q");
+  it("labels the refCode as the Property ID, falling back to the propertyId", () => {
+    const withRef = buildInquiryMessage({ ...details, refCode: "K7M2Q" });
+    expect(withRef).toContain("Property ID / Ref: K7M2Q");
     expect(buildInquiryMessage(details)).toContain("Ref: 12345");
+  });
+
+  it("keeps the Ref token the webhook parses out of forwarded enquiries", () => {
+    const re = /Ref:\s*([a-z0-9]{5,})/i;
+    expect(buildInquiryMessage({ ...details, refCode: "K7M2Q" }).match(re)?.[1]).toBe(
+      "K7M2Q"
+    );
+    expect(buildInquiryMessage(details).match(re)?.[1]).toBe("12345");
+  });
+
+  it("omits the Property ID label (and never prints undefined) without a refCode", () => {
+    for (const refCode of [undefined, "", "   "]) {
+      const msg = buildInquiryMessage({ ...details, refCode });
+      expect(msg).not.toContain("Property ID");
+      expect(msg).not.toContain("undefined");
+      expect(msg).toContain("Ref: 12345");
+    }
   });
 
   it("computes nights from the dates when not provided", () => {
@@ -71,5 +123,11 @@ describe("buildWhatsAppLink", () => {
     const decoded = decodeURIComponent(link.split("text=")[1]);
     expect(decoded).toContain("Ocean View Villa");
     expect(decoded).toContain("Hi Chandra,");
+  });
+
+  it("carries the Property ID through the encoded message", () => {
+    const link = buildWhatsAppLink("+918789194107", { ...details, refCode: "HAXGT" });
+    const decoded = decodeURIComponent(link.split("text=")[1]);
+    expect(decoded).toContain("Property ID / Ref: HAXGT");
   });
 });
