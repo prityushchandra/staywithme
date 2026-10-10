@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { PriceInsight } from "@/components/price-insight";
 import { ImageUploader } from "@/components/image-uploader";
-import { listingInputSchema } from "@/lib/validation";
+import { listingInputSchema, PROPERTY_ID_MAX } from "@/lib/validation";
 import { cn } from "@/lib/utils";
 
 const ROOM_TYPES = [
@@ -47,6 +47,9 @@ export interface ListingFormInitial {
   country: string;
   flatNumber: string;
   block: string;
+  refCode?: string;
+  mapsUrl?: string;
+  guestFavorite?: boolean;
   bedrooms: number;
   bathrooms: number;
   beds: number;
@@ -84,6 +87,7 @@ export function ListingForm({
   const router = useRouter();
   const { data: session, update } = useSession();
   const isEdit = !!listingId;
+  const isAdmin = !!session?.user?.isAdmin;
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -100,6 +104,9 @@ export function ListingForm({
     country: initial?.country ?? "India",
     flatNumber: initial?.flatNumber ?? "",
     block: initial?.block ?? "",
+    refCode: initial?.refCode ?? "",
+    mapsUrl: initial?.mapsUrl ?? "",
+    guestFavorite: initial?.guestFavorite ?? false,
     bedrooms: initial?.bedrooms ?? 1,
     bathrooms: initial?.bathrooms ?? 1,
     beds: initial?.beds ?? 1,
@@ -391,6 +398,65 @@ export function ListingForm({
           </div>
         </div>
       </section>
+
+      {/* Property ID & map */}
+      <section className="space-y-4">
+        <h2 className="text-lg font-semibold">Property ID &amp; map</h2>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label htmlFor="refCode">Property ID</Label>
+            <Input
+              id="refCode"
+              value={form.refCode}
+              onChange={(e) => set("refCode", e.target.value.toUpperCase())}
+              placeholder="HAXGT"
+              maxLength={PROPERTY_ID_MAX}
+            />
+            <p className="text-xs text-muted-foreground">
+              Short code guests quote when they message us. 3–{PROPERTY_ID_MAX} letters or
+              numbers, and no two listings can share one.{" "}
+              {isEdit ? "Leave blank to keep the current code." : "Leave blank and we'll generate one."}
+            </p>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="mapsUrl">Google Maps link</Label>
+            <Input
+              id="mapsUrl"
+              type="url"
+              inputMode="url"
+              value={form.mapsUrl}
+              onChange={(e) => set("mapsUrl", e.target.value)}
+              placeholder="https://maps.app.goo.gl/…"
+              maxLength={500}
+            />
+            <p className="text-xs text-muted-foreground">
+              Optional. Shown to guests as the neighbourhood map — share the area,
+              not your front door.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {isAdmin && (
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold">Admin</h2>
+          <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 sm:max-w-md">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={form.guestFavorite}
+              onChange={(e) => set("guestFavorite", e.target.checked)}
+            />
+            <span>
+              <span className="block text-sm font-medium">Guest Favorite</span>
+              <span className="block text-xs text-muted-foreground">
+                Highlights this listing as one of the most-loved stays. Only
+                admins can set this — a host edit never changes it.
+              </span>
+            </span>
+          </label>
+        </section>
+      )}
 
       {/* Things guests should know */}
       <section className="space-y-4">

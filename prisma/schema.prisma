@@ -218,6 +218,14 @@ model Listing {
   icalSyncedAt DateTime?
   icalError    String?
 
+  // Google Maps share link. Drives the map preview on the listing page, which
+  // opens the real map in a new tab. Approximate by design — the exact flat is
+  // still held in the confidential fields above.
+  mapsUrl String?
+
+  // Admin curation badge, shown as a banner on the listing page.
+  guestFavorite Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

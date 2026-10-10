@@ -1,5 +1,44 @@
 import { z } from "zod";
 
+// A Property ID (Listing.refCode) is the short code a guest quotes over
+// WhatsApp, e.g. "HAXGT". Stored uppercase: the bot looks it up
+// case-insensitively, so two codes differing only in case must not coexist.
+export const PROPERTY_ID_RE = /^[A-Z0-9]{3,12}$/;
+export const PROPERTY_ID_MAX = 12;
+
+/** True when `value` is a plausible http(s) URL (used for the Maps link). */
+export function isHttpUrl(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return (
+    (url.protocol === "http:" || url.protocol === "https:") &&
+    url.hostname.includes(".")
+  );
+}
+
+/**
+ * True when a Prisma write failed because Listing.refCode was already taken.
+ * Checking the reported target avoids swallowing a P2002 raised by a different
+ * unique constraint in the same transaction.
+ */
+export function isDuplicateRefCodeError(error: unknown): boolean {
+  const e = error as { code?: string; meta?: { target?: unknown } } | null;
+  if (e?.code !== "P2002") return false;
+  const target = e.meta?.target;
+  const fields = Array.isArray(target)
+    ? target.map(String)
+    : typeof target === "string"
+      ? [target]
+      : [];
+  // No target reported means we cannot tell which constraint tripped; refCode
+  // is the only unique column a listing write sets, so assume it was ours.
+  return fields.length === 0 || fields.some((f) => f.includes("refCode"));
+}
+
 // Shared listing input schema (client form + server API use the same rules).
 // Note: there is intentionally NO contact/phone field — inquiry routing is global.
 export const listingInputSchema = z.object({
@@ -7,6 +46,30 @@ export const listingInputSchema = z.object({
   description: z.string().min(20, "Add at least a couple of sentences").max(4000),
   // Optional public host name shown as "Hosted by …".
   hostDisplayName: z.string().trim().max(50).optional(),
+  // Optional Property ID. Blank means "generate one" on create, or "keep the
+  // existing one" on edit — the server never clears a code that's in use.
+  refCode: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .refine(
+      (s) => s === "" || PROPERTY_ID_RE.test(s),
+      "Property ID must be 3–12 letters or numbers, e.g. HAXGT"
+    )
+    .optional(),
+  // Optional Google Maps share link. Public — shown to guests.
+  mapsUrl: z
+    .string()
+    .trim()
+    .max(500)
+    .refine(
+      (s) => s === "" || isHttpUrl(s),
+      "Enter a valid Google Maps link starting with http:// or https://"
+    )
+    .optional(),
+  // Admin-only curation flag. A host may submit it, but the API ignores the
+  // value unless the caller is an admin — never trust this from the client.
+  guestFavorite: z.boolean().default(false),
   propertyType: z.enum([
     "APARTMENT",
     "HOUSE",

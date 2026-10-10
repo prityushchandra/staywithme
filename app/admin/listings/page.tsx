@@ -84,8 +84,10 @@ export default async function AdminListingsPage({
                     </Link>
                     <Badge variant={STATUS_VARIANT[l.status]}>{l.status}</Badge>
                     {l.featured && <Badge>Featured</Badge>}
+                    {l.guestFavorite && <Badge variant="secondary">Guest Favorite</Badge>}
                   </div>
                   <p className="break-words text-sm text-muted-foreground">
+                    {l.refCode && `ID ${l.refCode} · `}
                     {l.city}, {l.country} · {formatINR(l.basePrice)} base/night · host{" "}
                     {l.host.name ?? l.host.phone ?? l.host.email ?? "—"}
                     {l.host.phone && ` · ${l.host.phone}`}

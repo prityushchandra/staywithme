@@ -3,7 +3,7 @@ import { revalidateTag } from "next/cache";
 import { clearMemo } from "@/lib/memo";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { listingInputSchema } from "@/lib/validation";
+import { listingInputSchema, isDuplicateRefCodeError } from "@/lib/validation";
 import { getAmenityIdByKey } from "@/lib/search";
 import { notifyAdminListingUpdated } from "@/lib/bookings";
 
@@ -44,7 +44,7 @@ export async function PATCH(
     .map((k) => amenityMap[k])
     .filter((id): id is string => !!id);
 
-  await prisma.$transaction([
+  const result = await prisma.$transaction([
     prisma.listingImage.deleteMany({ where: { listingId: id } }),
     prisma.listingAmenity.deleteMany({ where: { listingId: id } }),
     prisma.listing.update({
@@ -60,6 +60,14 @@ export async function PATCH(
         country: d.country,
         flatNumber: d.flatNumber,
         block: d.block,
+        // Blank keeps the current Property ID — guests may already be quoting it.
+        refCode: d.refCode || ctx.listing.refCode,
+        mapsUrl: d.mapsUrl || null,
+        // Admin-only: a host's submitted value is discarded, and whatever the
+        // admin set previously survives a host edit.
+        guestFavorite: ctx.session.user.isAdmin
+          ? d.guestFavorite
+          : ctx.listing.guestFavorite,
         bedrooms: d.bedrooms,
         bathrooms: d.bathrooms,
         beds: d.beds,
@@ -85,7 +93,17 @@ export async function PATCH(
         amenities: { create: amenityIds.map((id) => ({ amenityId: id })) },
       },
     }),
-  ]);
+  ]).catch((e) => {
+    if (isDuplicateRefCodeError(e)) return "duplicate-ref-code" as const;
+    throw e;
+  });
+
+  if (result === "duplicate-ref-code") {
+    return NextResponse.json(
+      { error: `Property ID "${d.refCode}" is already used by another listing.` },
+      { status: 409 }
+    );
+  }
 
   revalidateTag("listings");
   clearMemo();
