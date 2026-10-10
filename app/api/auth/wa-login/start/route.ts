@@ -18,5 +18,7 @@ export async function POST() {
   const number = normalizeWhatsAppNumber(botNumber);
   const message = `Verify my StayWithMe login: ${code}`;
   const waLink = `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
-  return NextResponse.json({ token, code, waLink });
+  // `message` + `botNumber` let the UI offer a copy/paste fallback when the deep
+  // link can't open WhatsApp (desktop without the app, in-app browsers, …).
+  return NextResponse.json({ token, code, message, waLink, botNumber: botNumber || null });
 }

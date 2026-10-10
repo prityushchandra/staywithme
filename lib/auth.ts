@@ -46,6 +46,7 @@ const providers: Provider[] = [
     name: "WhatsApp",
     credentials: {
       token: { label: "Token", type: "text" },
+      phone: { label: "Phone", type: "text" },
       firstName: { label: "First name", type: "text" },
       lastName: { label: "Last name", type: "text" },
     },
@@ -54,9 +55,18 @@ const providers: Provider[] = [
       if (!token) return null;
       const firstName = String(raw?.firstName ?? "").trim();
       const lastName = String(raw?.lastName ?? "").trim();
+      // The number typed on the sign-in screen, if the UI collected one. It is
+      // used ONLY as an extra equality constraint below — identity still comes
+      // solely from the WhatsApp-verified sender, so this can never grant
+      // access to a number the user hasn't proven they own.
+      const claimedRaw = String(raw?.phone ?? "").trim();
 
       const phone = await consumeWaLogin(token); // single-use; null unless VERIFIED
       if (!phone) return null;
+
+      // Sent from a different WhatsApp number than the one they entered →
+      // refuse, rather than silently signing them into the other account.
+      if (claimedRaw && normalizePhone(claimedRaw) !== phone) return null;
 
       let user = await prisma.user.findUnique({ where: { phone } });
       if (!user) {
