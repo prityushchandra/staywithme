@@ -49,14 +49,13 @@ export default async function HomePage() {
             </div>
           </div>
           <h1 className="text-center text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
-            Book a{" "}
-            <span className="font-bold text-[#C2410C]">homestay</span> in{" "}
-            <span className="italic text-brand">your society</span>
+            Book a <span className="font-bold text-[#C2410C]">Stay</span> in a{" "}
+            <span className="italic text-brand">Society</span>
           </h1>
           <p className="mx-auto mt-3 max-w-2xl text-center text-base text-muted-foreground sm:text-lg">
-            Curated stays hosted by your neighbours — the easiest way to put up
-            visiting family and guests, right inside the community you already
-            call home.
+            Find comfortable homes in residential communities for short stays,
+            trips, and visits. Enjoy a homely space with the convenience of
+            society living.
           </p>
           <div className="mx-auto mt-7 max-w-3xl">
             <SearchBar variant="hero" />
