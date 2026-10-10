@@ -9,15 +9,18 @@ import { mkdir } from "node:fs/promises";
 
 import { APPLE_SPLASH_DEVICES, appleSplashFileName } from "../lib/apple-splash";
 
-const CREAM = "#FDF8F4";
-const TERRA = "#C8705E";
+const TILE = "#000000";
+const TERRA = "#FC7C66";
 const INTRO_BG = "#140F0D";
+
+/** iOS' superellipse corner radius, as a fraction of the icon's width. */
+const SQUIRCLE = 0.2237;
 
 const ICONS_DIR = "public/icons";
 const SPLASH_DIR = "public/splash";
 
 /** The glyph's inked box is x 2..22, y 1.3..22 once the 2px stroke is counted. */
-function houseSvg(size: number, coverage: number) {
+function houseSvg(size: number, coverage: number, radius: number) {
   const boxW = 20;
   const boxH = 20.7;
   const scale = (size * coverage) / boxH;
@@ -25,7 +28,7 @@ function houseSvg(size: number, coverage: number) {
   const ty = (size - boxH * scale) / 2 - 1.3 * scale;
 
   return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-  <rect width="${size}" height="${size}" fill="${CREAM}"/>
+  <rect width="${size}" height="${size}" rx="${radius}" ry="${radius}" fill="${TILE}"/>
   <g transform="translate(${tx} ${ty}) scale(${scale})"
      fill="none" stroke="${TERRA}" stroke-width="2"
      stroke-linecap="round" stroke-linejoin="round">
@@ -35,13 +38,20 @@ function houseSvg(size: number, coverage: number) {
 </svg>`);
 }
 
-async function icon(out: string, size: number, coverage: number) {
-  await sharp(houseSvg(size, coverage), { density: 400 })
-    .resize(size, size)
-    // Home-screen icons are composited on unknown backgrounds; keep them opaque.
-    .flatten({ background: CREAM })
-    .png({ compressionLevel: 9 })
-    .toFile(out);
+/**
+ * `rounded` draws the logo's own squircle and keeps the corners transparent,
+ * for the surfaces that show the icon exactly as given. Platforms that apply
+ * their own mask (Android maskable, apple-touch) need a full-bleed opaque
+ * square instead, or they'd clip a second time and shave the tile.
+ */
+async function icon(out: string, size: number, coverage: number, rounded = true) {
+  const img = sharp(houseSvg(size, coverage, rounded ? size * SQUIRCLE : 0), {
+    density: 400,
+  }).resize(size, size);
+
+  if (!rounded) img.flatten({ background: TILE });
+
+  await img.png({ compressionLevel: 9 }).toFile(out);
 }
 
 async function main() {
@@ -53,8 +63,8 @@ async function main() {
   await icon(`${ICONS_DIR}/icon-512.png`, 512, 0.605);
   // Android crops maskable icons to a circle, so the glyph has to sit in the
   // inner 80% safe zone.
-  await icon(`${ICONS_DIR}/icon-maskable-512.png`, 512, 0.42);
-  await icon("public/apple-touch-icon.png", 180, 0.605);
+  await icon(`${ICONS_DIR}/icon-maskable-512.png`, 512, 0.42, false);
+  await icon("public/apple-touch-icon.png", 180, 0.605, false);
 
   // The launch images are the intro's first frame: a bare dark field that the
   // animation then assembles the house on top of.

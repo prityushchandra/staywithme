@@ -69,7 +69,10 @@ export function Navbar({
     <header className="sticky top-0 z-40 border-b bg-background/90 backdrop-blur">
       <div className="container flex h-16 items-center justify-between gap-4">
         <Link href="/" className="flex items-center gap-2 font-bold text-brand">
-          <Home className="h-6 w-6 shrink-0" />
+          {/* The logo mark: the house glyph on its black tile. */}
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-black">
+            <Home className="h-5 w-5" />
+          </span>
           {showSignature ? (
             <span className="flex flex-col leading-none">
               <span className="text-lg">StayWithMe</span>

@@ -7,8 +7,8 @@
 import sharp from "sharp";
 import { mkdir } from "node:fs/promises";
 
-const CREAM = "#FDF8F4";
-const TERRA = "#C8705E";
+const TILE = "#000000";
+const TERRA = "#FC7C66";
 const SPLASH_BG = "#140F0D";
 
 const ICONSET = "ios/App/App/Assets.xcassets/AppIcon.appiconset";
@@ -35,9 +35,10 @@ function houseSvg(size, { bg, stroke, coverage = 0.605 }) {
 
 async function png(svg, out, size) {
   // App Store rejects icons with an alpha channel, so flatten every export.
+  // iOS rounds the icon itself, so this stays a full-bleed square.
   await sharp(svg, { density: 400 })
     .resize(size, size)
-    .flatten({ background: CREAM })
+    .flatten({ background: TILE })
     .png({ compressionLevel: 9 })
     .toFile(out);
 }
@@ -45,7 +46,7 @@ async function png(svg, out, size) {
 await mkdir(ICONSET, { recursive: true });
 await mkdir(SPLASHSET, { recursive: true });
 
-await png(houseSvg(1024, { bg: CREAM, stroke: TERRA }), `${ICONSET}/AppIcon-512@2x.png`, 1024);
+await png(houseSvg(1024, { bg: TILE, stroke: TERRA }), `${ICONSET}/AppIcon-512@2x.png`, 1024);
 
 // The launch screen is the first frame of the retro intro, so keep it the bare
 // dark field that native/www/splash.html then animates on top of.

@@ -38,8 +38,8 @@ import { ToggleSelect } from "@/components/ui/toggle-select";
 import { EXPENSE_TYPES, EXPENSE_TYPE_LABEL, type ExpenseType } from "@/lib/expenses";
 
 const REVENUE = "#2f9e6f";
-const EXPENSE = "#C8705E";
-const RENT = "#C8705E";
+const EXPENSE = "#FC7C66";
+const RENT = "#FC7C66";
 const STAFF = "#E0A99B";
 
 // One colour per expense type, warm-to-pale so rent (the big one) reads first.

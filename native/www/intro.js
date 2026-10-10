@@ -32,7 +32,7 @@
   var COLS = 13;
   var ROWS = 12;
   var GOLD = "#e8a020";
-  var TERRA = "#c8705e";
+  var TERRA = "#fc7c66";
 
   /** Head-room around the house so blocks can fly in from off-canvas. */
   var PAD = 240;
