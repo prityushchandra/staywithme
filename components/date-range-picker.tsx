@@ -305,7 +305,11 @@ export function DateRangePicker({
             <span className="text-sm text-muted-foreground">
               {nights > 0
                 ? `${nights} night${nights > 1 ? "s" : ""} selected`
-                : "Select your dates"}
+                : checkIn
+                  ? // Clicking an earlier day silently restarts the range, which
+                    // reads as the picker resetting itself. Say which way to go.
+                    `Now pick a checkout after ${fmtLabel(checkIn)}`
+                  : "Select your dates"}
             </span>
             <button
               type="button"
