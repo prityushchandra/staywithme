@@ -41,8 +41,9 @@ export function isDuplicateRefCodeError(error: unknown): boolean {
 
 // Shared listing input schema (client form + server API use the same rules).
 // Note: there is intentionally NO contact/phone field — inquiry routing is global.
-export const listingInputSchema = z.object({
-  title: z.string().min(5, "Give your listing a descriptive title").max(40),
+export const listingInputSchema = z
+  .object({
+  title: z.string().min(5, "Give your listing a descriptive title").max(100),
   description: z.string().min(20, "Add at least a couple of sentences").max(4000),
   // Optional public host name shown as "Hosted by …".
   hostDisplayName: z.string().trim().max(50).optional(),
@@ -99,6 +100,9 @@ export const listingInputSchema = z.object({
   maxInfants: z.coerce.number().int().min(0).max(10).default(0),
   // basePrice is entered in RUPEES in the form, converted to paise server-side.
   basePriceRupees: z.coerce.number().int().min(1, "Enter a price").max(10_000_000),
+  // Optional sale price (rupees); 0/empty = no discount. Must undercut the base
+  // price, which is the only thing that makes the struck-through price honest.
+  discountedPriceRupees: z.coerce.number().int().min(0).max(10_000_000).default(0),
   // Optional monthly rate (rupees); 0/empty = not offered. Applies to 30+ night stays.
   monthlyPriceRupees: z.coerce.number().int().min(0).max(100_000_000).default(0),
   cancellationPolicy: z.enum(["FLEXIBLE", "MODERATE", "STRICT"]),
@@ -121,7 +125,18 @@ export const listingInputSchema = z.object({
     )
     .min(1, "Add at least one photo")
     .max(40, "You can add up to 40 photos"),
-});
+  })
+  .superRefine((v, ctx) => {
+    // A "discount" at or above the list price would render as a strike-through
+    // saving that isn't one, so reject it rather than quietly ignoring it.
+    if (v.discountedPriceRupees > 0 && v.discountedPriceRupees >= v.basePriceRupees) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["discountedPriceRupees"],
+        message: "The discounted price must be lower than the base price",
+      });
+    }
+  });
 
 export type ListingInput = z.infer<typeof listingInputSchema>;
 

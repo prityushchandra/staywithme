@@ -3,7 +3,14 @@
 import { useMemo } from "react";
 import { ReserveButton } from "@/components/reserve-button";
 import { useBooking } from "@/components/booking-context";
-import { computePricing, computeStayBase, isMonthlyRate, formatINR } from "@/lib/pricing";
+import {
+  computePricing,
+  computeStayBase,
+  isMonthlyRate,
+  formatINR,
+  nightlyPrice,
+  strikePrice,
+} from "@/lib/pricing";
 import { isRangeAvailable, toUtcDate } from "@/lib/dates";
 
 // Floating booking tab on mobile (hidden on desktop, where the sticky card is
@@ -15,18 +22,25 @@ import { isRangeAvailable, toUtcDate } from "@/lib/dates";
 // ISR-cached props whenever they exist, so both surfaces always agree.
 export function MobileBookingBar({
   basePrice: basePriceProp,
+  discountedPrice: discountedPriceProp,
   monthlyPrice: monthlyPriceProp,
   platformFeePercent: platformFeePercentProp,
   blockedRanges: blockedRangesProp = [],
 }: {
   basePrice: number;
+  discountedPrice?: number | null;
   monthlyPrice?: number | null;
   platformFeePercent: number;
   blockedRanges?: { startDate: string; endDate: string }[];
 }) {
   const { checkIn, checkOut, guests, infants, isCompactLayout, reserveCta, liveListing } =
     useBooking();
-  const basePrice = liveListing?.basePrice ?? basePriceProp;
+  const listPrice = liveListing?.basePrice ?? basePriceProp;
+  const discountedPrice = liveListing
+    ? liveListing.discountedPrice
+    : discountedPriceProp ?? null;
+  const basePrice = nightlyPrice({ basePrice: listPrice, discountedPrice });
+  const strike = strikePrice({ basePrice: listPrice, discountedPrice });
   const monthlyPrice = liveListing ? liveListing.monthlyPrice : monthlyPriceProp;
   const platformFeePercent = liveListing?.platformFeePercent ?? platformFeePercentProp;
   const blockedRanges = liveListing?.blockedRanges ?? blockedRangesProp;
@@ -53,6 +67,11 @@ export function MobileBookingBar({
   const monthly = isMonthlyRate(monthlyPrice, n);
   const total = computePricing(computeStayBase(basePrice, monthlyPrice, n), { platformFeePercent }).total;
   const nightlyTotal = computePricing(basePrice * n, { platformFeePercent }).total;
+  // A sale only moves the bill on nightly stays — a monthly stay is priced off
+  // monthlyPrice, so the monthly strike stays the one that's shown there.
+  const saleTotal =
+    !monthly && strike ? computePricing(strike * n, { platformFeePercent }).total : null;
+  const strikeTotal = saleTotal ?? (monthly && nightlyTotal > total ? nightlyTotal : null);
 
   // Only mount on compact screens: on desktop the booking card owns the Reserve
   // button, and rendering both is what used to put two Reserve buttons on screen.
@@ -65,12 +84,14 @@ export function MobileBookingBar({
           {hasDates && available ? (
             <>
               <div className="text-sm font-semibold">
-                {monthly && nightlyTotal > total ? (
+                {strikeTotal ? (
                   <span className="mr-1 font-normal text-muted-foreground line-through">
-                    {formatINR(nightlyTotal)}
+                    {formatINR(strikeTotal)}
                   </span>
                 ) : null}
-                {formatINR(total)}{" "}
+                <span className={saleTotal ? "discount-price text-rose-600" : undefined}>
+                  {formatINR(total)}
+                </span>{" "}
                 <span className="font-normal text-muted-foreground">total</span>
               </div>
               <div className="text-xs text-muted-foreground">
@@ -83,7 +104,14 @@ export function MobileBookingBar({
           ) : (
             <>
               <div className="text-sm font-semibold">
-                {formatINR(basePrice)}{" "}
+                {strike ? (
+                  <span className="mr-1 font-normal text-muted-foreground line-through">
+                    {formatINR(strike)}
+                  </span>
+                ) : null}
+                <span className={strike ? "discount-price text-rose-600" : undefined}>
+                  {formatINR(basePrice)}
+                </span>{" "}
                 <span className="font-normal text-muted-foreground">/ night</span>
               </div>
               <div className="text-xs text-muted-foreground">

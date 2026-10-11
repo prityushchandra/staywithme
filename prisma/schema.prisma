@@ -194,6 +194,10 @@ model Listing {
   maxInfants Int @default(0)
 
   basePrice    Int // minor units (paise), INR
+  // Optional sale price (paise). Any value above 0 replaces basePrice as the
+  // nightly rate the guest is actually charged, and basePrice is then shown
+  // struck through beside it. Null/0 means "no discount".
+  discountedPrice Int?
   // Optional monthly rate (paise). When set, stays of 30+ nights are charged at
   // this rate pro-rated per night instead of the nightly basePrice.
   monthlyPrice Int?

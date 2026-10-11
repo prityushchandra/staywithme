@@ -224,6 +224,7 @@ export function ReserveButton({
     if (result.fresh) {
       setLiveListing({
         basePrice: result.fresh.basePrice,
+        discountedPrice: result.fresh.discountedPrice,
         monthlyPrice: result.fresh.monthlyPrice,
         platformFeePercent: result.fresh.platformFeePercent,
         blockedRanges: result.fresh.blockedRanges,

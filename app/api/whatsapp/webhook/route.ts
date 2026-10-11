@@ -17,7 +17,7 @@ import {
 } from "@/lib/bookings";
 import { addBlock, toUtcDate } from "@/lib/availability";
 import { getPlatformSettings } from "@/lib/settings";
-import { formatINR } from "@/lib/pricing";
+import { formatINR, nightlyPrice } from "@/lib/pricing";
 import { computeBookingMoneyFromTotal, perNightFromBase } from "@/lib/payouts";
 import { parseWaLoginCode, verifyWaLogin } from "@/lib/wa-login";
 
@@ -583,7 +583,7 @@ async function earningsReport(): Promise<string> {
   const fee = settings.platformFeePercent;
   const confirmed = await prisma.booking.findMany({
     where: { status: "CONFIRMED" },
-    include: { listing: { select: { basePrice: true } } },
+    include: { listing: { select: { basePrice: true, discountedPrice: true } } },
   });
   if (!confirmed.length) return "No confirmed bookings yet.";
 
@@ -591,7 +591,7 @@ async function earningsReport(): Promise<string> {
   const months = new Map<string, { total: number; host: number; admin: number }>();
   for (const b of confirmed) {
     const nights = Math.max(1, Math.round((b.checkOut.getTime() - b.checkIn.getTime()) / 86_400_000));
-    const base = b.listing.basePrice * nights; // host payout
+    const base = nightlyPrice(b.listing) * nights; // host payout
     const adminEarn = Math.round((base * fee) / 100); // platform fee
     const key = `${b.checkIn.getUTCFullYear()}-${String(b.checkIn.getUTCMonth() + 1).padStart(2, "0")}`;
     const m = months.get(key) ?? { total: 0, host: 0, admin: 0 };

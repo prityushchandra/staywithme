@@ -48,6 +48,7 @@ export type ListingCardData = {
   id: string;
   title: string;
   basePrice: number;
+  discountedPrice: number | null;
   cover: string | null;
 };
 
@@ -55,12 +56,14 @@ export function toListingCardData(l: {
   id: string;
   title: string;
   basePrice: number;
+  discountedPrice: number | null;
   images: { url: string }[];
 }): ListingCardData {
   return {
     id: l.id,
     title: l.title,
     basePrice: l.basePrice,
+    discountedPrice: l.discountedPrice,
     cover: l.images[0]?.url ?? null,
   };
 }

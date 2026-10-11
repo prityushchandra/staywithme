@@ -101,6 +101,54 @@
        the sweep reads as continuous rather than stopping and jumping back. */
     animation: banner-sheen 4s linear infinite;
   }
+
+  /* Discount badge on a listing card: pops in once, then breathes gently so the
+     saving catches the eye without turning the grid into a flashing sale wall. */
+  @keyframes discount-pop {
+    0% {
+      opacity: 0;
+      transform: scale(0.6) translateY(-4px);
+    }
+    60% {
+      opacity: 1;
+      transform: scale(1.12) translateY(0);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+  @keyframes discount-pulse {
+    0%,
+    100% {
+      transform: scale(1);
+      box-shadow: 0 4px 6px -1px rgb(225 29 72 / 0.3);
+    }
+    50% {
+      transform: scale(1.06);
+      box-shadow: 0 6px 14px -2px rgb(225 29 72 / 0.55);
+    }
+  }
+  .discount-badge {
+    transform-origin: left center;
+    animation:
+      discount-pop 0.45s cubic-bezier(0.22, 1, 0.36, 1) both,
+      discount-pulse 2.6s ease-in-out 0.45s infinite;
+  }
+  @keyframes discount-price-in {
+    from {
+      opacity: 0;
+      transform: translateY(3px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .discount-price {
+    display: inline-block;
+    animation: discount-price-in 0.4s ease-out 0.15s both;
+  }
 }
 
 /* Respect users who prefer less motion. */

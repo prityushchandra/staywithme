@@ -7,8 +7,10 @@
 
 /** The price figures the booking card is showing right now. */
 export type QuoteSnapshot = {
-  /** Nightly rate, minor units (paise). */
+  /** Nightly LIST rate, minor units (paise) — before any discount. */
   basePrice: number;
+  /** Nightly sale rate, minor units, or null when the listing isn't discounted. */
+  discountedPrice: number | null;
   /** Long-stay monthly rate, minor units, or null when the host set none. */
   monthlyPrice: number | null;
   platformFeePercent: number;
@@ -38,9 +40,10 @@ export const PRICE_CHANGED_MESSAGE = "Prices have been updated.";
  * the server says right now.
  *
  * Availability wins over price: a nudge about money is pointless when the
- * nights are gone. A price move only compares the three figures the card
- * actually shows — the stay total, the nightly rate and the monthly rate — so a
- * fee-percent tweak that leaves the total untouched never interrupts a booking.
+ * nights are gone. A price move only compares the figures the card actually
+ * shows — the stay total, the nightly list and sale rates, and the monthly rate
+ * — so a fee-percent tweak that leaves the total untouched never interrupts a
+ * booking.
  */
 export function compareQuote(shown: QuoteSnapshot, fresh: FreshQuote): QuoteOutcome {
   if (!fresh.available) {
@@ -49,6 +52,7 @@ export function compareQuote(shown: QuoteSnapshot, fresh: FreshQuote): QuoteOutc
   const priceMoved =
     fresh.total !== shown.total ||
     fresh.basePrice !== shown.basePrice ||
+    (fresh.discountedPrice ?? null) !== (shown.discountedPrice ?? null) ||
     (fresh.monthlyPrice ?? null) !== (shown.monthlyPrice ?? null);
   if (priceMoved) {
     return { kind: "price-changed", message: PRICE_CHANGED_MESSAGE };
@@ -83,10 +87,12 @@ export function parseFreshQuote(data: unknown): FreshQuote | null {
   if (typeof q.platformFeePercent !== "number") return null;
   if (typeof q.nights !== "number") return null;
   const monthlyPrice = typeof q.monthlyPrice === "number" ? q.monthlyPrice : null;
+  const discountedPrice = typeof q.discountedPrice === "number" ? q.discountedPrice : null;
   return {
     available: q.available,
     nights: q.nights,
     basePrice: q.basePrice,
+    discountedPrice,
     monthlyPrice,
     platformFeePercent: q.platformFeePercent,
     total: q.total,

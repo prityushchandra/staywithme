@@ -10,6 +10,7 @@ import {
 
 const shown: QuoteSnapshot = {
   basePrice: 200000,
+  discountedPrice: null,
   monthlyPrice: null,
   platformFeePercent: 10,
   total: 440000,
@@ -48,6 +49,24 @@ describe("compareQuote", () => {
     expect(compareQuote(shown, fresh({ basePrice: 210000 })).kind).toBe("price-changed");
   });
 
+  it("flags a discount that appeared while the guest was reading", () => {
+    expect(compareQuote(shown, fresh({ discountedPrice: 150000 })).kind).toBe(
+      "price-changed"
+    );
+  });
+
+  it("flags a discount that was withdrawn", () => {
+    const onSale: QuoteSnapshot = { ...shown, discountedPrice: 150000 };
+    expect(compareQuote(onSale, fresh({ discountedPrice: null })).kind).toBe(
+      "price-changed"
+    );
+  });
+
+  it("treats a null and an absent discount as the same", () => {
+    const withUndefined = { ...fresh(), discountedPrice: undefined as unknown as null };
+    expect(compareQuote(shown, withUndefined).kind).toBe("proceed");
+  });
+
   it("flags a monthly rate appearing, since the card displays it", () => {
     expect(compareQuote(shown, fresh({ monthlyPrice: 4500000 })).kind).toBe(
       "price-changed"
@@ -75,6 +94,7 @@ describe("parseFreshQuote", () => {
       available: true,
       nights: 3,
       basePrice: 200000,
+      discountedPrice: 150000,
       monthlyPrice: null,
       platformFeePercent: 10,
       total: 660000,
@@ -82,6 +102,7 @@ describe("parseFreshQuote", () => {
       blockedRanges: [{ startDate: "2025-01-01", endDate: "2025-01-04" }],
     });
     expect(parsed?.total).toBe(660000);
+    expect(parsed?.discountedPrice).toBe(150000);
     expect(parsed?.blockedRanges).toHaveLength(1);
   });
 
@@ -96,6 +117,7 @@ describe("parseFreshQuote", () => {
     });
     expect(parsed?.blockedRanges).toEqual([]);
     expect(parsed?.monthlyPrice).toBeNull();
+    expect(parsed?.discountedPrice).toBeNull();
   });
 
   it.each([

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { computePricing, computeStayBase } from "@/lib/pricing";
+import { computePricing, computeStayBase, nightlyPrice } from "@/lib/pricing";
 import { isRangeAvailable, toUtcDate } from "@/lib/dates";
 
 // Live price + availability re-check, called the moment a guest presses Reserve.
@@ -71,7 +71,12 @@ export async function POST(
 
   const listing = await prisma.listing.findUnique({
     where: { id },
-    select: { status: true, basePrice: true, monthlyPrice: true },
+    select: {
+      status: true,
+      basePrice: true,
+      discountedPrice: true,
+      monthlyPrice: true,
+    },
   });
   // Drafts, pending and rejected listings are invisible to guests — same 404 as
   // a listing that doesn't exist, so this can't be used to probe for them.
@@ -100,7 +105,7 @@ export async function POST(
   // Reuse the card's own maths rather than re-deriving it: a rounding
   // difference here would surface as a phantom "prices have been updated".
   const { total } = computePricing(
-    computeStayBase(listing.basePrice, listing.monthlyPrice, nights),
+    computeStayBase(nightlyPrice(listing), listing.monthlyPrice, nights),
     { platformFeePercent }
   );
 
@@ -109,6 +114,7 @@ export async function POST(
       available: isRangeAvailable(checkIn, checkOut, blocks),
       nights,
       basePrice: listing.basePrice,
+      discountedPrice: listing.discountedPrice,
       monthlyPrice: listing.monthlyPrice,
       platformFeePercent,
       total,

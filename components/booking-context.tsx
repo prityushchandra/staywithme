@@ -57,6 +57,7 @@ export type ReserveCta = { label: string; shortLabel: string } & (
  */
 export type LiveListingData = {
   basePrice: number;
+  discountedPrice: number | null;
   monthlyPrice: number | null;
   platformFeePercent: number;
   blockedRanges: { startDate: string; endDate: string }[];

@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { computePricing, formatINR, getPriceInsight } from "./pricing";
+import {
+  computePricing,
+  formatINR,
+  getPriceInsight,
+  nightlyPrice,
+  strikePrice,
+} from "./pricing";
 
 const settings = {
   platformFeePercent: 10,
@@ -34,6 +40,30 @@ describe("computePricing", () => {
     expect(r.base).toBe(0);
     expect(r.platformFee).toBe(0);
     expect(r.total).toBe(0);
+  });
+});
+
+describe("nightlyPrice / strikePrice", () => {
+  it("charges the base price when there is no discount", () => {
+    expect(nightlyPrice({ basePrice: 200000, discountedPrice: null })).toBe(200000);
+    expect(nightlyPrice({ basePrice: 200000 })).toBe(200000);
+    expect(strikePrice({ basePrice: 200000, discountedPrice: null })).toBeNull();
+  });
+
+  it("treats zero as 'no discount' rather than a free night", () => {
+    expect(nightlyPrice({ basePrice: 200000, discountedPrice: 0 })).toBe(200000);
+    expect(strikePrice({ basePrice: 200000, discountedPrice: 0 })).toBeNull();
+  });
+
+  it("charges the sale price and strikes the base when the discount is real", () => {
+    const l = { basePrice: 200000, discountedPrice: 150000 };
+    expect(nightlyPrice(l)).toBe(150000);
+    expect(strikePrice(l)).toBe(200000);
+  });
+
+  it("does not strike a 'discount' that is not actually cheaper", () => {
+    expect(strikePrice({ basePrice: 200000, discountedPrice: 200000 })).toBeNull();
+    expect(strikePrice({ basePrice: 200000, discountedPrice: 250000 })).toBeNull();
   });
 });
 

@@ -289,6 +289,7 @@ export default async function ListingPage({
               refCode={listing.refCode ?? undefined}
               propertyName={listing.title}
               basePrice={listing.basePrice}
+              discountedPrice={listing.discountedPrice}
               monthlyPrice={listing.monthlyPrice}
               platformFeePercent={settings.platformFeePercent}
               maxGuests={listing.maxGuests}
@@ -307,6 +308,7 @@ export default async function ListingPage({
         {/* Mobile-only sticky CTA bar */}
         <MobileBookingBar
           basePrice={listing.basePrice}
+          discountedPrice={listing.discountedPrice}
           monthlyPrice={listing.monthlyPrice}
           platformFeePercent={settings.platformFeePercent}
           blockedRanges={serializedBlocks}

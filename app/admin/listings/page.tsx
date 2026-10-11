@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { formatINR } from "@/lib/pricing";
+import { formatINR, nightlyPrice, strikePrice } from "@/lib/pricing";
 import { Badge } from "@/components/ui/badge";
 import { SmartImage } from "@/components/smart-image";
 import { AdminListingActions } from "@/components/admin/listing-actions";
@@ -85,6 +85,11 @@ export default async function AdminListingsPage({
                     <Badge variant={STATUS_VARIANT[l.status]}>{l.status}</Badge>
                     {l.featured && <Badge>Featured</Badge>}
                     {l.guestFavorite && <Badge variant="secondary">Guest Favorite</Badge>}
+                    {strikePrice(l) && (
+                      <Badge className="bg-rose-600 hover:bg-rose-600">
+                        On sale {formatINR(nightlyPrice(l))}
+                      </Badge>
+                    )}
                   </div>
                   <p className="break-words text-sm text-muted-foreground">
                     {l.refCode && `ID ${l.refCode} · `}

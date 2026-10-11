@@ -56,6 +56,7 @@ export interface ListingFormInitial {
   maxGuests: number;
   maxInfants?: number;
   basePriceRupees: number;
+  discountedPriceRupees?: number;
   monthlyPriceRupees?: number;
   cancellationPolicy: string;
   checkInTime?: string;
@@ -113,6 +114,7 @@ export function ListingForm({
     maxGuests: initial?.maxGuests ?? 2,
     maxInfants: initial?.maxInfants ?? 0,
     basePriceRupees: initial?.basePriceRupees ?? 0,
+    discountedPriceRupees: initial?.discountedPriceRupees ?? 0,
     monthlyPriceRupees: initial?.monthlyPriceRupees ?? 0,
     cancellationPolicy: initial?.cancellationPolicy ?? policies[0]?.policy ?? "FLEXIBLE",
     checkInTime: initial?.checkInTime ?? "",
@@ -188,6 +190,23 @@ export function ListingForm({
   function set<K extends keyof typeof form>(key: K, val: (typeof form)[K]) {
     setForm((f) => ({ ...f, [key]: val }));
   }
+
+  // Live echo of what a guest will see, so the host can't mis-set the sale price
+  // without noticing (e.g. a "discount" that is actually higher than the base).
+  const discountPreview = (() => {
+    const base = form.basePriceRupees;
+    const sale = form.discountedPriceRupees;
+    if (!sale) return null;
+    if (!base || sale >= base)
+      return { text: "Must be lower than the base price.", error: true };
+    const off = Math.round(((base - sale) / base) * 100);
+    return {
+      text: `Guests pay ₹${sale.toLocaleString("en-IN")} instead of ₹${base.toLocaleString(
+        "en-IN"
+      )} — ${off}% off.`,
+      error: false,
+    };
+  })();
 
   function toggleAmenity(key: string) {
     setAmenityKeys((keys) =>
@@ -295,10 +314,10 @@ export function ListingForm({
             value={form.title}
             onChange={(e) => set("title", e.target.value)}
             placeholder="Rest, Relax, Refresh"
-            maxLength={40}
+            maxLength={100}
           />
           <p className="text-right text-xs text-muted-foreground">
-            {form.title.length}/40
+            {form.title.length}/100
           </p>
         </div>
         <div className="space-y-1">
@@ -586,16 +605,40 @@ export function ListingForm({
               Guests see this plus the platform fee. You set only the base price.
             </p>
           </div>
-          <div className="flex items-end">
-            <div className="w-full">
-              <PriceInsight
-                basePriceRupees={form.basePriceRupees}
-                suggestedMinPaise={suggestedMinPaise}
-                suggestedMaxPaise={suggestedMaxPaise}
-              />
-            </div>
+          <div className="space-y-1">
+            <Label htmlFor="discountedPrice">Discounted price per night (₹) — optional</Label>
+            <Input
+              id="discountedPrice"
+              type="number"
+              min={0}
+              value={form.discountedPriceRupees || ""}
+              onChange={(e) => set("discountedPriceRupees", Number(e.target.value) || 0)}
+              placeholder="0"
+            />
+            <p
+              className={
+                discountPreview?.error
+                  ? "text-xs font-medium text-destructive"
+                  : discountPreview
+                    ? "text-xs font-medium text-green-700"
+                    : "text-xs text-muted-foreground"
+              }
+            >
+              {discountPreview?.text ?? (
+                <>
+                  Put the listing on sale. Guests are charged this instead, with the
+                  base price struck through. Leave blank or 0 for no discount.
+                </>
+              )}
+            </p>
           </div>
         </div>
+
+        <PriceInsight
+          basePriceRupees={form.discountedPriceRupees || form.basePriceRupees}
+          suggestedMinPaise={suggestedMinPaise}
+          suggestedMaxPaise={suggestedMaxPaise}
+        />
 
         <div className="space-y-1">
           <Label htmlFor="monthlyPrice">Monthly price (₹) — optional</Label>

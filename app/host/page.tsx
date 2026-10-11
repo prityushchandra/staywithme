@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Eye, Plus, Pencil, CalendarDays, ExternalLink } from "lucide-react";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { formatINR } from "@/lib/pricing";
+import { formatINR, nightlyPrice, strikePrice } from "@/lib/pricing";
 import { getListingStats, sumStats } from "@/lib/analytics";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -107,6 +107,12 @@ export default async function HostDashboard() {
                   </div>
                   <p className="text-sm text-muted-foreground">
                     {l.city}, {l.country} · {formatINR(l.basePrice)} base/night
+                    {strikePrice(l) && (
+                      <span className="font-medium text-rose-600">
+                        {" "}
+                        · on sale {formatINR(nightlyPrice(l))}
+                      </span>
+                    )}
                   </p>
                   {l.status === "REJECTED" && l.rejectionReason && (
                     <p className="mt-1 text-xs text-destructive">Rejected: {l.rejectionReason}</p>

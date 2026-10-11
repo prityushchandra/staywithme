@@ -6,7 +6,13 @@ import { DateRangePicker } from "@/components/date-range-picker";
 import { PricingBreakdown } from "@/components/pricing-breakdown";
 import { ReserveButton } from "@/components/reserve-button";
 import { useBooking, type ReserveCta } from "@/components/booking-context";
-import { computePricing, computeStayBase, formatINR } from "@/lib/pricing";
+import {
+  computePricing,
+  computeStayBase,
+  formatINR,
+  nightlyPrice,
+  strikePrice,
+} from "@/lib/pricing";
 import {
   BOOKING_TAB_INSET,
   NAVBAR_INSET,
@@ -16,7 +22,7 @@ import {
   type MissingTripField,
 } from "@/lib/reserve-prompt";
 import { isRangeAvailable, toUtcDate } from "@/lib/dates";
-import { scrollBehavior } from "@/lib/utils";
+import { cn, scrollBehavior } from "@/lib/utils";
 
 // Sticky booking card. Dates & guests come from the shared booking context, so
 // it stays in sync with the on-page availability calendar. It also resolves the
@@ -32,6 +38,7 @@ export function InquiryPanel({
   refCode,
   propertyName,
   basePrice: basePriceProp,
+  discountedPrice: discountedPriceProp,
   monthlyPrice: monthlyPriceProp,
   platformFeePercent: platformFeePercentProp,
   maxGuests,
@@ -48,6 +55,7 @@ export function InquiryPanel({
   refCode?: string;
   propertyName: string;
   basePrice: number;
+  discountedPrice?: number | null;
   monthlyPrice?: number | null;
   platformFeePercent: number;
   maxGuests: number;
@@ -79,7 +87,13 @@ export function InquiryPanel({
   // The page's props were baked in when the ISR page was last rendered. If the
   // Reserve re-check has since read the database, those fresher figures win —
   // so the breakdown the guest is looking at is the one they'll be quoted.
-  const basePrice = liveListing?.basePrice ?? basePriceProp;
+  const listPrice = liveListing?.basePrice ?? basePriceProp;
+  const discountedPrice = liveListing
+    ? liveListing.discountedPrice
+    : discountedPriceProp ?? null;
+  // The nightly rate actually charged, and the one to strike through (if any).
+  const basePrice = nightlyPrice({ basePrice: listPrice, discountedPrice });
+  const strike = strikePrice({ basePrice: listPrice, discountedPrice });
   const monthlyPrice = liveListing ? liveListing.monthlyPrice : monthlyPriceProp;
   const platformFeePercent = liveListing?.platformFeePercent ?? platformFeePercentProp;
   const blockedRanges = liveListing?.blockedRanges ?? blockedRangesProp;
@@ -157,7 +171,8 @@ export function InquiryPanel({
       // What this card is currently quoting, so Reserve can compare it against
       // the database before anything reaches WhatsApp.
       quote: {
-        basePrice,
+        basePrice: listPrice,
+        discountedPrice,
         monthlyPrice: monthlyPrice ?? null,
         platformFeePercent,
         total,
@@ -183,6 +198,8 @@ export function InquiryPanel({
     infants,
     total,
     basePrice,
+    listPrice,
+    discountedPrice,
     monthlyPrice,
     platformFeePercent,
   ]);
@@ -237,8 +254,25 @@ export function InquiryPanel({
     <Card className="sticky top-24">
       <CardContent className="space-y-4 p-5">
         <div className="flex items-baseline gap-1">
-          <span className="text-xl font-semibold">{formatINR(basePrice)}</span>
+          {strike ? (
+            <span className="text-base text-muted-foreground line-through">
+              {formatINR(strike)}
+            </span>
+          ) : null}
+          <span
+            className={cn(
+              "text-xl font-semibold",
+              strike && "discount-price text-rose-600"
+            )}
+          >
+            {formatINR(basePrice)}
+          </span>
           <span className="text-muted-foreground">/ night</span>
+          {strike ? (
+            <span className="discount-badge ml-1 inline-flex items-center rounded-full bg-rose-600 px-2 py-0.5 text-[11px] font-semibold text-white shadow-md shadow-rose-600/30">
+              {Math.round(((strike - basePrice) / strike) * 100)}% off
+            </span>
+          ) : null}
         </div>
         {monthlyPrice ? (
           <p className="-mt-2 text-xs text-muted-foreground">
@@ -283,6 +317,7 @@ export function InquiryPanel({
           {hasDates && (
             <PricingBreakdown
               basePrice={basePrice}
+              listPrice={strike}
               monthlyPrice={monthlyPrice}
               platformFeePercent={platformFeePercent}
               nights={nights}

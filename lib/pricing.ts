@@ -44,6 +44,33 @@ export function computePricing(
 /** Number of nights at/above which a monthly price (if set) kicks in. */
 export const MONTHLY_MIN_NIGHTS = 30;
 
+/** The two nightly figures a listing can carry: its list price and a sale price. */
+export interface ListingPrice {
+  basePrice: number;
+  /** Sale price in minor units. Null, undefined or 0 means "no discount". */
+  discountedPrice?: number | null;
+}
+
+/**
+ * The nightly rate a guest is actually charged. EVERY money path — the bill,
+ * the live Reserve re-check, the booking record and the host payout — must
+ * start here, or the price on screen and the price charged will drift apart.
+ */
+export function nightlyPrice(listing: ListingPrice): number {
+  const sale = listing.discountedPrice;
+  return sale != null && sale > 0 ? sale : listing.basePrice;
+}
+
+/**
+ * The list price to show struck through, or null when there is nothing to
+ * strike. A "discount" that is not actually cheaper is ignored rather than
+ * rendered as a nonsense saving.
+ */
+export function strikePrice(listing: ListingPrice): number | null {
+  const sale = listing.discountedPrice;
+  return sale != null && sale > 0 && sale < listing.basePrice ? listing.basePrice : null;
+}
+
 /**
  * Host base total (minor units) for a stay. When the host set a monthly price
  * and the stay is a month or longer (>= MONTHLY_MIN_NIGHTS), the stay is charged

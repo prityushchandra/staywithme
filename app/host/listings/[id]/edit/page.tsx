@@ -81,6 +81,9 @@ export default async function EditListingPage({
             maxGuests: listing.maxGuests,
             maxInfants: listing.maxInfants,
             basePriceRupees: Math.round(listing.basePrice / 100),
+            discountedPriceRupees: listing.discountedPrice
+              ? Math.round(listing.discountedPrice / 100)
+              : 0,
             monthlyPriceRupees: listing.monthlyPrice ? Math.round(listing.monthlyPrice / 100) : 0,
             cancellationPolicy: listing.cancellationPolicy,
             checkInTime: listing.checkInTime ?? "",

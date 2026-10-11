@@ -9,7 +9,7 @@ import { prisma } from "./db";
 import { clearMemo } from "./memo";
 import { toUtcDate } from "./dates";
 import { sendWhatsApp, sendNotification } from "./wa-send";
-import { formatINR } from "./pricing";
+import { formatINR, nightlyPrice } from "./pricing";
 import { getPlatformSettings } from "./settings";
 import { computeBookingMoney, computeBookingMoneyFromTotal, perNightFromBase, computeRefund } from "./payouts";
 
@@ -79,7 +79,7 @@ export async function reserveForGuest(input: {
   const negotiated = input.guestTotal && input.guestTotal > 0;
   const money = negotiated
     ? computeBookingMoneyFromTotal(input.guestTotal!, nights, settings.platformFeePercent)
-    : computeBookingMoney(listing.basePrice, nights, settings.platformFeePercent, listing.monthlyPrice);
+    : computeBookingMoney(nightlyPrice(listing), nights, settings.platformFeePercent, listing.monthlyPrice);
   const perNight = perNightFromBase(money.baseTotal, nights);
   const paid = Math.max(0, Math.min(input.amountPaid ?? 0, money.guestTotal));
   const due = money.guestTotal - paid;
@@ -172,7 +172,7 @@ export async function cancelBooking(
   const nights = nightsBetween(booking.checkIn, booking.checkOut);
   const refund = computeRefund(
     booking.listing.cancellationPolicy,
-    booking.listing.basePrice,
+    nightlyPrice(booking.listing),
     nights,
     settings.platformFeePercent,
     booking.amountPaid,
