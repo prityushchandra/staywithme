@@ -15,6 +15,7 @@ import {
   TrendingUp,
   CircleDot,
   Receipt,
+  PenSquare,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -36,7 +37,8 @@ const NAV: NavItem[] = [
   { href: "/admin/pnl", label: "P&L", Icon: TrendingUp },
   { href: "/admin/dots", label: "Dot days", Icon: CircleDot },
   { href: "/admin/staff", label: "Staff", Icon: Sparkles },
-  { href: "/admin/reviews", label: "Reviews", Icon: Star, badge: "reviews" },
+  { href: "/admin/reviews", label: "Reviews", Icon: Star, badge: "reviews", exact: true },
+  { href: "/admin/reviews/new", label: "Create review", Icon: PenSquare },
   { href: "/admin/users", label: "Users", Icon: Users },
   { href: "/admin/catalog", label: "Catalog", Icon: Tags },
   { href: "/admin/settings", label: "Settings", Icon: Settings },

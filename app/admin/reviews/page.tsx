@@ -39,7 +39,15 @@ export default async function AdminReviewsPage({
 
   return (
     <div className="space-y-5">
-      <h1 className="text-2xl font-bold tracking-tight">Reviews</h1>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-2xl font-bold tracking-tight">Reviews</h1>
+        <Link
+          href="/admin/reviews/new"
+          className="rounded-full bg-foreground px-3.5 py-1.5 text-sm font-medium text-background"
+        >
+          Create review
+        </Link>
+      </div>
 
       <div className="flex flex-wrap gap-2">
         {STATUSES.map((s) => {
@@ -85,7 +93,7 @@ export default async function AdminReviewsPage({
                 </span>
               </div>
               <p className="mt-1 break-words text-xs text-muted-foreground">
-                by {r.author.name ?? r.author.email} ·{" "}
+                by {r.authorName ?? r.author?.name ?? r.author?.email ?? "Guest"} ·{" "}
                 {r.createdAt.toLocaleDateString("en-IN")}
               </p>
               <p className="mt-2 whitespace-pre-line break-words text-sm">{r.body}</p>

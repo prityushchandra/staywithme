@@ -293,7 +293,7 @@ export function notifyAdminNewReview(reviewId: string): void {
     const a = review.author;
     await sendWhatsApp(
       adminPhone,
-      `*New review submitted*\n\nGuest: ${a.name ?? "—"} (${a.phone ?? "no number"})\nFlat: ${unitBlock(review.listing)} — ${review.listing.title}\nRating: ${review.rating}/5\n\nApprove it in the admin dashboard.`
+      `*New review submitted*\n\nGuest: ${a?.name ?? review.authorName ?? "—"} (${a?.phone ?? "no number"})\nFlat: ${unitBlock(review.listing)} — ${review.listing.title}\nRating: ${review.rating}/5\n\nApprove it in the admin dashboard.`
     );
   });
 }

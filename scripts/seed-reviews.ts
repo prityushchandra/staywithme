@@ -1191,10 +1191,15 @@ async function main() {
 
   for (const plan of plans) {
     const label = `${plan.refCode ?? plan.title.slice(0, 12)} ${plan.title}`;
-    const existing = await prisma.review.findMany({
+    const existingRows = await prisma.review.findMany({
       where: { listingId: plan.listingId, authorId: { in: guestIds } },
       select: { id: true, authorId: true, rating: true, body: true, status: true, createdAt: true },
     });
+    // authorId is nullable now (admin-authored rows carry no account), but the
+    // `in guestIds` filter already excludes those — this just proves it to TS.
+    const existing = existingRows.filter(
+      (r): r is typeof r & { authorId: string } => r.authorId !== null
+    );
 
     // Reconcile rather than blindly skip: a synthetic guest deleted from the
     // admin UI cascades away their reviews, which would leave the listing short

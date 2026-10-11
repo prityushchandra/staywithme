@@ -376,17 +376,20 @@ model WishlistItem {
 }
 
 model Review {
-  id        String   @id @default(cuid())
-  listingId String
-  authorId  String
-  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  rating    Int // 1..5
-  body      String   @db.Text
-  status    String   @default("PENDING") // PENDING | APPROVED | REJECTED
-  createdAt DateTime @default(now())
+  id         String   @id @default(cuid())
+  listingId  String
+  authorId   String?
+  listing    Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  author     User?    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  authorName String? // set when an admin posts a review on a guest's behalf
+  rating     Int // 1..5
+  body       String   @db.Text
+  status     String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  createdAt  DateTime @default(now())
 
-  @@unique([listingId, authorId]) // one review per user per listing
+  // One review per registered user per listing. Postgres treats NULLs as
+  // distinct, so admin-authored rows (authorId = null) are never constrained.
+  @@unique([listingId, authorId])
   @@index([listingId])
   @@index([status])
 }

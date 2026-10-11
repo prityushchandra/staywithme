@@ -12,7 +12,7 @@ import { WishlistButton } from "@/components/wishlist-button";
 import { TrackView } from "@/components/track-view";
 import { getActiveBlocks } from "@/lib/availability";
 import { syncListingCalendar } from "@/lib/calendar-sync";
-import { getApprovedReviews, getRatingSummary, hasCompletedStay } from "@/lib/reviews";
+import { getApprovedReviews, getRatingSummary, hasCompletedStay, reviewDisplayName } from "@/lib/reviews";
 import { relativeTime } from "@/lib/relative-time";
 import { ReviewList } from "@/components/review-list";
 import { ReviewForm } from "@/components/review-form";
@@ -152,7 +152,7 @@ export default async function ListingPage({
   const now = new Date();
   const reviewItems = reviews.map((r) => ({
     id: r.id,
-    name: r.author.name ?? "Guest",
+    name: reviewDisplayName(r),
     rating: r.rating,
     body: r.body,
     timeAgo: relativeTime(r.createdAt, now),
