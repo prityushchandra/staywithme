@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { X, Grip } from "lucide-react";
 import { SmartImage } from "@/components/smart-image";
 import { SwipeCarousel } from "@/components/swipe-carousel";
+import { useOverlayHistory } from "@/lib/use-overlay-history";
 
 type Img = { id: string; url: string };
 
@@ -24,6 +25,11 @@ export function Gallery({ images, title }: { images: Img[]; title: string }) {
     (next: number) => setIndex((i) => Math.max(0, Math.min(count - 1, next ?? i))),
     [count]
   );
+
+  const close = useCallback(() => setOpen(false), []);
+  // The viewer covers the whole screen, so Back should dismiss it rather than
+  // abandoning the listing.
+  useOverlayHistory(open, close);
 
   useEffect(() => {
     if (!open) return;

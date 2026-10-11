@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { SearchFilters } from "@/components/search-filters";
+import { useOverlayHistory } from "@/lib/use-overlay-history";
 
 // Mobile "Filters" button that opens the filters in a slide-over sheet.
 export function MobileFilters({
@@ -13,6 +14,9 @@ export function MobileFilters({
   amenities: { key: string; label: string }[];
 }) {
   const [open, setOpen] = useState(false);
+  const close = useCallback(() => setOpen(false), []);
+  // Back should close the sheet, not throw away the search results behind it.
+  useOverlayHistory(open, close);
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>

@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useOverlayHistory } from "@/lib/use-overlay-history";
 import { Loader2, Plus, Save, Trash2, X, Pencil, Check, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -52,6 +53,8 @@ export function StaffTracker({
   const [saved, setSaved] = useState(false);
   const [deletingRow, setDeletingRow] = useState<string | null>(null);
   const [modalDay, setModalDay] = useState<number | null>(null);
+  const closeModal = useCallback(() => setModalDay(null), []);
+  useOverlayHistory(modalDay != null, closeModal);
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useOverlayHistory } from "@/lib/use-overlay-history";
 import { Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -50,6 +51,8 @@ export function DotMarker({
   // the future, so its status alone can't tell us whether it has arrived.
   const [markableThrough, setMarkableThrough] = useState(0);
   const [modalDay, setModalDay] = useState<number | null>(null);
+  const closeModal = useCallback(() => setModalDay(null), []);
+  useOverlayHistory(modalDay != null, closeModal);
   const [override, setOverride] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
