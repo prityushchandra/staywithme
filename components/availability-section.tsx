@@ -201,29 +201,6 @@ export function AvailabilitySection() {
           </div>
         </div>
       </div>
-
-      <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 border-t pt-4 text-xs text-muted-foreground">
-        <span className="flex items-center gap-1.5">
-          <span className="h-3.5 w-3.5 rounded-full bg-brand" aria-hidden />
-          Selected
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="h-3.5 w-3.5 rounded-full bg-brand/10" aria-hidden />
-          Your stay
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="line-through" aria-hidden>
-            15
-          </span>
-          Booked
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="underline decoration-dotted underline-offset-4" aria-hidden>
-            15
-          </span>
-          Checkout only
-        </span>
-      </div>
     </div>
   );
 }
