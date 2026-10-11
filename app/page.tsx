@@ -52,11 +52,11 @@ export default async function HomePage() {
             Book a <span className="font-bold text-brand">Stay</span> in a{" "}
             <span className="italic text-brand">Society</span>
           </h1>
-          <p className="mx-auto mt-3 max-w-2xl text-pretty text-center text-base text-muted-foreground sm:text-lg">
-            Find comfortable homes in residential communities for short stays,
-            trips, and visits. Enjoy a homely space with the convenience of
-            society living.
-          </p>
+          {settings.homeTagline.trim() && (
+            <p className="mx-auto mt-3 max-w-2xl text-pretty text-center text-base text-muted-foreground sm:text-lg">
+              {settings.homeTagline}
+            </p>
+          )}
           <div className="mx-auto mt-7 max-w-3xl">
             <SearchBar variant="hero" />
           </div>

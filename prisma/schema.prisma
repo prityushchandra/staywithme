@@ -328,6 +328,8 @@ model PlatformSettings {
   showSignature        Boolean  @default(true)
   // Booking-receipt footer instruction (smart lock / door PIN etc.).
   smartLockNote        String   @default("We have a smart door lock — the door PIN will be shared with you on your check-in day.") @db.Text
+  // Sub-heading under the homepage hero title. Empty hides the line entirely.
+  homeTagline          String   @default("Find comfortable homes in residential communities for short stays, trips, and visits. Enjoy a homely space with the convenience of society living.") @db.Text
   // UPI id guests pay to (shown in the WhatsApp share message).
   upiId                String   @default("guestcollect@ybl")
   // Staff cleaning economics (paise). Default: ₹100 per flat per day, ₹3,000

@@ -21,6 +21,7 @@ export function SettingsForm({
     reviewsOpenToAll: boolean;
     showSignature: boolean;
     smartLockNote: string;
+    homeTagline: string;
     upiId: string;
     staffDailyRateRupees: number;
     staffMonthlySalaryRupees: number;
@@ -209,6 +210,22 @@ export function SettingsForm({
         <p className="text-xs text-muted-foreground">
           Printed at the bottom of every booking receipt (e.g. smart-lock / door
           PIN instructions).
+        </p>
+      </div>
+
+      <div className="space-y-1 border-t pt-6">
+        <Label htmlFor="homeTagline">Homepage tagline</Label>
+        <Textarea
+          id="homeTagline"
+          rows={3}
+          value={form.homeTagline}
+          onChange={(e) => set("homeTagline", e.target.value)}
+          placeholder="Find comfortable homes in residential communities for short stays, trips, and visits."
+        />
+        <p className="text-xs text-muted-foreground">
+          The line under “Book a Stay in a Society” on the homepage.{" "}
+          {form.homeTagline.trim().length}/300 characters — leave it blank to
+          hide the line completely.
         </p>
       </div>
 
