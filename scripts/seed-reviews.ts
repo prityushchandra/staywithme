@@ -1,7 +1,7 @@
 // Seed realistic synthetic reviews for every PUBLISHED listing.
 //
-//   npm run db:seed-reviews              # idempotent seed (skips listings already seeded)
-//   npm run db:seed-reviews -- --force   # rebuild the synthetic reviews from scratch
+//   npm run db:seed-reviews              # idempotent seed (skips listings already on target)
+//   npm run db:seed-reviews -- --force   # reconcile every listing, even the healthy ones
 //   npm run db:seed-reviews -- --verify  # just print the per-listing report
 //   npm run db:seed-reviews -- --dry-run # plan only, writes nothing
 //   npm run db:seed-reviews -- --reset   # delete ONLY the synthetic reviews + users
@@ -34,14 +34,24 @@ const SYNTHETIC_EMAIL_SUFFIX = `@${SYNTHETIC_EMAIL_DOMAIN}`;
 const USER_POOL_SIZE = 150;
 
 /** Review count per listing is drawn from this inclusive range. */
-const MIN_REVIEWS = 78;
-const MAX_REVIEWS = 100;
+const MIN_REVIEWS = 20;
+const MAX_REVIEWS = 45;
 
-/** The average every listing must land on, to 2 decimal places. */
-const TARGET_AVERAGE = 4.97;
+/**
+ * Every listing lands on its OWN average, to 2 decimal places. Five listings
+ * all showing 4.97 reads as fabricated; a spread does not.
+ *
+ * Assigned by listing creation order, so a listing keeps its number forever.
+ * Deliberately not monotonic — the first few listings should not look sorted.
+ * The ladder covers the whole 4.86-4.97 band, so it also stays distinct if more
+ * listings are published later.
+ */
+const TARGET_AVERAGES = [
+  4.88, 4.95, 4.91, 4.97, 4.93, 4.86, 4.96, 4.89, 4.94, 4.87, 4.92, 4.9,
+] as const;
 
-/** Reviews are backdated across roughly the last 18 months. */
-const SPREAD_DAYS = 548;
+/** Reviews are backdated across roughly the last 13 months. */
+const SPREAD_DAYS = 400;
 /** >1 biases timestamps towards the present, so recent months are denser. */
 const RECENCY_BIAS = 1.7;
 
@@ -56,6 +66,13 @@ const HOST_FIRST_NAME = "Chandra";
 const MAX_BODY_LENGTH = 170;
 const SHORT_BODY_LENGTH = 70;
 const MIN_SHORT_SHARE = 0.28;
+
+/**
+ * A 4-star review is NOT a complaint here — it is a shorter, cooler thank-you.
+ * "Good stay." rather than "Good stay, but the lift is slow."
+ */
+const FOUR_STAR_MAX_WORDS = 6;
+const FOUR_STAR_MAX_LENGTH = 48;
 
 // ---------------------------------------------------------------------------
 // Deterministic RNG — the same listing always produces the same plan
@@ -97,41 +114,64 @@ function shuffled<T>(rng: () => number, items: readonly T[]): T[] {
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 // ---------------------------------------------------------------------------
-// Rating mix — Review.rating is an Int, so 4.97 has to come out of the mix
+// Rating mix — Review.rating is an Int, so 4.88 has to come out of the mix
 // ---------------------------------------------------------------------------
 
-/**
- * How many 4s are needed among `count` reviews (rest are 5s) for the mean to
- * round to TARGET_AVERAGE. Returns null when no integer mix can hit it, and
- * never returns a count whose mean sits exactly on a rounding boundary.
- */
-function foursNeeded(count: number): number | null {
-  const candidates: number[] = [];
-  for (let fours = 0; fours <= count; fours++) {
-    const mean = (5 * count - fours) / count;
-    if (round2(mean) !== TARGET_AVERAGE) continue;
-    // Reject means sitting on the x.xx5 boundary — their rounding is not stable
-    // across languages/engines, and a report elsewhere could print 4.98.
-    const scaled = mean * 1000;
-    if (Math.abs(scaled - Math.round(scaled)) < 1e-9 && Math.round(scaled) % 10 === 5) continue;
-    candidates.push(fours);
-  }
-  if (candidates.length === 0) return null;
-  // Prefer the mix closest to a true 4.97 (3% of reviews are 4s).
-  const ideal = count * 0.03;
-  return candidates.sort((a, b) => Math.abs(a - ideal) - Math.abs(b - ideal))[0];
+interface RatingMix {
+  /** Total reviews. */
+  count: number;
+  /** How many of them are 4s; the rest are 5s. */
+  fours: number;
+  /** The mean those two produce, already rounded the way the app rounds. */
+  average: number;
 }
 
-/** Review counts in [MIN_REVIEWS, MAX_REVIEWS] that can actually average 4.97. */
-const VALID_COUNTS = Array.from(
-  { length: MAX_REVIEWS - MIN_REVIEWS + 1 },
-  (_, i) => MIN_REVIEWS + i
-).filter((n) => foursNeeded(n) !== null);
+/**
+ * A mean sitting exactly on an x.xx5 boundary rounds up in JS but not in every
+ * other engine, formatter or database, so the UI and a report could disagree by
+ * 0.01. Those mixes are thrown away rather than relied upon.
+ */
+function onRoundingBoundary(mean: number): boolean {
+  const scaled = mean * 1000;
+  return Math.abs(scaled - Math.round(scaled)) < 1e-9 && Math.round(scaled) % 10 === 5;
+}
 
-if (VALID_COUNTS.length === 0) {
-  throw new Error(
-    `No review count in [${MIN_REVIEWS}, ${MAX_REVIEWS}] can average ${TARGET_AVERAGE} with 4s and 5s`
-  );
+/**
+ * Every (count, fours) pair in the window whose mean really does round to
+ * `target`. The filter is the app's own rounding function, not an epsilon
+ * window: with N=40 and one 4 the mean is 4.975, which rounds UP to 4.98, and
+ * an epsilon comparison would happily call that 4.97.
+ */
+function findMixes(target: number, minCount: number, maxCount: number): RatingMix[] {
+  const mixes: RatingMix[] = [];
+  for (let count = minCount; count <= maxCount; count++) {
+    // fours < count keeps at least one 5 in the mix; fours >= 1 is implied for
+    // any target below 5, but is asserted rather than assumed.
+    for (let fours = 1; fours < count; fours++) {
+      const mean = (5 * count - fours) / count;
+      if (round2(mean) !== target) continue;
+      if (onRoundingBoundary(mean)) continue;
+      mixes.push({ count, fours, average: round2(mean) });
+    }
+  }
+  return mixes;
+}
+
+/** Fails the whole run rather than quietly shipping a listing on 4.89. */
+function mixesForTarget(target: number): RatingMix[] {
+  const mixes = findMixes(target, MIN_REVIEWS, MAX_REVIEWS);
+  if (mixes.length === 0) {
+    throw new Error(
+      `No mix of 4s and 5s with ${MIN_REVIEWS}-${MAX_REVIEWS} reviews averages ${target}. ` +
+        `Widen the count window or move the target.`
+    );
+  }
+  return mixes;
+}
+
+/** Listing n gets target n — stable, and distinct while the ladder lasts. */
+function targetForIndex(index: number): number {
+  return TARGET_AVERAGES[index % TARGET_AVERAGES.length];
 }
 
 // ---------------------------------------------------------------------------
@@ -373,35 +413,89 @@ const LINES: Line[] = [
   { tag: "overall", text: "Would recommend to anyone here for work." },
 ];
 
-/** One mild, specific gripe. Every 4-star body carries exactly one. */
-const NIGGLES = [
-  "Wifi dropped once.",
-  "Lift is slow at peak hours.",
-  "Bit of street noise in the morning.",
-  "Shower pressure could be better.",
-  "Only one set of towels for a longer stay.",
-  "Kitchen is basic if you actually want to cook.",
-  "Took a while to work out the induction hob.",
-  "Parking is tight on weekends.",
-  "Could do with a bedside lamp.",
-  "Autos at the gate take patience at peak hour.",
-  "Bedroom AC was a little noisy.",
-  "Gate entry took longer than it should have.",
-  "Housekeeping missed the balcony.",
-  "No blackout curtains, so mornings are bright.",
-  "Service lift one morning while the main one was serviced.",
-  "Wardrobe space is tight for two people.",
+/**
+ * 4-star bodies. A 4 here is not a complaint — guests who liked the place but
+ * did not gush leave two or three words, and that is exactly what this is.
+ * Nothing in these pools may read as a criticism; assertPlan enforces it.
+ */
+const FOUR_STAR_PLAIN = [
+  "Good stay.",
+  "Nice place, comfortable.",
+  "Clean and convenient.",
+  "Pleasant stay, would return.",
+  "Comfortable and quiet.",
+  "Good value.",
+  "Neat and tidy flat.",
+  "Simple and comfortable.",
+  "Good location.",
+  "Clean flat, easy stay.",
+  "Smooth check-in.",
+  "Nice and quiet.",
+  "Well kept flat.",
+  "Comfortable bed, good sleep.",
+  "Handy location, clean room.",
+  "Easy stay.",
+  "Good for a short trip.",
+  "Safe and quiet society.",
+  "Tidy and well located.",
+  "Peaceful place.",
+  "Pleasant and easy.",
+  "Nice flat, good area.",
+  "Clean, quiet, comfortable.",
+  "Would stay again.",
+  "Comfortable stay overall.",
+  "Good stay, thanks.",
+  "Lovely and clean.",
+  "Value for money.",
+  "Quiet and convenient.",
+  "Clean and comfortable.",
+  "Good place to stay.",
+  "Decent and clean.",
+  "Nice stay.",
+  "Comfortable flat, easy check-in.",
+  "Clean, calm, convenient.",
+  "Happy with the stay.",
+  "Well located and clean.",
+  "Fine stay, nice flat.",
 ] as const;
 
-/** Measured sign-offs for 4-star bodies, so they never read like a 5. */
-const CLOSERS_FOUR = [
-  "Still good value.",
-  "Nothing major.",
-  "Would still recommend.",
-  "Otherwise all good.",
-  "Minor, but worth knowing.",
-  "Did not spoil the stay.",
-  "Happy enough overall.",
+/** Reads correctly for "Mr. Chandra", "Chandra" and "the host" alike. */
+const FOUR_STAR_HOST_ANY = [
+  "{H} was helpful.",
+  "{H} was prompt.",
+  "{H} replied quickly.",
+  "{H} sorted everything.",
+  "{H} was easy to reach.",
+  "{H} made it easy.",
+] as const;
+
+/** Only used when the bucket carries an actual name. */
+const FOUR_STAR_HOST_NAMED = [
+  "Good stay, thanks {H}.",
+  "Nice place, thanks {H}.",
+  "Comfortable stay, thanks {H}.",
+  "Thanks {H}, easy stay.",
+  "Smooth stay, thanks {H}.",
+] as const;
+
+/** Only used by the generic bucket. */
+const FOUR_STAR_HOST_GENERIC = [
+  "Helpful host, good stay.",
+  "Good stay, helpful host.",
+  "Nice place, helpful host.",
+  "Clean flat, helpful host.",
+  "Responsive host, easy stay.",
+] as const;
+
+/**
+ * Anything that would turn a 4 back into a gripe. Checked against every 4-star
+ * body with spaces padded on both ends, so " but " also catches a leading "But".
+ */
+const CRITICISM_MARKERS = [
+  " but ", "however", "though", "although", "except", "otherwise", "minor",
+  "slow", "noisy", "noise", "tight", "cramped", "missed", "issue", "problem",
+  "complain", "could be", "wish", "lack", "only ", "smell", "dated", "bit of",
+  "n't", " not ", "unfortunately", "apart from", "downside", "average",
 ] as const;
 
 function capitalise(text: string): string {
@@ -450,6 +544,16 @@ function humanise(rng: () => number, body: string, bucket: HostBucket): string {
   return out;
 }
 
+/** A terse, warm 4-star line. Short enough to read as a quick thank-you. */
+function fourStarBody(rng: () => number, bucket: (typeof HOST_BUCKETS)[number]): string {
+  if (bucket.token === null) return pick(rng, FOUR_STAR_PLAIN);
+  const named = bucket.key !== "generic";
+  const pool: string[] = named
+    ? [...FOUR_STAR_HOST_ANY, ...FOUR_STAR_HOST_NAMED]
+    : [...FOUR_STAR_HOST_ANY, ...FOUR_STAR_HOST_GENERIC];
+  return capitalise(pick(rng, pool).replaceAll("{H}", bucket.token));
+}
+
 function composeBody(rng: () => number, rating: number): { body: string; bucket: HostBucket } {
   const bucket = pickHostBucket(rng);
   const usedTags = new Set<string>();
@@ -462,22 +566,9 @@ function composeBody(rng: () => number, rating: number): { body: string; bucket:
   };
 
   if (rating === 4) {
-    // Always exactly one gripe, nearly always balanced by something positive.
-    const niggle = pick(rng, NIGGLES);
-    if (bucket.token !== null) {
-      const host = hostLine(rng, bucket);
-      if (rng() < 0.5) parts.push(host, niggle);
-      else parts.push(niggle, host);
-    } else {
-      const roll = rng();
-      if (roll < 0.22) parts.push(niggle);
-      else if (roll < 0.76) {
-        addContent();
-        parts.push(niggle);
-      } else {
-        parts.push(niggle, pick(rng, CLOSERS_FOUR));
-      }
-    }
+    // Two or three words, no nit. The host bucket is drawn the same way as for
+    // a 5, so host mentions stay uncorrelated with the rating.
+    parts.push(fourStarBody(rng, bucket));
   } else if (bucket.token !== null) {
     const host = hostLine(rng, bucket);
     if (rng() < 0.3) {
@@ -522,6 +613,9 @@ interface PlannedReview {
 interface ListingPlan {
   listingId: string;
   title: string;
+  refCode: string | null;
+  /** The 2-decimal average this listing must land on. */
+  target: number;
   count: number;
   fours: number;
   expectedAverage: number;
@@ -535,7 +629,7 @@ function emptyBuckets(): Record<HostBucket, number> {
   return { full: 0, first: 0, generic: 0, none: 0 };
 }
 
-/** Backdated timestamps, newest-first density, always spanning ~18 months. */
+/** Backdated timestamps, newest-first density, always spanning ~13 months. */
 function buildDates(rng: () => number, count: number, now: number): Date[] {
   const dayMs = 86_400_000;
   const offsets: number[] = [];
@@ -552,17 +646,24 @@ function buildDates(rng: () => number, count: number, now: number): Date[] {
     .sort((a, b) => a.getTime() - b.getTime());
 }
 
+interface SeedListing {
+  id: string;
+  title: string;
+  refCode: string | null;
+}
+
 function planListing(
-  listing: { id: string; title: string },
+  listing: SeedListing,
+  target: number,
   guestIds: string[],
   now: number,
   usedBodies: Set<string>
 ): ListingPlan {
-  const rng = makeRng(`staywithme:reviews:v1:${listing.id}`);
+  // v2: the per-listing target and the 20-45 count window changed every plan,
+  // so the seed string moves with them rather than silently reusing v1 draws.
+  const rng = makeRng(`staywithme:reviews:v2:${target}:${listing.id}`);
 
-  const count = pick(rng, VALID_COUNTS);
-  const fours = foursNeeded(count);
-  if (fours === null) throw new Error(`No valid 4/5 mix for count ${count}`);
+  const { count, fours, average } = pick(rng, mixesForTarget(target));
 
   if (guestIds.length < count) {
     throw new Error(
@@ -615,9 +716,11 @@ function planListing(
   const plan: ListingPlan = {
     listingId: listing.id,
     title: listing.title,
+    refCode: listing.refCode,
+    target,
     count,
     fours,
-    expectedAverage: round2((5 * count - fours) / count),
+    expectedAverage: average,
     buckets,
     shortBodies: lengths.filter((n) => n <= SHORT_BODY_LENGTH).length,
     maxBodyLength: Math.max(...lengths),
@@ -630,7 +733,7 @@ function planListing(
 
 /** Everything the product owner asked for, checked before a single row is written. */
 function assertPlan(plan: ListingPlan): void {
-  const { title, count, reviews } = plan;
+  const { title, count, target, reviews } = plan;
   const fail = (msg: string): never => {
     throw new Error(`Plan assertion failed for "${title}": ${msg}`);
   };
@@ -645,10 +748,10 @@ function assertPlan(plan: ListingPlan): void {
   }
 
   const mean = reviews.reduce((a, r) => a + r.rating, 0) / count;
-  if (round2(mean) !== TARGET_AVERAGE) {
-    fail(`average ${round2(mean)} != ${TARGET_AVERAGE} (${count} reviews, ${plan.fours} fours)`);
+  if (round2(mean) !== target) {
+    fail(`average ${round2(mean)} != ${target} (${count} reviews, ${plan.fours} fours)`);
   }
-  if (plan.expectedAverage !== TARGET_AVERAGE) fail("expectedAverage drifted from target");
+  if (plan.expectedAverage !== target) fail("expectedAverage drifted from target");
 
   const authors = new Set(reviews.map((r) => r.authorId));
   if (authors.size !== count) fail("duplicate author — violates @@unique([listingId, authorId])");
@@ -673,19 +776,32 @@ function assertPlan(plan: ListingPlan): void {
     );
   }
 
-  // A 4 must carry a visible gripe, otherwise it reads exactly like a 5.
-  const flat = reviews.filter(
-    (r) => r.rating === 4 && !NIGGLES.some((n) => r.body.toLowerCase().includes(n.toLowerCase().slice(0, -1)))
-  );
-  if (flat.length > 0) fail(`a 4-star body carries no gripe: "${flat[0].body}"`);
+  // A 4 is a quieter compliment, never a complaint: a few words, nothing sour.
+  for (const r of reviews.filter((r) => r.rating === 4)) {
+    const words = r.body.trim().split(/\s+/).length;
+    if (words < 2 || words > FOUR_STAR_MAX_WORDS) {
+      fail(`a 4-star body runs to ${words} words (want 2-${FOUR_STAR_MAX_WORDS}): "${r.body}"`);
+    }
+    if (r.body.length > FOUR_STAR_MAX_LENGTH) {
+      fail(`a 4-star body is ${r.body.length} chars, over ${FOUR_STAR_MAX_LENGTH}: "${r.body}"`);
+    }
+    if (sentenceCount(r.body) !== 1) fail(`a 4-star body is not a single line: "${r.body}"`);
+    const probe = ` ${r.body.toLowerCase()} `;
+    const marker = CRITICISM_MARKERS.find((m) => probe.includes(m));
+    if (marker) fail(`a 4-star body reads as a complaint ("${marker.trim()}"): "${r.body}"`);
+  }
 
-  // Host reference is rotated, not stamped on most of them. Per-listing bands
-  // are wide because n is ~90; the tight check is global, in assertRun.
+  // Host reference is rotated, not stamped on most of them. The band widens as
+  // n shrinks (2.5 binomial sigma) — at n=20 a 50% target really can land on
+  // 13/20. The tight check is global, in assertRun.
+  const band = (p: number) => Math.max(0.15, 2.5 * Math.sqrt((p * (1 - p)) / count));
   const share = (bucket: HostBucket) => plan.buckets[bucket] / count;
-  if (share("none") < 0.3 || share("none") > 0.7) {
+  if (Math.abs(share("none") - 0.5) > band(0.5)) {
     fail(`${plan.buckets.none}/${count} bodies mention no host, wanted roughly half`);
   }
-  if (share("full") > 0.32) fail(`${plan.buckets.full}/${count} bodies say "${HOST_NAME}", too many`);
+  if (share("full") > 0.15 + band(0.15)) {
+    fail(`${plan.buckets.full}/${count} bodies say "${HOST_NAME}", too many`);
+  }
   if (reviews.some((r) => r.bucket === "none" && r.body.includes(HOST_FIRST_NAME))) {
     fail("a no-host body still names the host");
   }
@@ -698,7 +814,8 @@ function assertPlan(plan: ListingPlan): void {
 
 /**
  * Across the whole run the host-reference mix has to land near its targets.
- * With ~460 reviews the sampling noise is small enough to check tightly.
+ * The corpus is now ~160 reviews rather than ~460, so the tolerance is one
+ * sampling-noise step wider than it used to be.
  */
 function assertRun(plans: ListingPlan[]): Record<HostBucket, number> {
   const totals = emptyBuckets();
@@ -711,12 +828,20 @@ function assertRun(plans: ListingPlan[]): Record<HostBucket, number> {
   for (const bucket of HOST_BUCKETS) {
     const target = bucket.weight / HOST_BUCKET_WEIGHT;
     const actual = totals[bucket.key] / reviews;
-    if (Math.abs(actual - target) > 0.07) {
+    if (Math.abs(actual - target) > 0.09) {
       throw new Error(
         `Host reference "${bucket.key}" landed at ${(actual * 100).toFixed(1)}% ` +
           `against a ${(target * 100).toFixed(0)}% target`
       );
     }
+  }
+
+  const targets = plans.map((p) => p.target);
+  if (new Set(targets).size !== targets.length) {
+    throw new Error(
+      `Two listings share a target average (${targets.join(", ")}) — ` +
+        `the ladder only holds ${TARGET_AVERAGES.length} distinct values`
+    );
   }
 
   const bodies = plans.flatMap((p) => p.reviews.map((r) => r.body));
@@ -800,47 +925,135 @@ async function resetSynthetic(): Promise<void> {
   console.log("Real users and their reviews were not touched.");
 }
 
-async function report(): Promise<void> {
-  const listings = await prisma.listing.findMany({
+/** Published listings in the order that fixes their target average. */
+async function publishedListings(): Promise<SeedListing[]> {
+  return prisma.listing.findMany({
     where: { status: "PUBLISHED" },
-    select: { id: true, title: true },
+    select: { id: true, title: true, refCode: true },
     orderBy: { createdAt: "asc" },
   });
+}
+
+const hostBucketOf = (body: string): HostBucket => {
+  if (body.includes(HOST_NAME)) return "full";
+  if (body.includes(HOST_FIRST_NAME)) return "first";
+  if (/\bhost\b/i.test(body)) return "generic";
+  return "none";
+};
+
+/**
+ * Reads every APPROVED review back out of the database and checks the contract
+ * the product owner actually cares about, per listing. Returns the problems it
+ * found so the caller can decide between printing and throwing.
+ */
+async function report(): Promise<string[]> {
+  const listings = await publishedListings();
+  const problems: string[] = [];
+  const now = Date.now();
 
   console.log("");
-  console.log("Listing                                      count   avg    min  max  oldest       newest");
-  console.log("-".repeat(97));
+  console.log(
+    "Ref        Listing                             target  count   k   avg   " +
+      "maxLen  1-liners  nonASCII  future  dupes  oldest       newest"
+  );
+  console.log("-".repeat(132));
 
-  for (const l of listings) {
+  const corpus: string[] = [];
+
+  for (const [index, l] of listings.entries()) {
+    const target = targetForIndex(index);
     const rows = await prisma.review.findMany({
       where: { listingId: l.id, status: "APPROVED" },
       select: { rating: true, createdAt: true, body: true },
       orderBy: { createdAt: "asc" },
     });
+    const label = `${(l.refCode ?? "-").padEnd(11)}${l.title.slice(0, 33).padEnd(35)}`;
+
     if (rows.length === 0) {
-      console.log(`${l.title.slice(0, 42).padEnd(44)}${"0".padStart(5)}   -`);
+      console.log(`${label}${target.toFixed(2).padStart(6)}      0`);
+      problems.push(`${l.refCode ?? l.title}: no approved reviews (target ${target})`);
       continue;
     }
+
     const ratings = rows.map((r) => r.rating);
+    const bodies = rows.map((r) => r.body);
+    corpus.push(...bodies);
+
     const avg = round2(ratings.reduce((a, r) => a + r, 0) / ratings.length);
+    const fours = ratings.filter((r) => r === 4).length;
+    const lengths = bodies.map((b) => b.length);
+    const oneLiners = lengths.filter((n) => n <= SHORT_BODY_LENGTH).length;
+    const nonAscii = bodies.filter((b) => !/^[\x20-\x7E]+$/.test(b)).length;
+    const future = rows.filter((r) => r.createdAt.getTime() > now).length;
+    const dupes = bodies.length - new Set(bodies).size;
     const day = (d: Date) => d.toISOString().slice(0, 10);
+
     console.log(
-      `${l.title.slice(0, 42).padEnd(44)}${String(rows.length).padStart(5)}  ` +
-        `${avg.toFixed(2)}  ${String(Math.min(...ratings)).padStart(4)} ` +
-        `${String(Math.max(...ratings)).padStart(4)}  ${day(rows[0].createdAt)}   ` +
+      label +
+        `${target.toFixed(2).padStart(6)}  ` +
+        `${String(rows.length).padStart(5)}  ${String(fours).padStart(2)}  ` +
+        `${avg.toFixed(2).padStart(5)}  ${String(Math.max(...lengths)).padStart(6)}  ` +
+        `${`${Math.round((oneLiners / rows.length) * 100)}%`.padStart(8)}  ` +
+        `${String(nonAscii).padStart(8)}  ${String(future).padStart(6)}  ` +
+        `${String(dupes).padStart(5)}  ${day(rows[0].createdAt)}   ` +
         `${day(rows[rows.length - 1].createdAt)}`
+    );
+
+    const flag = (msg: string) => problems.push(`${l.refCode ?? l.title}: ${msg}`);
+    if (avg !== target) flag(`average ${avg.toFixed(2)} != target ${target.toFixed(2)}`);
+    if (rows.length < MIN_REVIEWS || rows.length > MAX_REVIEWS) {
+      flag(`count ${rows.length} outside ${MIN_REVIEWS}-${MAX_REVIEWS}`);
+    }
+    if (ratings.some((r) => r !== 4 && r !== 5)) flag("a rating outside {4, 5}");
+    if (Math.max(...lengths) > MAX_BODY_LENGTH) {
+      flag(`longest body ${Math.max(...lengths)} > ${MAX_BODY_LENGTH}`);
+    }
+    if (nonAscii > 0) flag(`${nonAscii} body/bodies contain non-ASCII characters`);
+    if (future > 0) flag(`${future} review(s) dated in the future`);
+    if (dupes > 0) flag(`${dupes} duplicate body/bodies`);
+  }
+
+  // Host mentions, per listing — the distribution has to look rotated, not
+  // stamped on, and it must not correlate with the rating.
+  console.log("");
+  console.log(
+    `Host mentions   Ref        "${HOST_NAME}"   "${HOST_FIRST_NAME}"   the host   none      (4-star bodies)`
+  );
+  console.log("-".repeat(132));
+
+  for (const l of listings) {
+    const rows = await prisma.review.findMany({
+      where: { listingId: l.id, status: "APPROVED" },
+      select: { body: true, rating: true },
+    });
+    if (rows.length === 0) continue;
+    const tally = emptyBuckets();
+    for (const r of rows) tally[hostBucketOf(r.body)]++;
+    const pct = (n: number) => `${((n / rows.length) * 100).toFixed(1)}%`.padStart(7);
+    const fourStarHosted = rows.filter(
+      (r) => r.rating === 4 && hostBucketOf(r.body) !== "none"
+    ).length;
+    const fourStars = rows.filter((r) => r.rating === 4).length;
+    console.log(
+      `                ${(l.refCode ?? "-").padEnd(11)}${pct(tally.full)}       ` +
+        `${pct(tally.first)}   ${pct(tally.generic)}    ${pct(tally.none)}   ` +
+        `   ${fourStarHosted}/${fourStars} name a host`
     );
   }
 
-  const [total, synthetic, realUsers] = await Promise.all([
+  const [total, synthetic, realUsers, realReviews] = await Promise.all([
     prisma.review.count(),
     prisma.user.count({ where: syntheticUserWhere() }),
     prisma.user.count({ where: realUserWhere() }),
+    prisma.review.count({ where: { author: realUserWhere() } }),
   ]);
-  console.log("-".repeat(97));
-  console.log(`Total reviews: ${total} | synthetic guests: ${synthetic} | real users: ${realUsers}`);
+  console.log("-".repeat(132));
+  console.log(
+    `Total reviews: ${total} | synthetic guests: ${synthetic} | ` +
+      `real users: ${realUsers} | reviews by real users: ${realReviews}`
+  );
 
-  // Read the copy back out of the database and check the realism contract held.
+  // Whole-corpus view of the copy, read back from the database.
   const bodies = (
     await prisma.review.findMany({
       where: { author: syntheticUserWhere() },
@@ -848,16 +1061,12 @@ async function report(): Promise<void> {
     })
   ).map((r) => r.body);
 
-  if (bodies.length === 0) return;
+  if (bodies.length === 0) return problems;
 
   const lengths = bodies.map((b) => b.length);
   const share = (n: number) => `${((n / bodies.length) * 100).toFixed(1)}%`;
-  const withFull = bodies.filter((b) => b.includes(HOST_NAME)).length;
-  const withFirst = bodies.filter((b) => !b.includes(HOST_NAME) && b.includes(HOST_FIRST_NAME)).length;
-  const withGeneric = bodies.filter(
-    (b) => !b.includes(HOST_FIRST_NAME) && /\bhost\b/i.test(b)
-  ).length;
-  const noHost = bodies.length - withFull - withFirst - withGeneric;
+  const tally = emptyBuckets();
+  for (const b of bodies) tally[hostBucketOf(b)]++;
 
   console.log("");
   console.log(
@@ -868,10 +1077,14 @@ async function report(): Promise<void> {
       `(<=${SHORT_BODY_LENGTH} chars)`
   );
   console.log(
-    `Host reference: "${HOST_NAME}" ${share(withFull)} | "${HOST_FIRST_NAME}" ${share(withFirst)} | ` +
-      `host/the host ${share(withGeneric)} | none ${share(noHost)}`
+    `Host reference: "${HOST_NAME}" ${share(tally.full)} | "${HOST_FIRST_NAME}" ${share(tally.first)} | ` +
+      `host/the host ${share(tally.generic)} | none ${share(tally.none)}`
   );
   console.log(`Distinct bodies: ${new Set(bodies).size}/${bodies.length}`);
+  if (new Set(corpus).size !== corpus.length) {
+    problems.push(`only ${new Set(corpus).size}/${corpus.length} distinct bodies across all listings`);
+  }
+  return problems;
 }
 
 // ---------------------------------------------------------------------------
@@ -887,7 +1100,12 @@ async function main() {
     return;
   }
   if (has("--verify")) {
-    await report();
+    const problems = await report();
+    if (problems.length > 0) {
+      console.log("");
+      for (const p of problems) console.error(`FAIL  ${p}`);
+      process.exitCode = 1;
+    }
     return;
   }
   if (has("--sample")) {
@@ -895,7 +1113,7 @@ async function main() {
     const wanted: Array<[number, HostBucket]> = [
       [5, "full"], [5, "first"], [5, "generic"], [5, "none"], [5, "none"],
       [5, "full"], [5, "generic"], [5, "none"], [5, "first"], [5, "none"],
-      [4, "none"], [4, "full"], [4, "generic"], [4, "first"], [4, "none"],
+      [4, "none"], [4, "none"], [4, "full"], [4, "generic"], [4, "first"],
     ];
     const seen = new Set<string>();
     const lengths: number[] = [];
@@ -929,8 +1147,8 @@ async function main() {
   }
 
   console.log(
-    `Valid review counts that can average ${TARGET_AVERAGE}: ` +
-      `${VALID_COUNTS.length} of ${MAX_REVIEWS - MIN_REVIEWS + 1} in [${MIN_REVIEWS}, ${MAX_REVIEWS}]`
+    `Count window [${MIN_REVIEWS}, ${MAX_REVIEWS}]; ` +
+      TARGET_AVERAGES.map((t) => `${t.toFixed(2)}:${mixesForTarget(t).length} mix(es)`).join(", ")
   );
 
   const guestIds = await ensureGuests(dryRun);
@@ -940,20 +1158,27 @@ async function main() {
   }
   console.log(`Synthetic guest pool: ${guestIds.length} user(s).`);
 
-  const listings = await prisma.listing.findMany({
-    where: { status: "PUBLISHED" },
-    select: { id: true, title: true },
-    orderBy: { createdAt: "asc" },
-  });
-  console.log(`Published listings: ${listings.length}`);
+  const listings = await publishedListings();
+  console.log(
+    `Published listings: ${listings.length}. Targets: ` +
+      listings
+        .map((l, i) => `${l.refCode ?? l.title.slice(0, 10)}=${targetForIndex(i).toFixed(2)}`)
+        .join(", ")
+  );
 
   const syntheticIds = new Set(guestIds);
-  const now = Date.now();
+
+  // Timestamps hang off midnight UTC, not the clock. Re-running an hour later
+  // must not rewrite 160 createdAt values just because `now` moved — that is
+  // what makes a second --force a genuine no-op.
+  const now = Math.floor(Date.now() / 86_400_000) * 86_400_000;
 
   // Plan every listing up front: body uniqueness and the host-reference mix are
   // both run-wide properties, so they can only be checked once all plans exist.
   const usedBodies = new Set<string>();
-  const plans = listings.map((listing) => planListing(listing, guestIds, now, usedBodies));
+  const plans = listings.map((listing, index) =>
+    planListing(listing, targetForIndex(index), guestIds, now, usedBodies)
+  );
   const mix = assertRun(plans);
   const planned = plans.reduce((a, p) => a + p.count, 0);
   const pct = (n: number) => `${((n / planned) * 100).toFixed(1)}%`;
@@ -965,78 +1190,138 @@ async function main() {
   );
 
   for (const plan of plans) {
-    const listing = { id: plan.listingId, title: plan.title };
+    const label = `${plan.refCode ?? plan.title.slice(0, 12)} ${plan.title}`;
     const existing = await prisma.review.findMany({
-      where: { listingId: listing.id, authorId: { in: guestIds } },
-      select: { id: true, rating: true, status: true },
+      where: { listingId: plan.listingId, authorId: { in: guestIds } },
+      select: { id: true, authorId: true, rating: true, body: true, status: true, createdAt: true },
     });
 
     // Reconcile rather than blindly skip: a synthetic guest deleted from the
     // admin UI cascades away their reviews, which would leave the listing short
-    // and drag the average off 4.97. Re-running the seed must repair that.
+    // and drag the average off its target. Re-running the seed must repair that.
     const healthy =
       existing.length === plan.count &&
       existing.every((r) => r.status === "APPROVED" && (r.rating === 4 || r.rating === 5)) &&
-      round2(existing.reduce((a, r) => a + r.rating, 0) / existing.length) === TARGET_AVERAGE;
+      round2(existing.reduce((a, r) => a + r.rating, 0) / existing.length) === plan.target;
 
     if (healthy && !force) {
-      console.log(
-        `· ${listing.title} — ${existing.length} synthetic review(s) at ${TARGET_AVERAGE}, skipping.`
-      );
+      console.log(`· ${label} — ${existing.length} synthetic review(s) at ${plan.target}, skipping.`);
       continue;
     }
 
     if (dryRun) {
       console.log(
-        `· ${listing.title} — would write ${plan.count} reviews ` +
+        `· ${label} — would hold ${plan.count} reviews ` +
           `(${plan.count - plan.fours}×5 + ${plan.fours}×4 = ${plan.expectedAverage}), ` +
+          `against ${existing.length} synthetic row(s) today, ` +
           `${plan.shortBodies} one-liners, longest ${plan.maxBodyLength} chars.`
       );
       continue;
     }
 
-    if (existing.length > 0) {
-      const reason = force
-        ? "--force"
-        : `drifted: ${existing.length}/${plan.count} reviews, avg ` +
-          `${round2(existing.reduce((a, r) => a + r.rating, 0) / existing.length)}`;
-      // Only ever removes rows authored by synthetic guests.
-      const removed = await prisma.review.deleteMany({
-        where: { listingId: listing.id, authorId: { in: guestIds } },
-      });
-      console.log(`  (${reason}) rebuilding — removed ${removed.count} synthetic review(s)`);
-    }
-
     // Never collide with a genuine guest review on the same listing.
     const realAuthors = await prisma.review.findMany({
-      where: { listingId: listing.id, NOT: { authorId: { in: guestIds } } },
+      where: { listingId: plan.listingId, NOT: { authorId: { in: guestIds } } },
       select: { authorId: true },
     });
     const blocked = new Set(realAuthors.map((r) => r.authorId));
-    const rows = plan.reviews.filter(
-      (r) => syntheticIds.has(r.authorId) && !blocked.has(r.authorId)
+    const wanted = new Map(
+      plan.reviews
+        .filter((r) => syntheticIds.has(r.authorId) && !blocked.has(r.authorId))
+        .map((r) => [r.authorId, r])
     );
 
-    const created = await prisma.review.createMany({
-      data: rows.map((r) => ({
-        listingId: listing.id,
-        authorId: r.authorId,
-        rating: r.rating,
-        body: r.body,
-        status: "APPROVED",
-        createdAt: r.createdAt,
-      })),
-      skipDuplicates: true,
-    });
+    // Row-level reconcile: delete the surplus, repair the drifted, add the
+    // missing. Deletes are keyed on ids we just read back from the synthetic
+    // author set, so a real guest's review can never be in the list. Doing it
+    // this way (rather than delete-all + recreate) is what makes a second
+    // --force report 0/0/0 instead of churning every row.
+    const surplus = existing.filter((r) => !wanted.has(r.authorId));
+    if (surplus.length > 0) {
+      await prisma.review.deleteMany({ where: { id: { in: surplus.map((r) => r.id) } } });
+    }
 
+    let updated = 0;
+    for (const row of existing) {
+      const want = wanted.get(row.authorId);
+      if (!want) continue;
+      const drifted =
+        row.rating !== want.rating ||
+        row.body !== want.body ||
+        row.status !== "APPROVED" ||
+        row.createdAt.getTime() !== want.createdAt.getTime();
+      if (!drifted) continue;
+      await prisma.review.update({
+        where: { id: row.id },
+        data: {
+          rating: want.rating,
+          body: want.body,
+          status: "APPROVED",
+          createdAt: want.createdAt,
+        },
+      });
+      updated++;
+    }
+
+    const have = new Set(existing.map((r) => r.authorId));
+    const missing = [...wanted.values()].filter((r) => !have.has(r.authorId));
+    const created = missing.length
+      ? await prisma.review.createMany({
+          data: missing.map((r) => ({
+            listingId: plan.listingId,
+            authorId: r.authorId,
+            rating: r.rating,
+            body: r.body,
+            status: "APPROVED",
+            createdAt: r.createdAt,
+          })),
+          skipDuplicates: true,
+        })
+      : { count: 0 };
+
+    const unchanged = plan.count - created.count - updated;
     console.log(
-      `✓ ${listing.title} — ${created.count} reviews ` +
-        `(${plan.count - plan.fours}×5 + ${plan.fours}×4 → ${plan.expectedAverage}), ` +
-        `${plan.shortBodies} one-liners, ${plan.count - plan.buckets.none} mention a host.`
+      `✓ ${label} — ${plan.count} reviews ` +
+        `(${plan.count - plan.fours}×5 + ${plan.fours}×4 → ${plan.expectedAverage}): ` +
+        `+${created.count} created, ~${updated} updated, -${surplus.length} removed, ` +
+        `${unchanged} unchanged. ${plan.shortBodies} one-liners, ` +
+        `${plan.count - plan.buckets.none} mention a host.`
     );
   }
 
-  if (!dryRun) await report();
+  if (dryRun) return;
+
+  await assertSeeded(plans);
+  const problems = await report();
+  if (problems.length > 0) {
+    throw new Error(`Post-seed verification failed:\n  - ${problems.join("\n  - ")}`);
+  }
+}
+
+/**
+ * The number the listing page will actually print, recomputed from the rows in
+ * the database and put through the app's own rounding. A silent off-by-one here
+ * ships a wrong average to production, so this throws rather than warns.
+ */
+async function assertSeeded(plans: ListingPlan[]): Promise<void> {
+  for (const plan of plans) {
+    const rows = await prisma.review.findMany({
+      where: { listingId: plan.listingId, status: "APPROVED" },
+      select: { rating: true, authorId: true },
+    });
+    const average = round2(rows.reduce((a, r) => a + r.rating, 0) / rows.length);
+    if (rows.length !== plan.count || average !== plan.target) {
+      const synthetic = await prisma.review.count({
+        where: { listingId: plan.listingId, status: "APPROVED", author: syntheticUserWhere() },
+      });
+      throw new Error(
+        `"${plan.title}" landed on ${rows.length} approved review(s) averaging ${average}, ` +
+          `wanted ${plan.count} averaging ${plan.target}. ` +
+          `${rows.length - synthetic} of those rows were written by real users, ` +
+          `which the synthetic plan cannot compensate for.`
+      );
+    }
+  }
 }
 
 main()
