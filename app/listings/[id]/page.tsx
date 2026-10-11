@@ -229,7 +229,10 @@ export default async function ListingPage({
             {/* Where you'll be — renders only when an admin has added a map link */}
             {listing.mapsUrl && (
               <section className="border-b py-6">
-                <h3 className="mb-4 text-lg font-semibold">Where you&apos;ll be</h3>
+                <h3 className="text-lg font-semibold">Where you&apos;ll be</h3>
+                <p className="mb-4 mt-1 text-sm text-muted-foreground">
+                  Tap the map to open the exact location in Google Maps.
+                </p>
                 <MapPreview
                   mapsUrl={listing.mapsUrl}
                   address={`${listing.city}, ${listing.country}`}

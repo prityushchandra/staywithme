@@ -6,14 +6,19 @@ import { Button } from "@/components/ui/button";
 import { WhatsAppContactButton } from "@/components/whatsapp-contact-button";
 import { useToast } from "@/components/ui/toast";
 import { useBooking, type ReserveCta } from "@/components/booking-context";
-import { datePromptMessage, isSufficientlyVisible } from "@/lib/reserve-prompt";
+import {
+  BOOKING_TAB_INSET,
+  NAVBAR_INSET,
+  datePromptMessage,
+  isSufficientlyVisible,
+} from "@/lib/reserve-prompt";
 import {
   compareQuote,
   parseFreshQuote,
   type FreshQuote,
   type QuoteOutcome,
 } from "@/lib/quote-check";
-import { cn } from "@/lib/utils";
+import { cn, prefersReducedMotion } from "@/lib/utils";
 
 // The page's ONE Reserve button. The booking card resolves what Reserve should
 // do and publishes it to the booking context; only the active surface (the card
@@ -33,10 +38,6 @@ import { cn } from "@/lib/utils";
 
 /** The booking card, which owns the date picker and the price breakdown. */
 const BOOK_SECTION_ID = "book";
-/** The sticky navbar covers the top of the viewport. */
-const NAVBAR_INSET = 64;
-/** On compact screens the floating booking tab covers the bottom. */
-const BOOKING_TAB_INSET = 96;
 /** Abandon the live re-check after this and let the booking through. */
 const QUOTE_TIMEOUT_MS = 4000;
 /** How long an already-fetched quote stays good enough to act on. */
@@ -53,13 +54,6 @@ type QuoteCheck = {
   /** The settled result, or null while the request is still in flight. */
   peek: () => QuoteResult | null;
 };
-
-function prefersReducedMotion() {
-  return (
-    typeof window !== "undefined" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
 
 /**
  * Below `sm` the date picker opens as a fixed fullscreen overlay that locks

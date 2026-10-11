@@ -18,6 +18,18 @@ export type ViewportInsets = { top?: number; bottom?: number };
 export const VISIBLE_RATIO_THRESHOLD = 0.4;
 
 /**
+ * The total and guest count only count as "seen" when they're all but fully in
+ * the clear band — unlike a section heading, a half-visible price is useless.
+ */
+export const SUMMARY_VISIBLE_THRESHOLD = 0.98;
+
+/** The sticky navbar covers the top of the viewport. */
+export const NAVBAR_INSET = 64;
+
+/** On compact screens the floating booking tab covers the bottom. */
+export const BOOKING_TAB_INSET = 96;
+
+/**
  * Fraction of `rect` sitting inside the unobstructed band of the viewport.
  *
  * A section taller than that band can never show a large fraction of its own
@@ -70,4 +82,30 @@ export function datePromptMessage(
   if (needsCheckOut && !needsCheckIn) return "Please pick a checkout date";
   if (needsCheckIn && !needsCheckOut) return "Please pick a check-in date";
   return "Please choose your travel dates";
+}
+
+/**
+ * Should closing the date picker carry the guest down to the price summary?
+ *
+ * Only when they actually settled on a *new* stay inside the picker. Dismissing
+ * it, or re-opening and closing on the stay that was already chosen, must leave
+ * the page where it was — an unasked-for scroll is worse than none.
+ *
+ * `rangeBefore` is the stay as it stood when the picker opened (`null` when the
+ * picker was never seen to open, e.g. on first mount) and `rangeAfter` the stay
+ * once it closed, both as an opaque key; an empty string means "no complete stay".
+ */
+export function shouldRevealSummary(opts: {
+  rangeBefore: string | null;
+  rangeAfter: string;
+  isCompactLayout: boolean;
+}): boolean {
+  const { rangeBefore, rangeAfter, isCompactLayout } = opts;
+  // From `lg` up the summary lives in a sticky card that is already on screen,
+  // and scrolling a stuck element only runs the page to the end of its sticky
+  // range without ever bringing the element closer.
+  if (!isCompactLayout) return false;
+  if (rangeBefore === null) return false;
+  if (!rangeAfter) return false;
+  return rangeAfter !== rangeBefore;
 }

@@ -1,14 +1,22 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { PricingBreakdown } from "@/components/pricing-breakdown";
 import { ReserveButton } from "@/components/reserve-button";
 import { useBooking, type ReserveCta } from "@/components/booking-context";
 import { computePricing, computeStayBase, formatINR } from "@/lib/pricing";
-import type { MissingTripField } from "@/lib/reserve-prompt";
+import {
+  BOOKING_TAB_INSET,
+  NAVBAR_INSET,
+  SUMMARY_VISIBLE_THRESHOLD,
+  isSufficientlyVisible,
+  shouldRevealSummary,
+  type MissingTripField,
+} from "@/lib/reserve-prompt";
 import { isRangeAvailable, toUtcDate } from "@/lib/dates";
+import { prefersReducedMotion } from "@/lib/utils";
 
 // Sticky booking card. Dates & guests come from the shared booking context, so
 // it stays in sync with the on-page availability calendar. It also resolves the
@@ -102,6 +110,13 @@ export function InquiryPanel({
     platformFeePercent,
   }).total;
 
+  /** The guests + total block the guest is sent to once a stay is complete. */
+  const summaryRef = useRef<HTMLDivElement>(null);
+  /** Identifies a complete stay, so a changed one can be told from an unchanged one. */
+  const rangeKey = hasDates ? `${checkIn}/${checkOut}` : "";
+  /** The stay the card already held when the picker was opened. */
+  const rangeAtOpen = useRef<string | null>(null);
+
   // The single Reserve action for the whole page, resolved here because this is
   // the only component with the full listing + pricing context.
   const cta = useMemo<ReserveCta>(() => {
@@ -177,6 +192,47 @@ export function InquiryPanel({
     return () => setReserveCta(null);
   }, [cta, setReserveCta]);
 
+  // Picking dates is only half the job — the guest still has to check the
+  // total and the guest count, which sit below the calendar trigger and on a
+  // small phone fall under the floating booking tab. So when the picker closes
+  // on a stay that was actually chosen in it, bring that block into view.
+  useEffect(() => {
+    if (pickerOpen) {
+      rangeAtOpen.current = rangeKey;
+      return;
+    }
+    const rangeBefore = rangeAtOpen.current;
+    rangeAtOpen.current = null;
+    if (!shouldRevealSummary({ rangeBefore, rangeAfter: rangeKey, isCompactLayout })) {
+      return;
+    }
+
+    // One frame, so the picker's body-scroll lock is released and the newly
+    // rendered breakdown is measurable before we aim at it.
+    const frame = requestAnimationFrame(() => {
+      const target = summaryRef.current;
+      if (!target) return;
+      const onScreen = isSufficientlyVisible(
+        target.getBoundingClientRect(),
+        window.innerHeight,
+        {
+          top: NAVBAR_INSET,
+          bottom: BOOKING_TAB_INSET,
+          threshold: SUMMARY_VISIBLE_THRESHOLD,
+        }
+      );
+      if (onScreen) return;
+      target.scrollIntoView({
+        behavior: prefersReducedMotion() ? "auto" : "smooth",
+        block: "center",
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+    // `rangeKey` is read, never tracked: it has to stay as it was when the
+    // picker opened so the close can tell a new stay from an unchanged one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickerOpen, isCompactLayout]);
+
   return (
     <Card className="sticky top-24">
       <CardContent className="space-y-4 p-5">
@@ -201,36 +257,38 @@ export function InquiryPanel({
           onOpenChange={setPickerOpen}
         />
 
-        <div className="space-y-3 rounded-xl border px-4 py-3">
-          <GuestStepper
-            label="Adults"
-            value={guests}
-            min={1}
-            max={maxGuests}
-            onChange={(n) => setGuests(Math.max(1, Math.min(maxGuests, n)))}
-          />
-          {maxInfants > 0 && (
-            <>
-              <div className="border-t" />
-              <GuestStepper
-                label="Infants"
-                value={infants}
-                min={0}
-                max={maxInfants}
-                onChange={(n) => setInfants(Math.max(0, Math.min(maxInfants, n)))}
-              />
-            </>
+        <div ref={summaryRef} className="space-y-4">
+          <div className="space-y-3 rounded-xl border px-4 py-3">
+            <GuestStepper
+              label="Adults"
+              value={guests}
+              min={1}
+              max={maxGuests}
+              onChange={(n) => setGuests(Math.max(1, Math.min(maxGuests, n)))}
+            />
+            {maxInfants > 0 && (
+              <>
+                <div className="border-t" />
+                <GuestStepper
+                  label="Infants"
+                  value={infants}
+                  min={0}
+                  max={maxInfants}
+                  onChange={(n) => setInfants(Math.max(0, Math.min(maxInfants, n)))}
+                />
+              </>
+            )}
+          </div>
+
+          {hasDates && (
+            <PricingBreakdown
+              basePrice={basePrice}
+              monthlyPrice={monthlyPrice}
+              platformFeePercent={platformFeePercent}
+              nights={nights}
+            />
           )}
         </div>
-
-        {hasDates && (
-          <PricingBreakdown
-            basePrice={basePrice}
-            monthlyPrice={monthlyPrice}
-            platformFeePercent={platformFeePercent}
-            nights={nights}
-          />
-        )}
 
         {datesUnavailable && (
           <div className="rounded-lg bg-amber-50 p-3 text-center text-sm text-amber-800">

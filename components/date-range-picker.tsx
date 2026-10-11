@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, CalendarDays, X } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, prefersReducedMotion } from "@/lib/utils";
 import {
   dayHint,
   getDayAvailability,
@@ -47,13 +47,7 @@ function nightsBetween(ci: string, co: string): number {
   if (!a || !b) return 0;
   return Math.round((b.getTime() - a.getTime()) / 86_400_000);
 }
-/** Media/motion probes — only ever called from effects & handlers (client-side). */
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
+/** Media probe — only ever called from effects & handlers (client-side). */
 function isAnchoredLayout(): boolean {
   return typeof window !== "undefined" && window.matchMedia("(min-width: 640px)").matches;
 }

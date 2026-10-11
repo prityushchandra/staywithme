@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   datePromptMessage,
   isSufficientlyVisible,
+  shouldRevealSummary,
   visibleRatio,
   VISIBLE_RATIO_THRESHOLD,
 } from "./reserve-prompt";
@@ -79,5 +80,52 @@ describe("datePromptMessage", () => {
 
   it("explains booked dates instead of asking for any dates", () => {
     expect(datePromptMessage("unavailable")).toMatch(/booked/i);
+  });
+});
+
+describe("shouldRevealSummary", () => {
+  const compact = { isCompactLayout: true };
+
+  it("reveals the summary when a new stay was chosen in the picker", () => {
+    expect(
+      shouldRevealSummary({ ...compact, rangeBefore: "", rangeAfter: "2026-01-02/2026-01-05" })
+    ).toBe(true);
+    expect(
+      shouldRevealSummary({
+        ...compact,
+        rangeBefore: "2026-01-02/2026-01-05",
+        rangeAfter: "2026-02-10/2026-02-14",
+      })
+    ).toBe(true);
+  });
+
+  it("stays put when the picker closed on the stay it opened with", () => {
+    expect(
+      shouldRevealSummary({
+        ...compact,
+        rangeBefore: "2026-01-02/2026-01-05",
+        rangeAfter: "2026-01-02/2026-01-05",
+      })
+    ).toBe(false);
+  });
+
+  it("stays put when the picker was dismissed without a complete stay", () => {
+    expect(shouldRevealSummary({ ...compact, rangeBefore: "", rangeAfter: "" })).toBe(false);
+  });
+
+  it("stays put when the picker was never seen to open", () => {
+    expect(
+      shouldRevealSummary({ ...compact, rangeBefore: null, rangeAfter: "2026-01-02/2026-01-05" })
+    ).toBe(false);
+  });
+
+  it("never scrolls the desktop layout, where the summary card is sticky", () => {
+    expect(
+      shouldRevealSummary({
+        isCompactLayout: false,
+        rangeBefore: "",
+        rangeAfter: "2026-01-02/2026-01-05",
+      })
+    ).toBe(false);
   });
 });
