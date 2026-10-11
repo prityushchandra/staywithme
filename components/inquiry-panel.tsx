@@ -7,6 +7,7 @@ import { PricingBreakdown } from "@/components/pricing-breakdown";
 import { ReserveButton } from "@/components/reserve-button";
 import { useBooking, type ReserveCta } from "@/components/booking-context";
 import { computePricing, computeStayBase, formatINR } from "@/lib/pricing";
+import type { MissingTripField } from "@/lib/reserve-prompt";
 import { isRangeAvailable, toUtcDate } from "@/lib/dates";
 
 // Sticky booking card. Dates & guests come from the shared booking context, so
@@ -14,13 +15,17 @@ import { isRangeAvailable, toUtcDate } from "@/lib/dates";
 // page's single "Reserve" action and publishes it to the context — on mobile the
 // floating booking tab renders that one button instead of this card, so there is
 // never a second Reserve button on screen.
+//
+// Prices and blocked nights arrive as props from the ISR-cached page, but the
+// live re-check behind Reserve can replace them mid-session; whenever it has,
+// the context's override is what this card displays and quotes.
 export function InquiryPanel({
   propertyId,
   refCode,
   propertyName,
-  basePrice,
-  monthlyPrice,
-  platformFeePercent,
+  basePrice: basePriceProp,
+  monthlyPrice: monthlyPriceProp,
+  platformFeePercent: platformFeePercentProp,
   maxGuests,
   maxInfants = 0,
   whatsappNumber,
@@ -28,7 +33,7 @@ export function InquiryPanel({
   guestPhone,
   checkInTime,
   checkOutTime,
-  blockedRanges = [],
+  blockedRanges: blockedRangesProp = [],
   isAuthenticated = false,
 }: {
   propertyId: string;
@@ -59,8 +64,17 @@ export function InquiryPanel({
     pickerOpen,
     setPickerOpen,
     setReserveCta,
+    liveListing,
   } = useBooking();
   const loginHref = `/sign-in?callbackUrl=${encodeURIComponent(`/listings/${propertyId}`)}`;
+
+  // The page's props were baked in when the ISR page was last rendered. If the
+  // Reserve re-check has since read the database, those fresher figures win —
+  // so the breakdown the guest is looking at is the one they'll be quoted.
+  const basePrice = liveListing?.basePrice ?? basePriceProp;
+  const monthlyPrice = liveListing ? liveListing.monthlyPrice : monthlyPriceProp;
+  const platformFeePercent = liveListing?.platformFeePercent ?? platformFeePercentProp;
+  const blockedRanges = liveListing?.blockedRanges ?? blockedRangesProp;
 
   // A valid stay needs checkout strictly after check-in (guards reversed/equal
   // dates that can arrive via stale URL params).
@@ -92,11 +106,11 @@ export function InquiryPanel({
   // the only component with the full listing + pricing context.
   const cta = useMemo<ReserveCta>(() => {
     if (!hasDates) {
-      const missing: string[] = [];
-      if (!checkIn) missing.push("Check-in date");
-      if (!checkOut) missing.push("Check-out date");
-      // Both set but the stay is zero/negative nights (e.g. stale URL params).
-      else if (checkIn) missing.push("A check-out date after your check-in");
+      const missing: MissingTripField[] = [];
+      if (!checkIn) missing.push("checkIn");
+      // Also "missing" when both are set but the stay is zero/negative nights
+      // (e.g. stale URL params) — the checkout is the one to fix.
+      if (!checkOut || checkIn) missing.push("checkOut");
       return { kind: "incomplete", label: "Reserve", shortLabel: "Reserve", missing };
     }
     if (datesUnavailable) {
@@ -125,6 +139,14 @@ export function InquiryPanel({
         infants,
         totalMinorUnits: total,
       },
+      // What this card is currently quoting, so Reserve can compare it against
+      // the database before anything reaches WhatsApp.
+      quote: {
+        basePrice,
+        monthlyPrice: monthlyPrice ?? null,
+        platformFeePercent,
+        total,
+      },
     };
   }, [
     hasDates,
@@ -145,6 +167,9 @@ export function InquiryPanel({
     guests,
     infants,
     total,
+    basePrice,
+    monthlyPrice,
+    platformFeePercent,
   ]);
 
   useEffect(() => {

@@ -2,6 +2,8 @@
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { nextRangeSelection, type DateRange } from "@/lib/dates";
+import type { MissingTripField } from "@/lib/reserve-prompt";
+import type { QuoteSnapshot } from "@/lib/quote-check";
 import type { InquiryDetails } from "@/lib/whatsapp";
 
 // Shared booking state so the on-page availability calendar and the sticky
@@ -12,6 +14,10 @@ import type { InquiryDetails } from "@/lib/whatsapp";
 // owns the listing data, so it publishes the CTA here and whichever surface is
 // active (the card on desktop, the floating tab on mobile) renders it. Without
 // this both surfaces rendered their own Reserve button and the guest saw two.
+//
+// Finally it holds `liveListing` — the figures the Reserve re-check pulled
+// straight from the database. The page itself is ISR-cached, so once we know
+// better, that override wins over the props everywhere.
 
 function pad(n: number) {
   return String(n).padStart(2, "0");
@@ -28,15 +34,33 @@ function parseYmd(s: string): Date | null {
 
 /** What the one Reserve button must do, in the order the card resolves it. */
 export type ReserveCta = { label: string; shortLabel: string } & (
-  /** Trip details are missing — tapping Reserve explains what. */
-  | { kind: "incomplete"; missing: string[] }
+  /** Trip details are missing — tapping Reserve takes the guest to the dates. */
+  | { kind: "incomplete"; missing: MissingTripField[] }
   /** The chosen nights are already booked. */
   | { kind: "unavailable" }
   /** Signed-out guest: send them to sign-in first. */
   | { kind: "login"; href: string }
   /** Everything is set — open WhatsApp with the pre-filled enquiry. */
-  | { kind: "ready"; whatsappNumber: string; details: InquiryDetails }
+  | {
+      kind: "ready";
+      whatsappNumber: string;
+      details: InquiryDetails;
+      /** What the card is quoting, so Reserve can re-check it live on click. */
+      quote: QuoteSnapshot;
+    }
 );
+
+/**
+ * Server-fresh listing figures, fetched when the guest presses Reserve. The
+ * page's props are ISR-cached, so whenever this is set it supersedes them
+ * everywhere the booking surfaces read prices or blocked nights.
+ */
+export type LiveListingData = {
+  basePrice: number;
+  monthlyPrice: number | null;
+  platformFeePercent: number;
+  blockedRanges: { startDate: string; endDate: string }[];
+};
 
 type BookingState = {
   checkIn: string;
@@ -53,9 +77,14 @@ type BookingState = {
   /** The single Reserve CTA, published by the booking card. */
   reserveCta: ReserveCta | null;
   setReserveCta: (cta: ReserveCta | null) => void;
-  /** Shared so the validation dialog can open the card's date picker. */
+  /** Shared so any surface can open the booking card's date picker. */
   pickerOpen: boolean;
   setPickerOpen: (open: boolean) => void;
+  /** Live figures from the Reserve re-check; wins over the page's props. */
+  liveListing: LiveListingData | null;
+  setLiveListing: (next: LiveListingData | null) => void;
+  /** Blocked ranges actually in force — the live ones when we have them. */
+  blockedRanges: { startDate: string; endDate: string }[];
 };
 
 const BookingCtx = createContext<BookingState | null>(null);
@@ -94,17 +123,22 @@ export function BookingProvider({
   const [infants, setInfants] = useState(0);
   const [reserveCta, setReserveCta] = useState<ReserveCta | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [liveListing, setLiveListing] = useState<LiveListingData | null>(null);
   const isCompactLayout = useIsCompactLayout();
+
+  // Once the Reserve re-check has told us what the server really holds, that
+  // list is the one every surface (and the selection rule below) enforces.
+  const effectiveRanges = liveListing?.blockedRanges ?? blockedRanges;
 
   const blockDates = useMemo<DateRange[]>(
     () =>
-      blockedRanges
+      effectiveRanges
         .map((b) => ({
           startDate: parseYmd(b.startDate.slice(0, 10)),
           endDate: parseYmd(b.endDate.slice(0, 10)),
         }))
         .filter((b): b is DateRange => b.startDate !== null && b.endDate !== null),
-    [blockedRanges]
+    [effectiveRanges]
   );
 
   function setRange(ci: string, co: string) {
@@ -144,6 +178,9 @@ export function BookingProvider({
         setReserveCta,
         pickerOpen,
         setPickerOpen,
+        liveListing,
+        setLiveListing,
+        blockedRanges: effectiveRanges,
       }}
     >
       {children}

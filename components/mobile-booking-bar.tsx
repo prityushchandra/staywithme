@@ -10,18 +10,26 @@ import { isRangeAvailable, toUtcDate } from "@/lib/dates";
 // used). It renders the page's single Reserve button — published by the booking
 // card, which hides its own copy on compact screens — so the guest only ever
 // sees one Reserve CTA.
+//
+// Like the card, it prefers the live figures from the Reserve re-check over the
+// ISR-cached props whenever they exist, so both surfaces always agree.
 export function MobileBookingBar({
-  basePrice,
-  monthlyPrice,
-  platformFeePercent,
-  blockedRanges = [],
+  basePrice: basePriceProp,
+  monthlyPrice: monthlyPriceProp,
+  platformFeePercent: platformFeePercentProp,
+  blockedRanges: blockedRangesProp = [],
 }: {
   basePrice: number;
   monthlyPrice?: number | null;
   platformFeePercent: number;
   blockedRanges?: { startDate: string; endDate: string }[];
 }) {
-  const { checkIn, checkOut, guests, infants, isCompactLayout, reserveCta } = useBooking();
+  const { checkIn, checkOut, guests, infants, isCompactLayout, reserveCta, liveListing } =
+    useBooking();
+  const basePrice = liveListing?.basePrice ?? basePriceProp;
+  const monthlyPrice = liveListing ? liveListing.monthlyPrice : monthlyPriceProp;
+  const platformFeePercent = liveListing?.platformFeePercent ?? platformFeePercentProp;
+  const blockedRanges = liveListing?.blockedRanges ?? blockedRangesProp;
   const hasDates =
     Boolean(checkIn && checkOut) &&
     new Date(checkOut).getTime() > new Date(checkIn).getTime();

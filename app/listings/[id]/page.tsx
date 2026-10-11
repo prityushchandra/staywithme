@@ -248,9 +248,11 @@ export default async function ListingPage({
               </section>
             )}
 
-            {/* Availability calendar (interactive, synced with the booking card) */}
-            <section className="border-b py-6">
-              <AvailabilitySection blockedRanges={serializedBlocks} />
+            {/* Availability calendar (interactive, synced with the booking card).
+                `#dates` is the scroll target for the Reserve button when a trip
+                is missing its dates. */}
+            <section id="dates" className="scroll-mt-24 border-b py-6">
+              <AvailabilitySection />
             </section>
 
             {/* Reviews */}
@@ -295,7 +297,7 @@ export default async function ListingPage({
           </div>
 
           {/* Right: booking card */}
-          <div id="book" className="lg:col-span-1">
+          <div id="book" className="scroll-mt-24 lg:col-span-1">
             <InquiryPanel
               propertyId={listing.id}
               refCode={listing.refCode ?? undefined}

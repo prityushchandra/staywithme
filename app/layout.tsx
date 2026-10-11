@@ -3,6 +3,7 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import { Providers } from "@/components/providers";
+import { ToastProvider } from "@/components/ui/toast";
 import { Navbar } from "@/components/navbar";
 import { TrackVisit } from "@/components/track-visit";
 import { AppIntro } from "@/components/app-intro";
@@ -60,11 +61,16 @@ export default async function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: INTRO_BOOT }} />
         <AppIntro />
         <Providers>
-          <Navbar showSignature={settings.showSignature} whatsappNumber={settings.whatsappNumber} />
-          <main className="min-h-[calc(100vh-4rem)]">{children}</main>
-          <footer className="border-t py-8 text-center text-sm text-muted-foreground">
-            © {new Date().getFullYear()} StayWithMe
-          </footer>
+          {/* Client-side toast host. Mounted here so every route can raise one,
+              and inside <body> so its viewport can sit above the fixed mobile
+              booking tab. This layout stays a server component. */}
+          <ToastProvider>
+            <Navbar showSignature={settings.showSignature} />
+            <main className="min-h-[calc(100vh-4rem)]">{children}</main>
+            <footer className="border-t py-8 text-center text-sm text-muted-foreground">
+              © {new Date().getFullYear()} StayWithMe
+            </footer>
+          </ToastProvider>
         </Providers>
         <SpeedInsights />
         <Analytics />

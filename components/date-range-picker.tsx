@@ -1,19 +1,23 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { ChevronLeft, ChevronRight, CalendarDays, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
-  isBlockedNight,
-  isSelectableCheckout,
+  dayHint,
+  getDayAvailability,
   nextRangeSelection,
   type DateRange,
+  type DayAvailability,
 } from "@/lib/dates";
+import { useOverlayHistory } from "@/lib/use-overlay-history";
 
-// Airbnb-style "When" range picker: a single trigger that opens a calendar
-// popover. Click a start date, then an end date; the range highlights and the
-// picker auto-applies (closes) once both are chosen. Booked & past dates are
-// disabled. Values are "yyyy-mm-dd" strings.
+// Airbnb-style "When" range picker: a single trigger that opens a calendar.
+// Click a start date, then an end date; the range highlights and the picker
+// auto-applies (closes) once both are chosen. On phones the calendar opens as a
+// CENTRED overlay with a dim backdrop; from `sm` up it stays anchored under the
+// trigger. Values are "yyyy-mm-dd" strings.
 
 const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
@@ -42,6 +46,34 @@ function nightsBetween(ci: string, co: string): number {
   const b = parseYmd(co);
   if (!a || !b) return 0;
   return Math.round((b.getTime() - a.getTime()) / 86_400_000);
+}
+/** Media/motion probes — only ever called from effects & handlers (client-side). */
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+function isAnchoredLayout(): boolean {
+  return typeof window !== "undefined" && window.matchMedia("(min-width: 640px)").matches;
+}
+
+/**
+ * `true` only below `sm`, i.e. exactly when the calendar renders as the fixed,
+ * centred fullscreen overlay rather than an anchored dropdown. Starts `false`
+ * so SSR and the first client render agree (same pattern as
+ * `useIsCompactLayout` in booking-context).
+ */
+function useIsFullscreenOverlay(): boolean {
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 639.98px)");
+    const sync = () => setCompact(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+  return compact;
 }
 
 export function DateRangePicker({
@@ -79,15 +111,31 @@ export function DateRangePicker({
   onOpenChange?: (open: boolean) => void;
 }) {
   const [openState, setOpenState] = useState(false);
-  const open = openProp !== undefined ? openProp : openState;
-  const setOpen = (v: boolean) => {
-    onOpenChange?.(v);
-    if (openProp === undefined) setOpenState(v);
-  };
+  const controlled = openProp !== undefined;
+  const open = controlled ? (openProp as boolean) : openState;
+  const setOpen = useCallback(
+    (v: boolean) => {
+      onOpenChange?.(v);
+      if (!controlled) setOpenState(v);
+    },
+    [controlled, onOpenChange]
+  );
+
+  // Below `sm` the calendar is a fullscreen overlay that *feels* like a page,
+  // so the device Back gesture has to dismiss it rather than navigate off the
+  // listing (which would lose the scroll position and the chosen dates). On
+  // `sm`+ it's an anchored dropdown, where hijacking Back would be surprising —
+  // hence the same media gate that chooses the presentation. Closing this way
+  // only hides the picker; the selection is left exactly as it was, like an
+  // outside click.
+  const isFullscreenOverlay = useIsFullscreenOverlay();
+  const close = useCallback(() => setOpen(false), [setOpen]);
+  useOverlayHistory(open, close, { enabled: isFullscreenOverlay });
 
   const [hovered, setHovered] = useState<Date | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const start = parseYmd(checkIn);
   const end = parseYmd(checkOut);
@@ -107,50 +155,40 @@ export function DateRangePicker({
         .filter((b): b is DateRange => b.startDate !== null && b.endDate !== null),
     [blockedRanges]
   );
-  const isBlocked = (d: Date) => isBlockedNight(d, blockDates);
 
-  // Availability of a single day given the current selection phase. While
-  // choosing a checkout (a start is set, no end yet) the FIRST booked night
-  // after the start is a valid "checkout-only" date — you check out that
-  // morning, exactly like Airbnb allows same-day turnover. Otherwise a booked
-  // night can't be picked (you can't check IN on an occupied night).
-  function dayStatus(day: Date): { disabled: boolean; checkoutOnly: boolean } {
-    const t = day.getTime();
-    const isPast = !allowPast && t < today.getTime();
-    const choosingCheckout = !!start && !end;
-
-    // Admin override mode: blocked dates stay selectable (the server will prompt
-    // to confirm the override). Only the past is unpickable (unless allowPast).
-    if (allowBlocked) {
-      return { disabled: isPast, checkoutOnly: false };
-    }
-
-    if (choosingCheckout && start) {
-      if (t <= start.getTime()) {
-        // Clicking on/before the start restarts selection as a new check-in.
-        return { disabled: isPast || isBlocked(day), checkoutOnly: false };
-      }
-      if (!isSelectableCheckout(start, day, blockDates)) {
-        // The stay would span an occupied night → not a reachable checkout.
-        return { disabled: true, checkoutOnly: false };
-      }
-      // Reachable checkout. It's "checkout-only" when the day is itself booked.
-      return { disabled: isPast, checkoutOnly: isBlocked(day) };
-    }
-
-    // Choosing a check-in (nothing selected yet, or a full range → start over).
-    return { disabled: isPast || isBlocked(day), checkoutOnly: false };
+  // Availability of a single day, delegated to the one shared rule in
+  // `lib/dates.ts` so this picker, the on-page availability calendar and the
+  // server's booking validation can never drift apart. Crucially a free night
+  // that simply can't be reached as a checkout (because booked nights sit in
+  // between) comes back as `restart` — dimmed but still CLICKABLE, so clicking
+  // it starts a new trip there instead of silently swallowing the tap.
+  function dayStatus(day: Date): DayAvailability {
+    return getDayAvailability(day, {
+      checkIn: start,
+      checkOut: end,
+      blocks: blockDates,
+      today,
+      allowBlocked,
+      allowPast,
+    });
   }
 
   const [view, setView] = useState(() => {
     const base = start ?? today;
     return { year: base.getFullYear(), month: base.getMonth() };
   });
+  // Which way the month grid should slide when paging.
+  const [dir, setDir] = useState<1 | -1>(1);
 
   useEffect(() => {
     if (!open) return;
     function onDown(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      // The fullscreen overlay is portalled to <body>, so it isn't inside
+      // `ref` — check it separately or every tap inside it would close.
+      if (ref.current?.contains(target)) return;
+      if (popoverRef.current?.contains(target)) return;
+      setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
       // Capture phase + stopPropagation so closing the calendar with Escape
@@ -169,18 +207,56 @@ export function DateRangePicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  // When the calendar opens, auto-scroll it fully into view so dates are easy
-  // to pick without manually scrolling the page.
+  // Reopening jumps back to the month the trip starts in, so the selection is
+  // always on screen instead of wherever the guest last paged to.
   useEffect(() => {
-    if (!open) return;
-    const t = setTimeout(() => {
-      popoverRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }, 20);
+    if (!open || !start) return;
+    setDir(1);
+    setView({ year: start.getFullYear(), month: start.getMonth() });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Settle the ANCHORED popover into view once its entrance animation has
+  // finished — scrolling mid-animation is what made it lurch. The mobile
+  // overlay is already centred in the viewport, so it never scrolls.
+  useEffect(() => {
+    if (!open || !isAnchoredLayout()) return;
+    const reduce = prefersReducedMotion();
+    const t = setTimeout(
+      () => {
+        popoverRef.current?.scrollIntoView({
+          behavior: reduce ? "auto" : "smooth",
+          block: "nearest",
+        });
+      },
+      reduce ? 0 : 220
+    );
     return () => clearTimeout(t);
   }, [open]);
 
+  // Lock the page behind the mobile overlay so the backdrop doesn't scroll away
+  // under the guest's thumb while they pick dates.
+  useEffect(() => {
+    if (!open || isAnchoredLayout()) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [open]);
+
+  useEffect(() => () => clearTimeout(closeTimer.current), []);
+
   function pick(day: Date) {
-    if (dayStatus(day).disabled) return;
+    const status = dayStatus(day);
+    if (status.disabled) return;
+    // Tapping the pending check-in again clears the trip — there is always a
+    // visible way out of a half-finished selection.
+    if (status.clearsSelection) {
+      setHovered(null);
+      onChange("", "");
+      return;
+    }
     // Shared, tested transition — identical to the on-page calendar & server.
     // In admin override mode we ignore block constraints so any chronological
     // range can be chosen (occupied dates included).
@@ -196,11 +272,20 @@ export function DateRangePicker({
     );
     if (next.checkOut) {
       setHovered(null);
-      setOpen(false); // auto-apply once a full range is chosen
+      // Hold the popover open for a beat so the completed range visibly fills
+      // in before it eases away — closing on the same frame reads as a flicker.
+      clearTimeout(closeTimer.current);
+      closeTimer.current = setTimeout(() => setOpen(false), prefersReducedMotion() ? 0 : 200);
     }
   }
 
+  function clear() {
+    setHovered(null);
+    onChange("", "");
+  }
+
   function shift(delta: number) {
+    setDir(delta > 0 ? 1 : -1);
     setView((v) => {
       const m = v.month + delta;
       return { year: v.year + Math.floor(m / 12), month: ((m % 12) + 12) % 12 };
@@ -212,6 +297,23 @@ export function DateRangePicker({
   else if (checkIn) label = `${fmtLabel(checkIn)} – End date`;
 
   const card = variant === "card";
+  const helper =
+    nights > 0
+      ? `${nights} night${nights > 1 ? "s" : ""} selected`
+      : checkIn
+        ? // Clicking an earlier day silently restarts the range, which reads as
+          // the picker resetting itself. Say which way to go.
+          `Now pick a checkout after ${fmtLabel(checkIn)}`
+        : "Select your check-in date";
+
+  // The fullscreen overlay is portalled to <body> so a transformed ancestor
+  // (the sticky booking card, a sheet, an animated wrapper) can never turn its
+  // `position: fixed` centring into "centred inside that ancestor". The
+  // anchored desktop popover stays inline, next to its trigger.
+  const portal = (node: ReactNode) =>
+    isFullscreenOverlay && typeof document !== "undefined"
+      ? createPortal(node, document.body)
+      : node;
 
   return (
     <div
@@ -245,82 +347,110 @@ export function DateRangePicker({
         </span>
       </button>
 
-      {open && (
-        <div
-          ref={popoverRef}
-          className={cn(
-            "absolute top-full z-50 mt-3 w-[calc(100vw-2rem)] max-w-[720px] rounded-3xl border bg-white p-5 shadow-xl duration-200 ease-ios animate-in fade-in zoom-in-95 slide-in-from-top-1 sm:w-auto sm:p-6",
-            align === "right" ? "right-0" : "left-0"
-          )}
-        >
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => shift(-1)}
-              className="absolute left-0 top-0 rounded-full p-2 hover:bg-muted"
-              aria-label="Previous month"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => shift(1)}
-              className="absolute right-0 top-0 rounded-full p-2 hover:bg-muted"
-              aria-label="Next month"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
+      {open && portal(
+        // Phones: a centred overlay with a dim backdrop (the old right-anchored
+        // ~100vw popover hung off-screen inside the narrow booking card).
+        // `sm:contents` dissolves this wrapper from `sm` up, so the calendar
+        // goes back to being anchored under the trigger exactly as before.
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:contents">
+          <button
+            type="button"
+            aria-label="Close calendar"
+            onClick={() => setOpen(false)}
+            className="absolute inset-0 cursor-default bg-black/40 duration-200 ease-ios animate-in fade-in motion-reduce:animate-none sm:hidden"
+          />
+          <div
+            ref={popoverRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Select dates"
+            className={cn(
+              "relative z-10 flex max-h-[88vh] w-full max-w-[400px] flex-col overflow-y-auto overscroll-contain rounded-3xl border bg-white p-4 shadow-2xl duration-200 ease-ios animate-in fade-in zoom-in-95 slide-in-from-bottom-2 motion-reduce:animate-none",
+              "sm:absolute sm:top-full sm:z-50 sm:mt-3 sm:max-h-none sm:w-auto sm:max-w-[760px] sm:overflow-visible sm:p-6 sm:shadow-xl sm:slide-in-from-top-1",
+              align === "right" ? "sm:right-0" : "sm:left-0"
+            )}
+          >
+            <div className="mb-3 flex items-center justify-between sm:hidden">
+              <span className="text-base font-semibold">Select dates</span>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                aria-label="Close calendar"
+                className="-mr-1 rounded-full p-2 text-muted-foreground transition-[background-color,transform] duration-150 ease-ios active:scale-90 active:bg-muted motion-reduce:transition-none motion-reduce:active:scale-100 [@media(hover:hover)]:hover:bg-muted"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
 
-            <div className="flex justify-center gap-10">
-              <Month
-                year={view.year}
-                month={view.month}
-                start={start}
-                end={end}
-                hovered={hovered}
-                today={today}
-                isBlocked={isBlocked}
-                dayStatus={dayStatus}
-                onPick={pick}
-                onHover={setHovered}
-              />
-              <div className="hidden sm:block">
-                <Month
-                  year={view.month === 11 ? view.year + 1 : view.year}
-                  month={(view.month + 1) % 12}
-                  start={start}
-                  end={end}
-                  hovered={hovered}
-                  today={today}
-                  isBlocked={isBlocked}
-                  dayStatus={dayStatus}
-                  onPick={pick}
-                  onHover={setHovered}
-                />
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => shift(-1)}
+                className="absolute left-0 top-0 z-10 rounded-full p-2 transition-[background-color,transform] duration-150 ease-ios active:scale-90 active:bg-muted motion-reduce:transition-none motion-reduce:active:scale-100 [@media(hover:hover)]:hover:bg-muted"
+                aria-label="Previous month"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => shift(1)}
+                className="absolute right-0 top-0 z-10 rounded-full p-2 transition-[background-color,transform] duration-150 ease-ios active:scale-90 active:bg-muted motion-reduce:transition-none motion-reduce:active:scale-100 [@media(hover:hover)]:hover:bg-muted"
+                aria-label="Next month"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+
+              {/* Re-keyed on every page so the grids slide in from the side the
+                  guest paged towards instead of blinking into place. */}
+              <div className="overflow-hidden">
+                <div
+                  key={`${view.year}-${view.month}`}
+                  className={cn(
+                    "flex justify-center gap-10 duration-200 ease-ios animate-in fade-in motion-reduce:animate-none",
+                    dir > 0 ? "slide-in-from-right-4" : "slide-in-from-left-4"
+                  )}
+                >
+                  <Month
+                    year={view.year}
+                    month={view.month}
+                    start={start}
+                    end={end}
+                    hovered={hovered}
+                    today={today}
+                    dayStatus={dayStatus}
+                    onPick={pick}
+                    onHover={setHovered}
+                  />
+                  <div className="hidden sm:block">
+                    <Month
+                      year={view.month === 11 ? view.year + 1 : view.year}
+                      month={(view.month + 1) % 12}
+                      start={start}
+                      end={end}
+                      hovered={hovered}
+                      today={today}
+                      dayStatus={dayStatus}
+                      onPick={pick}
+                      onHover={setHovered}
+                    />
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="mt-5 flex items-center justify-between border-t pt-4">
-            <span className="text-sm text-muted-foreground">
-              {nights > 0
-                ? `${nights} night${nights > 1 ? "s" : ""} selected`
-                : checkIn
-                  ? // Clicking an earlier day silently restarts the range, which
-                    // reads as the picker resetting itself. Say which way to go.
-                    `Now pick a checkout after ${fmtLabel(checkIn)}`
-                  : "Select your dates"}
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                onChange("", "");
-                setHovered(null);
-              }}
-              className="text-sm font-semibold underline underline-offset-2 hover:text-brand"
-            >
-              Clear dates
-            </button>
+            <div className="mt-4 flex items-center justify-between gap-3 border-t pt-4 sm:mt-5">
+              <span className="text-sm text-muted-foreground" aria-live="polite">
+                {helper}
+              </span>
+              <button
+                type="button"
+                onClick={clear}
+                disabled={!checkIn && !checkOut}
+                className="shrink-0 rounded-full px-3 py-1.5 text-sm font-semibold underline underline-offset-4 transition-[background-color,color,transform] duration-150 ease-ios active:scale-95 disabled:pointer-events-none disabled:opacity-40 motion-reduce:transition-none motion-reduce:active:scale-100 [@media(hover:hover)]:hover:bg-muted [@media(hover:hover)]:hover:text-brand"
+              >
+                Clear dates
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -335,7 +465,6 @@ function Month({
   end,
   hovered,
   today,
-  isBlocked,
   dayStatus,
   onPick,
   onHover,
@@ -346,8 +475,7 @@ function Month({
   end: Date | null;
   hovered: Date | null;
   today: Date;
-  isBlocked: (d: Date) => boolean;
-  dayStatus: (d: Date) => { disabled: boolean; checkoutOnly: boolean };
+  dayStatus: (d: Date) => DayAvailability;
   onPick: (d: Date) => void;
   onHover: (d: Date | null) => void;
 }) {
@@ -358,6 +486,8 @@ function Month({
     year: "numeric",
   });
 
+  // Tentative end while the pointer sweeps the grid — only ever a day that is
+  // genuinely reachable as a checkout, so the band can't paint over booked nights.
   const rangeEnd =
     end ?? (start && hovered && hovered.getTime() > start.getTime() ? hovered : null);
 
@@ -367,58 +497,89 @@ function Month({
   );
 
   return (
-    <div className="w-[300px]">
+    <div className="w-full select-none sm:w-[300px]">
       <div className="mb-3 text-center text-sm font-semibold">{monthLabel}</div>
-      <div className="grid grid-cols-7 text-center text-[11px] text-muted-foreground">
+      <div className="grid grid-cols-7 text-center text-[11px] font-medium text-muted-foreground">
         {WEEKDAYS.map((d) => (
           <div key={d} className="py-1">
             {d}
           </div>
         ))}
       </div>
-      <div className="grid grid-cols-7">
+      {/* Six rows reserved so paging between a 5- and 6-row month can't jolt the
+          layout, and the hover preview is cleared here (not per cell) so it
+          doesn't flicker as the pointer crosses the gaps between days. */}
+      <div
+        className="grid min-h-[264px] grid-cols-7 content-start sm:min-h-[240px]"
+        onMouseLeave={() => onHover(null)}
+      >
         {Array.from({ length: firstWeekday }).map((_, i) => (
           <div key={`pad-${i}`} />
         ))}
         {cells.map((day) => {
           const t = day.getTime();
-          const isPast = t < today.getTime();
-          const blockedNight = isBlocked(day);
-          const { disabled, checkoutOnly } = dayStatus(day);
-          const isStart = start && t === start.getTime();
-          const isEnd = rangeEnd && t === rangeEnd.getTime();
-          const inRange = start && rangeEnd && t > start.getTime() && t < rangeEnd.getTime();
+          const status = dayStatus(day);
+          const isStart = !!start && t === start.getTime();
+          const isEnd = !!rangeEnd && t === rangeEnd.getTime();
+          const inRange =
+            !!start && !!rangeEnd && t > start.getTime() && t < rangeEnd.getTime();
           const isEndpoint = isStart || isEnd;
+          const banded = inRange || (isEndpoint && !!rangeEnd);
+          const hint = dayHint(status, isEndpoint);
 
           return (
             <div
               key={t}
               className={cn(
-                "aspect-square p-0.5",
-                (inRange || (isEndpoint && rangeEnd)) && "bg-brand/10",
+                "flex h-11 items-center justify-center transition-[background-color,border-radius] duration-150 ease-ios motion-reduce:transition-none sm:h-10",
+                banded && "bg-brand/10",
                 isStart && rangeEnd && "rounded-l-full",
                 isEnd && "rounded-r-full"
               )}
             >
               <button
                 type="button"
-                disabled={disabled}
+                disabled={status.disabled}
                 onClick={() => onPick(day)}
-                onMouseEnter={() => {
-                  if (!disabled) onHover(day);
-                }}
-                title={checkoutOnly && !isEndpoint ? "Checkout only" : undefined}
+                onMouseEnter={() =>
+                  onHover(status.disabled || status.restartsRange ? null : day)
+                }
+                title={hint}
+                aria-label={`${day.toLocaleDateString("en-US", {
+                  weekday: "long",
+                  month: "long",
+                  day: "numeric",
+                  year: "numeric",
+                })}${hint ? ` — ${hint}` : ""}`}
                 className={cn(
-                  "flex h-full w-full items-center justify-center rounded-full text-sm transition-colors",
-                  isEndpoint && "bg-brand font-semibold text-white",
-                  !disabled && !isEndpoint && "hover:border hover:border-foreground",
-                  // Truly unavailable booked night → struck through.
-                  blockedNight && disabled && "text-muted-foreground/40 line-through",
-                  // Admin override: blocked but still selectable → amber strike.
-                  blockedNight && !disabled && !isEndpoint && "text-amber-600 line-through decoration-amber-500/70",
-                  // Booked night that's still valid as a checkout (same-day turnover).
-                  checkoutOnly && !isEndpoint && "text-foreground underline decoration-dotted underline-offset-4",
-                  isPast && disabled && !blockedNight && "cursor-default text-muted-foreground/30"
+                  "flex h-10 w-10 touch-manipulation items-center justify-center rounded-full text-sm transition-[background-color,color,transform,box-shadow] duration-150 ease-ios focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 motion-reduce:transition-none",
+                  !status.disabled && "active:scale-90 motion-reduce:active:scale-100",
+                  !isEndpoint &&
+                    !status.disabled &&
+                    "[@media(hover:hover)]:hover:bg-brand/10 [@media(hover:hover)]:hover:ring-1 [@media(hover:hover)]:hover:ring-foreground/60",
+                  // Chosen check-in / checkout — solid, filled caps.
+                  isEndpoint && "bg-brand font-semibold text-white shadow-sm",
+                  // Booked & genuinely unpickable.
+                  status.kind === "blocked" &&
+                    !isEndpoint &&
+                    "cursor-not-allowed text-muted-foreground/40 line-through",
+                  status.kind === "past" &&
+                    !isEndpoint &&
+                    "cursor-default text-muted-foreground/30",
+                  // Admin override: occupied but still selectable → amber strike.
+                  status.blockedNight &&
+                    !status.disabled &&
+                    !status.checkoutOnly &&
+                    !isEndpoint &&
+                    "text-amber-600 line-through decoration-amber-500/70",
+                  // Booked night still valid as a checkout (same-day turnover).
+                  status.checkoutOnly &&
+                    !isEndpoint &&
+                    "text-foreground underline decoration-dotted underline-offset-4",
+                  // Free, but unreachable from this check-in: dimmed yet clickable —
+                  // tapping it starts a new trip rather than doing nothing.
+                  status.restartsRange && !isEndpoint && "text-muted-foreground/60",
+                  t === today.getTime() && !isEndpoint && "font-semibold"
                 )}
               >
                 {day.getDate()}

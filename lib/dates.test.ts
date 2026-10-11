@@ -6,6 +6,7 @@ import {
   isBlockedNight,
   isSelectableCheckout,
   nextRangeSelection,
+  getDayAvailability,
   type DateRange,
 } from "./dates";
 
@@ -186,5 +187,176 @@ describe("Airbnb iCal sync — imported blocks stay respected (exclusive DTEND)"
   it("prevents booking straight across the imported block", () => {
     expect(isSelectableCheckout(d("2026-08-01"), d("2026-08-04"), ical)).toBe(false);
     expect(isRangeAvailable(d("2026-08-01"), d("2026-08-04"), ical)).toBe(false);
+  });
+});
+
+describe("getDayAvailability — the shared day-cell rule for both calendars", () => {
+  // Oct 25, 26, 27 are booked; everything else in October is free.
+  const blocks: DateRange[] = [{ startDate: d("2026-10-25"), endDate: d("2026-10-28") }];
+  const today = d("2026-10-10");
+
+  it("THE STUCK BUG: a free day past a blocked run stays clickable and restarts the range", () => {
+    // Check-in Oct 20, nights Oct 25-27 booked, guest clicks Oct 30.
+    const status = getDayAvailability(d("2026-10-30"), {
+      checkIn: d("2026-10-20"),
+      blocks,
+      today,
+    });
+    expect(status.kind).toBe("restart");
+    expect(status.disabled).toBe(false); // the click must reach the handler
+    expect(status.restartsRange).toBe(true);
+    expect(status.checkoutOnly).toBe(false);
+    // …and the shared transition does exactly what the UI now promises.
+    expect(
+      nextRangeSelection({ checkIn: d("2026-10-20"), checkOut: null }, d("2026-10-30"), blocks)
+    ).toEqual({ checkIn: d("2026-10-30"), checkOut: null });
+  });
+
+  it("the first booked night after the check-in is checkout-only (same-day turnover)", () => {
+    const status = getDayAvailability(d("2026-10-25"), {
+      checkIn: d("2026-10-20"),
+      blocks,
+      today,
+    });
+    expect(status.kind).toBe("checkout-only");
+    expect(status.disabled).toBe(false);
+    expect(status.checkoutOnly).toBe(true);
+    expect(status.blockedNight).toBe(true);
+  });
+
+  it("later nights of the same block are unreachable AND unbookable → disabled", () => {
+    for (const day of [d("2026-10-26"), d("2026-10-27")]) {
+      const status = getDayAvailability(day, { checkIn: d("2026-10-20"), blocks, today });
+      expect(status.kind).toBe("blocked");
+      expect(status.disabled).toBe(true);
+    }
+  });
+
+  it("a free day inside the reachable window is a plain selectable checkout", () => {
+    const status = getDayAvailability(d("2026-10-23"), {
+      checkIn: d("2026-10-20"),
+      blocks,
+      today,
+    });
+    expect(status).toMatchObject({ kind: "selectable", disabled: false, checkoutOnly: false });
+  });
+
+  it("the exclusive checkout morning (Oct 28) is free, but unreachable → restart", () => {
+    const status = getDayAvailability(d("2026-10-28"), {
+      checkIn: d("2026-10-20"),
+      blocks,
+      today,
+    });
+    expect(status.blockedNight).toBe(false);
+    expect(status.kind).toBe("restart");
+    expect(status.disabled).toBe(false);
+  });
+
+  it("a booked night is never a valid check-in", () => {
+    const status = getDayAvailability(d("2026-10-26"), { blocks, today });
+    expect(status.kind).toBe("blocked");
+    expect(status.disabled).toBe(true);
+    expect(nextRangeSelection({ checkIn: null, checkOut: null }, d("2026-10-26"), blocks)).toBeNull();
+  });
+
+  it("days before the pending check-in are clickable restarts (free) or blocked (booked)", () => {
+    const free = getDayAvailability(d("2026-10-15"), {
+      checkIn: d("2026-10-20"),
+      blocks,
+      today,
+    });
+    expect(free).toMatchObject({ kind: "restart", disabled: false, restartsRange: true });
+
+    const booked = getDayAvailability(d("2026-10-26"), {
+      checkIn: d("2026-10-29"),
+      blocks,
+      today,
+    });
+    expect(booked).toMatchObject({ kind: "blocked", disabled: true });
+  });
+
+  it("re-clicking the pending check-in clears the selection", () => {
+    const status = getDayAvailability(d("2026-10-20"), {
+      checkIn: d("2026-10-20"),
+      blocks,
+      today,
+    });
+    expect(status.clearsSelection).toBe(true);
+    expect(status.disabled).toBe(false);
+  });
+
+  it("does not offer to clear once a full range is chosen — the click starts over", () => {
+    const status = getDayAvailability(d("2026-10-20"), {
+      checkIn: d("2026-10-20"),
+      checkOut: d("2026-10-22"),
+      blocks,
+      today,
+    });
+    expect(status.clearsSelection).toBe(false);
+    expect(status).toMatchObject({ kind: "selectable", disabled: false });
+  });
+
+  it("past days are disabled, and free future days are selectable", () => {
+    expect(getDayAvailability(d("2026-10-09"), { blocks, today })).toMatchObject({
+      kind: "past",
+      disabled: true,
+    });
+    expect(getDayAvailability(d("2026-10-10"), { blocks, today })).toMatchObject({
+      kind: "selectable",
+      disabled: false,
+    });
+  });
+
+  it("skips past-date filtering entirely when no `today` is supplied", () => {
+    expect(getDayAvailability(d("2020-01-01"), { blocks })).toMatchObject({
+      kind: "selectable",
+      disabled: false,
+      past: false,
+    });
+  });
+
+  it("admin allowBlocked: occupied nights stay selectable, the past still does not", () => {
+    const booked = getDayAvailability(d("2026-10-26"), { blocks, today, allowBlocked: true });
+    expect(booked).toMatchObject({ kind: "selectable", disabled: false, blockedNight: true });
+    // Still no checkout-only dotted treatment in override mode.
+    expect(booked.checkoutOnly).toBe(false);
+    expect(
+      getDayAvailability(d("2026-10-01"), { blocks, today, allowBlocked: true })
+    ).toMatchObject({ kind: "past", disabled: true });
+  });
+
+  it("admin allowPast: past days become selectable, booked nights still are not", () => {
+    expect(getDayAvailability(d("2026-10-01"), { blocks, today, allowPast: true })).toMatchObject({
+      kind: "selectable",
+      disabled: false,
+      past: false,
+    });
+    expect(getDayAvailability(d("2026-10-26"), { blocks, today, allowPast: true })).toMatchObject({
+      kind: "blocked",
+      disabled: true,
+    });
+  });
+
+  it("admin allowBlocked + allowPast: nothing is disabled", () => {
+    for (const day of [d("2020-05-05"), d("2026-10-26"), d("2026-12-31")]) {
+      expect(
+        getDayAvailability(day, { blocks, today, allowBlocked: true, allowPast: true }).disabled
+      ).toBe(false);
+    }
+  });
+
+  it("never disables a day the shared transition would have accepted", () => {
+    // Walk a month around the blocked run from every pending check-in: whenever
+    // nextRangeSelection returns a selection, the cell must stay clickable.
+    const checkIns = [d("2026-10-20"), d("2026-10-24"), d("2026-10-28"), null];
+    for (const checkIn of checkIns) {
+      for (let day = 10; day <= 31; day++) {
+        const date = d(`2026-10-${String(day).padStart(2, "0")}`);
+        const status = getDayAvailability(date, { checkIn, blocks, today });
+        const next = nextRangeSelection({ checkIn, checkOut: null }, date, blocks);
+        if (next) expect(status.disabled).toBe(false);
+        else expect(status.disabled).toBe(true);
+      }
+    }
   });
 });

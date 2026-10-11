@@ -102,6 +102,144 @@ export function nextRangeSelection(
   return { checkIn: day, checkOut: null };
 }
 
+/**
+ * How a single calendar day behaves right now, given the pending selection.
+ *
+ * - `selectable`    — a normal click: starts the trip, or completes it as a checkout.
+ * - `checkout-only` — an occupied night that is still reachable as a CHECKOUT
+ *                     (same-day turnover): you leave the morning the next guest arrives.
+ * - `restart`       — a free night that cannot complete the pending range (it sits
+ *                     before the check-in, or past an occupied night). Clicking it is
+ *                     NOT a dead end: it abandons the pending check-in and starts a new
+ *                     trip on that day, exactly like `nextRangeSelection` already does.
+ * - `blocked`       — an occupied night that can serve as neither check-in nor checkout.
+ * - `past`          — before `today` (and `allowPast` is off).
+ */
+export type DayAvailabilityKind =
+  | "selectable"
+  | "checkout-only"
+  | "restart"
+  | "blocked"
+  | "past";
+
+export interface DayAvailability {
+  kind: DayAvailabilityKind;
+  /** The day button must be inert — a click can produce no valid selection. */
+  disabled: boolean;
+  /** Occupied night usable only as a checkout (Airbnb same-day turnover). */
+  checkoutOnly: boolean;
+  /** Clicking abandons the pending check-in and starts a new trip on this day. */
+  restartsRange: boolean;
+  /** Clicking the pending check-in again — the caller should clear the selection. */
+  clearsSelection: boolean;
+  /** The day is an occupied night in one of the blocks. */
+  blockedNight: boolean;
+  /** The day is before `today` (ignored when `allowPast`). */
+  past: boolean;
+}
+
+export interface DayAvailabilityOptions {
+  /** The pending (or complete) check-in, if any. */
+  checkIn?: Date | null;
+  /** The chosen checkout, if any. A complete range means the next click starts over. */
+  checkOut?: Date | null;
+  /** Booked ranges, half-open [startDate, endDate). */
+  blocks?: DateRange[];
+  /** Date-only "today"; omit to skip past-date filtering entirely. */
+  today?: Date | null;
+  /** Admin override: occupied nights stay selectable (offline bookings). */
+  allowBlocked?: boolean;
+  /** Admin override: past dates stay selectable (recording a stay that happened). */
+  allowPast?: boolean;
+}
+
+/**
+ * The single rule both calendars use to render (and gate) one day cell, so the
+ * booking-card popover and the on-page availability calendar can never drift.
+ *
+ * The important part: a free night that merely isn't *reachable* as a checkout
+ * from the pending check-in stays CLICKABLE (`kind: "restart"`). Disabling it is
+ * what used to strand the guest — with nights booked inside the range they could
+ * pick neither a checkout nor a new check-in. `nextRangeSelection` already
+ * restarts the range on such a day; this keeps the UI from swallowing the click.
+ */
+export function getDayAvailability(
+  day: Date,
+  options: DayAvailabilityOptions = {}
+): DayAvailability {
+  const {
+    checkIn = null,
+    checkOut = null,
+    blocks = [],
+    today = null,
+    allowBlocked = false,
+    allowPast = false,
+  } = options;
+
+  const t = day.getTime();
+  const past = !allowPast && !!today && t < today.getTime();
+  const blockedNight = isBlockedNight(day, blocks);
+  const base = { blockedNight, past, clearsSelection: false, restartsRange: false };
+
+  const blocked: DayAvailability = {
+    ...base,
+    kind: "blocked",
+    disabled: true,
+    checkoutOnly: false,
+  };
+  const restart: DayAvailability = {
+    ...base,
+    kind: "restart",
+    disabled: false,
+    checkoutOnly: false,
+    restartsRange: true,
+  };
+  const selectable: DayAvailability = {
+    ...base,
+    kind: "selectable",
+    disabled: false,
+    checkoutOnly: false,
+  };
+
+  if (past) {
+    return { ...base, kind: "past", disabled: true, checkoutOnly: false };
+  }
+
+  const pendingCheckIn = checkIn && !checkOut ? checkIn : null;
+  const clearsSelection = !!pendingCheckIn && t === pendingCheckIn.getTime();
+
+  // Admin override mode: occupied nights stay selectable so a stay can be
+  // recorded on top of them (the server asks the admin to confirm).
+  if (allowBlocked) return { ...selectable, clearsSelection };
+
+  if (pendingCheckIn) {
+    // Re-clicking the pending check-in clears it, so there is always a way out.
+    if (clearsSelection) return { ...selectable, clearsSelection: true };
+    if (t > pendingCheckIn.getTime() && isSelectableCheckout(pendingCheckIn, day, blocks)) {
+      return blockedNight
+        ? { ...base, kind: "checkout-only", disabled: false, checkoutOnly: true }
+        : selectable;
+    }
+    // Before the check-in, or past an occupied night → can only start over here.
+    return blockedNight ? blocked : restart;
+  }
+
+  // Choosing a check-in (nothing picked yet, or a complete range → start over).
+  return blockedNight ? blocked : selectable;
+}
+
+/**
+ * Plain-language hint for a day cell, shared by both calendars (as `title` and
+ * in the aria-label) so the three honest states always read the same way.
+ */
+export function dayHint(status: DayAvailability, isEndpoint = false): string | undefined {
+  if (isEndpoint) return undefined;
+  if (status.checkoutOnly) return "Checkout only — the next guest checks in";
+  if (status.restartsRange) return "Starts a new trip";
+  if (status.kind === "blocked") return "Booked";
+  return undefined;
+}
+
 /** Normalise a date to UTC midnight (date-only semantics). */
 export function toUtcDate(input: string | Date): Date {
   const d = new Date(input);
