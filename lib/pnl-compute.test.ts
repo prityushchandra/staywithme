@@ -46,6 +46,7 @@ function row(
     nightsOffline: partial.nightsOffline ?? 0,
     nightsOnline: partial.nightsOnline ?? 0,
     expenseByType,
+    setup: partial.setup ?? 0,
     staff: partial.staff ?? 0,
     unbookedDays: partial.unbookedDays ?? 0,
     dots: partial.dots ?? 0,
@@ -124,8 +125,18 @@ describe("summarize", () => {
     expect(t.unbookedDays).toBe(8);
   });
 
-  it("aggregates booked nights per channel", () => {
+  it("reports setup spend but keeps it out of expenses and profit", () => {
+    // A one-off fit-out earns across every month that follows, so charging it to
+    // the month it was paid would show a loss the business never made.
     const t = summarize([
+      row({ listingId: "a", month: "2026-05", revenueOnline: 500, rent: 100, staff: 50, setup: 900 }),
+    ]);
+    expect(t.setup).toBe(900);
+    expect(t.expenseTotal).toBe(150);
+    expect(t.profit).toBe(350);
+  });
+
+  it("aggregates booked nights per channel", () => {    const t = summarize([
       row({ listingId: "a", month: "2026-05", nightsOnline: 4, nightsOffline: 2, nightsDirect: 1 }),
       row({ listingId: "a", month: "2026-06", nightsOnline: 3 }),
     ]);

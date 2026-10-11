@@ -15,7 +15,8 @@ export interface PnlSummary {
   nightsTotal: number;
   // Costs, split the way they were recorded. `rent` is pulled out because it
   // dwarfs the rest and is the one people look for; `expenseByType` carries the
-  // full split including rent, so nothing is lost.
+  // full split including rent, so nothing is lost. Only RUNNING expenses are in
+  // here — see `setup` below.
   rent: number;
   expenseByType: Record<ExpenseType, number>;
   // Every recorded expense that isn't rent. Staff pay is NOT in here — it comes
@@ -23,6 +24,11 @@ export interface PnlSummary {
   expenseOther: number;
   staff: number;
   expenseTotal: number;
+  // One-off setup spend (furniture, deposits, the first fit-out). Reported so it
+  // doesn't vanish, but deliberately OUTSIDE expenseTotal and profit: it buys an
+  // asset that earns across every month, so charging it to the single month it
+  // was paid would make that month look ruinous and every later one too good.
+  setup: number;
   profit: number;
   margin: number; // profit / revenue, as a percentage (0 when no revenue)
   unbookedDays: number;
@@ -251,6 +257,7 @@ export function summarize(rows: PnlListingMonth[]): PnlSummary {
   let nightsOffline = 0;
   let nightsOnline = 0;
   let staff = 0;
+  let setup = 0;
   let unbookedDays = 0;
   let dots = 0;
   const expenseByType = emptyExpenseByType();
@@ -262,6 +269,7 @@ export function summarize(rows: PnlListingMonth[]): PnlSummary {
     nightsOffline += r.nightsOffline;
     nightsOnline += r.nightsOnline;
     staff += r.staff;
+    setup += r.setup;
     unbookedDays += r.unbookedDays;
     dots += r.dots;
     for (const t of EXPENSE_TYPES) expenseByType[t] += r.expenseByType[t] ?? 0;
@@ -287,6 +295,7 @@ export function summarize(rows: PnlListingMonth[]): PnlSummary {
     expenseOther,
     staff,
     expenseTotal,
+    setup,
     profit,
     margin,
     unbookedDays,

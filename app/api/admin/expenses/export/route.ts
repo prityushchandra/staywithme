@@ -14,6 +14,7 @@ export async function GET(req: Request) {
   const rows = filterExpenses(await listExpenses(), {
     listingId: q.get("listingId") ?? undefined,
     type: q.get("type") ?? undefined,
+    nature: q.get("nature") ?? undefined,
     paidBy: q.get("paidBy") ?? undefined,
     from: q.get("from") ?? undefined,
     to: q.get("to") ?? undefined,

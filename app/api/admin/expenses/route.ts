@@ -31,6 +31,7 @@ export async function POST(req: Request) {
     data: {
       listingId: v.listingId,
       type: v.type,
+      nature: v.nature,
       amount: v.amount,
       date: dateToUtc(v.date),
       month: v.month,
@@ -64,6 +65,7 @@ export async function PATCH(req: Request) {
     data: {
       listingId: v.listingId,
       type: v.type,
+      nature: v.nature,
       amount: v.amount,
       date: dateToUtc(v.date),
       month: v.month,

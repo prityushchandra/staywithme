@@ -3,6 +3,7 @@ import {
   needsSource,
   isExpenseType,
   isExpenseSource,
+  isExpenseNature,
   isValidDate,
   monthOfDate,
   dateToUtc,
@@ -10,6 +11,7 @@ import {
   normalizeExpense,
   filterExpenses,
   sumExpenses,
+  sumExpensesOfNature,
   expensesToCsv,
   type ExpenseRow,
 } from "./expenses";
@@ -20,6 +22,7 @@ function row(p: Partial<ExpenseRow> & { id: string }): ExpenseRow {
     listingId: p.listingId ?? "flat-1",
     label: p.label ?? "G1601",
     type: p.type ?? "RENT",
+    nature: p.nature ?? "RUNNING",
     amount: p.amount ?? 100_00,
     date: p.date ?? "2026-08-01",
     month: p.month ?? monthOfDate(p.date ?? "2026-08-01"),
@@ -128,6 +131,29 @@ describe("normalizeExpense", () => {
     const kept = normalizeExpense({ ...base, note: "  paid by card  " });
     if (kept.ok) expect(kept.value.note).toBe("paid by card");
   });
+
+  it("defaults a missing category to running, so an older caller still feeds the P&L", () => {
+    const absent = normalizeExpense(base);
+    if (absent.ok) expect(absent.value.nature).toBe("RUNNING");
+    const nulled = normalizeExpense({ ...base, nature: null });
+    if (nulled.ok) expect(nulled.value.nature).toBe("RUNNING");
+  });
+
+  it("keeps an explicit setup category and refuses an unknown one", () => {
+    const setup = normalizeExpense({ ...base, nature: "SETUP" });
+    expect(setup.ok).toBe(true);
+    if (setup.ok) expect(setup.value.nature).toBe("SETUP");
+    expect(normalizeExpense({ ...base, nature: "CAPITAL" }).ok).toBe(false);
+  });
+});
+
+describe("isExpenseNature", () => {
+  it("accepts only the two categories", () => {
+    expect(isExpenseNature("RUNNING")).toBe(true);
+    expect(isExpenseNature("SETUP")).toBe(true);
+    expect(isExpenseNature("running")).toBe(false);
+    expect(isExpenseNature(undefined)).toBe(false);
+  });
 });
 
 describe("filterExpenses", () => {
@@ -136,12 +162,19 @@ describe("filterExpenses", () => {
     row({ id: "b", listingId: "f1", type: "GROCERY", date: "2026-08-10", paidBy: "Ayushi", amount: 200 }),
     row({ id: "c", listingId: "f2", type: "WIFI", date: "2026-08-20", amount: 300 }),
     row({ id: "d", listingId: "f2", type: "GROCERY", date: "2026-09-05", paidBy: "Prityush", amount: 400 }),
+    row({ id: "e", listingId: "f2", type: "OTHER", nature: "SETUP", date: "2026-09-06", amount: 500 }),
   ];
   const ids = (rs: ExpenseRow[]) => rs.map((r) => r.id);
 
   it("returns everything when filters are unset or 'all'", () => {
-    expect(ids(filterExpenses(rows, {}))).toEqual(["a", "b", "c", "d"]);
-    expect(ids(filterExpenses(rows, { listingId: "all", type: "all", paidBy: "all" }))).toEqual(["a", "b", "c", "d"]);
+    expect(ids(filterExpenses(rows, {}))).toEqual(["a", "b", "c", "d", "e"]);
+    expect(ids(filterExpenses(rows, { listingId: "all", type: "all", nature: "all", paidBy: "all" }))).toEqual([
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+    ]);
   });
 
   it("filters by flat, type and payer", () => {
@@ -150,15 +183,20 @@ describe("filterExpenses", () => {
     expect(ids(filterExpenses(rows, { paidBy: "Ayushi" }))).toEqual(["b"]);
   });
 
+  it("filters by category", () => {
+    expect(ids(filterExpenses(rows, { nature: "SETUP" }))).toEqual(["e"]);
+    expect(ids(filterExpenses(rows, { nature: "RUNNING" }))).toEqual(["a", "b", "c", "d"]);
+  });
+
   it("treats the date range as inclusive at both ends", () => {
     expect(ids(filterExpenses(rows, { from: "2026-08-10", to: "2026-08-20" }))).toEqual(["b", "c"]);
-    expect(ids(filterExpenses(rows, { from: "2026-08-11" }))).toEqual(["c", "d"]);
+    expect(ids(filterExpenses(rows, { from: "2026-08-11" }))).toEqual(["c", "d", "e"]);
     expect(ids(filterExpenses(rows, { to: "2026-07-01" }))).toEqual(["a"]);
   });
 
   it("ignores a half-typed date instead of hiding everything", () => {
     // The date boxes are free text; a partial value must not blank the table.
-    expect(ids(filterExpenses(rows, { from: "2026-08" }))).toEqual(["a", "b", "c", "d"]);
+    expect(ids(filterExpenses(rows, { from: "2026-08" }))).toEqual(["a", "b", "c", "d", "e"]);
   });
 
   it("combines filters", () => {
@@ -169,6 +207,12 @@ describe("filterExpenses", () => {
     expect(sumExpenses(filterExpenses(rows, { type: "GROCERY" }))).toBe(600);
     expect(sumExpenses([])).toBe(0);
   });
+
+  it("splits a total by category, so the tracker and the P&L agree", () => {
+    expect(sumExpenses(rows)).toBe(1500);
+    expect(sumExpensesOfNature(rows, "RUNNING")).toBe(1000);
+    expect(sumExpensesOfNature(rows, "SETUP")).toBe(500);
+  });
 });
 
 describe("expensesToCsv", () => {
@@ -178,10 +222,15 @@ describe("expensesToCsv", () => {
       row({ id: "b", amount: 1_250_50, date: "2026-08-04", label: "L1337", type: "GROCERY", paidBy: "Ayushi" }),
     ]);
     const lines = csv.split("\r\n");
-    expect(lines[0]).toBe("Date,Flat,Type,Amount (INR),Paid by,Note");
-    expect(lines[1]).toBe("2026-08-01,G1601,Rent,32000.00,,");
-    expect(lines[2]).toBe("2026-08-04,L1337,Grocery,1250.50,Ayushi,");
-    expect(lines[3]).toBe(",,Total,33250.50,,");
+    expect(lines[0]).toBe("Date,Flat,Type,Nature,Amount (INR),Paid by,Note");
+    expect(lines[1]).toBe("2026-08-01,G1601,Rent,Running expense,32000.00,,");
+    expect(lines[2]).toBe("2026-08-04,L1337,Grocery,Running expense,1250.50,Ayushi,");
+    expect(lines[3]).toBe(",,,Total,33250.50,,");
+  });
+
+  it("names the category so a setup cost is identifiable in the sheet", () => {
+    const csv = expensesToCsv([row({ id: "a", nature: "SETUP", type: "OTHER", amount: 500_00 })]);
+    expect(csv.split("\r\n")[1]).toBe("2026-08-01,G1601,Other,Setup expense,500.00,,");
   });
 
   it("quotes commas, quotes and newlines in a note", () => {
@@ -199,6 +248,6 @@ describe("expensesToCsv", () => {
   it("still emits a header and a zero total when there is nothing to show", () => {
     const lines = expensesToCsv([]).split("\r\n");
     expect(lines).toHaveLength(2);
-    expect(lines[1]).toBe(",,Total,0.00,,");
+    expect(lines[1]).toBe(",,,Total,0.00,,");
   });
 });

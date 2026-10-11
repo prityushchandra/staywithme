@@ -174,7 +174,8 @@ export function PnlDashboard({
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Profit &amp; Loss</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {SOURCE_LABEL[source]} revenue minus expenses &amp; staff costs — {scopeLabel}.
+            {SOURCE_LABEL[source]} revenue minus running expenses &amp; staff costs — {scopeLabel}.
+            One-off setup spend is tracked separately and left out of profit.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -211,7 +212,7 @@ export function PnlDashboard({
           value={scoped.avgPerDay === null ? "—" : formatINR(scoped.avgPerDay)}
           sub={scoped.nights > 0 ? `over ${scoped.nights} booked ${scoped.nights === 1 ? "day" : "days"}` : "no booked days yet"}
         />
-        <Kpi label="Total expenses" value={formatINR(total.expenseTotal)} sub="all expenses + staff" />
+        <Kpi label="Total expenses" value={formatINR(total.expenseTotal)} sub="running expenses + staff" />
         <Kpi label="Net profit" value={formatINR(scoped.profit)} sub={`${scoped.margin.toFixed(1)}% margin`} valueClass={profitColor} />
         <Kpi label="Unbooked days" value={String(total.unbookedDays)} sub="still open + dots" />
         <Kpi label="Dots" value={String(total.dots)} sub="days gone unsold" valueClass={total.dots > 0 ? "text-amber-600" : undefined} />
@@ -281,6 +282,18 @@ export function PnlDashboard({
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">No expenses or staff costs recorded for this period.</p>
+          )}
+          {/* Setup spend is real money, so it is reported — but it buys something
+              that earns across every month that follows, so charging it to the
+              single month it was paid in would show a loss never actually made. */}
+          {total.setup > 0 && (
+            <div className="mt-4 border-t pt-3">
+              <StatRow label="Setup spend (not in P&L)" value={total.setup} />
+              <p className="mt-1 text-xs text-muted-foreground">
+                One-off costs to get flats going. Tracked in the expense tracker, left out of
+                profit above.
+              </p>
+            </div>
           )}
         </div>
       </div>

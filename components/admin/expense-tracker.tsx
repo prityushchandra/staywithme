@@ -10,12 +10,18 @@ import { Label } from "@/components/ui/label";
 import { SelectItem } from "@/components/ui/select";
 import { ToggleSelect } from "@/components/ui/toggle-select";
 import {
+  EXPENSE_NATURES,
+  EXPENSE_NATURE_HINT,
+  EXPENSE_NATURE_LABEL,
+  EXPENSE_NATURE_SHORT,
   EXPENSE_SOURCES,
   EXPENSE_TYPES,
   EXPENSE_TYPE_LABEL,
   filterExpenses,
   needsSource,
   sumExpenses,
+  sumExpensesOfNature,
+  type ExpenseNature,
   type ExpenseRow,
   type ExpenseType,
 } from "@/lib/expenses";
@@ -66,6 +72,21 @@ function RowActions({
   );
 }
 
+function NatureChip({ nature }: { nature: ExpenseNature }) {
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
+        nature === "SETUP"
+          ? "bg-amber-100 text-amber-900"
+          : "bg-emerald-100 text-emerald-900"
+      }`}
+      title={EXPENSE_NATURE_HINT[nature]}
+    >
+      {EXPENSE_NATURE_SHORT[nature]}
+    </span>
+  );
+}
+
 export function ExpenseTracker({
   flats,
   expenses,
@@ -81,6 +102,7 @@ export function ExpenseTracker({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [listingId, setListingId] = useState(flats[0]?.id ?? "");
   const [type, setType] = useState<ExpenseType>("RENT");
+  const [nature, setNature] = useState<ExpenseNature>("RUNNING");
   const [amount, setAmount] = useState("");
   const [paidBy, setPaidBy] = useState<string>(EXPENSE_SOURCES[0]);
   const [date, setDate] = useState(today);
@@ -92,13 +114,21 @@ export function ExpenseTracker({
   // --- viewer filters -----------------------------------------------------
   const [fFlat, setFFlat] = useState("all");
   const [fType, setFType] = useState("all");
+  const [fNature, setFNature] = useState("all");
   const [fPaidBy, setFPaidBy] = useState("all");
   const [fFrom, setFFrom] = useState("");
   const [fTo, setFTo] = useState("");
 
-  const filters = { listingId: fFlat, type: fType, paidBy: fPaidBy, from: fFrom, to: fTo };
-  const rows = useMemo(() => filterExpenses(expenses, filters), [expenses, fFlat, fType, fPaidBy, fFrom, fTo]);
+  const filters = { listingId: fFlat, type: fType, nature: fNature, paidBy: fPaidBy, from: fFrom, to: fTo };
+  const rows = useMemo(
+    () => filterExpenses(expenses, filters),
+    [expenses, fFlat, fType, fNature, fPaidBy, fFrom, fTo]
+  );
   const total = sumExpenses(rows);
+  // The P&L only charges running costs against a month, so the tracker shows the
+  // same split — otherwise its total and the P&L's would silently disagree.
+  const runningTotal = sumExpensesOfNature(rows, "RUNNING");
+  const setupTotal = sumExpensesOfNature(rows, "SETUP");
 
   // Per-type totals for the filtered set, so the split is visible without
   // leaving for the P&L.
@@ -112,6 +142,7 @@ export function ExpenseTracker({
     const q = new URLSearchParams();
     if (fFlat !== "all") q.set("listingId", fFlat);
     if (fType !== "all") q.set("type", fType);
+    if (fNature !== "all") q.set("nature", fNature);
     if (fPaidBy !== "all") q.set("paidBy", fPaidBy);
     if (fFrom) q.set("from", fFrom);
     if (fTo) q.set("to", fTo);
@@ -119,7 +150,8 @@ export function ExpenseTracker({
     return `/api/admin/expenses/export${s ? `?${s}` : ""}`;
   })();
 
-  const filtersOn = fFlat !== "all" || fType !== "all" || fPaidBy !== "all" || !!fFrom || !!fTo;
+  const filtersOn =
+    fFlat !== "all" || fType !== "all" || fNature !== "all" || fPaidBy !== "all" || !!fFrom || !!fTo;
 
   function resetForm() {
     setEditingId(null);
@@ -127,12 +159,14 @@ export function ExpenseTracker({
     setNote("");
     setDate(today);
     setType("RENT");
+    setNature("RUNNING");
   }
 
   function startEdit(r: ExpenseRow) {
     setEditingId(r.id);
     setListingId(r.listingId);
     setType(r.type);
+    setNature(r.nature);
     setAmount(String(r.amount / 100));
     setPaidBy(r.paidBy ?? EXPENSE_SOURCES[0]);
     setDate(r.date);
@@ -152,6 +186,7 @@ export function ExpenseTracker({
         id: editingId,
         listingId,
         type,
+        nature,
         amountRupees: Number(amount),
         date,
         paidBy: needsSource(type) ? paidBy : null,
@@ -192,9 +227,13 @@ export function ExpenseTracker({
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Expense tracker</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Every running cost of a flat, on the day it belongs to. These feed the Profit &amp; Loss
-          statement — rent included, which is why flats no longer carry a rent figure of their own.
-          Staff salaries stay in the staff tracker.
+          Every cost of a flat, on the day it belongs to. Mark each one as a{" "}
+          <span className="font-medium text-foreground">running</span> expense (rent, bills,
+          groceries — the cost of keeping the flat let) or a{" "}
+          <span className="font-medium text-foreground">setup</span> expense (furniture, deposits,
+          the first fit-out). Only running expenses feed the Profit &amp; Loss statement; setup
+          spend is tracked here and reported separately, so a one-off fit-out doesn&apos;t sink the
+          month it was paid in. Staff salaries stay in the staff tracker.
         </p>
       </div>
 
@@ -234,6 +273,23 @@ export function ExpenseTracker({
                 </SelectItem>
               ))}
             </ToggleSelect>
+          </div>
+
+          <div className="space-y-1">
+            <Label>Category</Label>
+            <ToggleSelect
+              value={nature}
+              onValueChange={(v) => setNature(v as ExpenseNature)}
+              placeholder="Category"
+              ariaLabel="Expense category"
+            >
+              {EXPENSE_NATURES.map((n) => (
+                <SelectItem key={n} value={n}>
+                  {EXPENSE_NATURE_LABEL[n]}
+                </SelectItem>
+              ))}
+            </ToggleSelect>
+            <p className="text-xs text-muted-foreground">{EXPENSE_NATURE_HINT[nature]}</p>
           </div>
 
           <div className="space-y-1">
@@ -303,7 +359,7 @@ export function ExpenseTracker({
           </a>
         </div>
 
-        <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <div className="space-y-1">
             <Label>Flat</Label>
             <ToggleSelect value={fFlat} onValueChange={setFFlat} ariaLabel="Filter by flat">
@@ -322,6 +378,17 @@ export function ExpenseTracker({
               {EXPENSE_TYPES.map((t) => (
                 <SelectItem key={t} value={t}>
                   {EXPENSE_TYPE_LABEL[t]}
+                </SelectItem>
+              ))}
+            </ToggleSelect>
+          </div>
+          <div className="space-y-1">
+            <Label>Category</Label>
+            <ToggleSelect value={fNature} onValueChange={setFNature} ariaLabel="Filter by category">
+              <SelectItem value="all">All categories</SelectItem>
+              {EXPENSE_NATURES.map((n) => (
+                <SelectItem key={n} value={n}>
+                  {EXPENSE_NATURE_LABEL[n]}
                 </SelectItem>
               ))}
             </ToggleSelect>
@@ -353,6 +420,7 @@ export function ExpenseTracker({
             onClick={() => {
               setFFlat("all");
               setFType("all");
+              setFNature("all");
               setFPaidBy("all");
               setFFrom("");
               setFTo("");
@@ -376,7 +444,10 @@ export function ExpenseTracker({
                 <li key={r.id} className="rounded-lg border p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="font-medium">{EXPENSE_TYPE_LABEL[r.type]}</p>
+                      <p className="flex flex-wrap items-center gap-2 font-medium">
+                        {EXPENSE_TYPE_LABEL[r.type]}
+                        <NatureChip nature={r.nature} />
+                      </p>
                       <p className="mt-0.5 text-xs text-muted-foreground">
                         {dayLabel(r.date)} · {r.label}
                       </p>
@@ -395,21 +466,30 @@ export function ExpenseTracker({
                   )}
                 </li>
               ))}
-              <li className="flex items-center justify-between rounded-lg bg-muted px-3 py-2 font-semibold">
-                <span>
-                  Total · {rows.length} {rows.length === 1 ? "entry" : "entries"}
-                </span>
-                <span>{formatINR(total)}</span>
+              <li className="rounded-lg bg-muted px-3 py-2">
+                <div className="flex items-center justify-between font-semibold">
+                  <span>
+                    Total · {rows.length} {rows.length === 1 ? "entry" : "entries"}
+                  </span>
+                  <span>{formatINR(total)}</span>
+                </div>
+                {setupTotal > 0 && (
+                  <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
+                    <span>Running (in P&amp;L) {formatINR(runningTotal)}</span>
+                    <span>Setup {formatINR(setupTotal)}</span>
+                  </div>
+                )}
               </li>
             </ul>
 
             <div className="hidden overflow-x-auto md:block">
-              <table className="w-full min-w-[620px] text-sm">
+              <table className="w-full min-w-[720px] text-sm">
                 <thead className="text-left text-muted-foreground">
                   <tr className="border-b">
                     <th className="py-2 pr-4 font-medium">Date</th>
                     <th className="py-2 pr-4 font-medium">Flat</th>
                     <th className="py-2 pr-4 font-medium">Type</th>
+                    <th className="py-2 pr-4 font-medium">Category</th>
                     <th className="py-2 pr-4 font-medium">Paid by</th>
                     <th className="py-2 pr-4 font-medium">Note</th>
                     <th className="py-2 pr-4 text-right font-medium">Amount</th>
@@ -422,6 +502,9 @@ export function ExpenseTracker({
                       <td className="whitespace-nowrap py-2 pr-4">{dayLabel(r.date)}</td>
                       <td className="whitespace-nowrap py-2 pr-4">{r.label}</td>
                       <td className="whitespace-nowrap py-2 pr-4">{EXPENSE_TYPE_LABEL[r.type]}</td>
+                      <td className="whitespace-nowrap py-2 pr-4">
+                        <NatureChip nature={r.nature} />
+                      </td>
                       <td className="whitespace-nowrap py-2 pr-4 text-muted-foreground">{r.paidBy ?? "—"}</td>
                       {/* Notes wrap rather than truncate — a note you can't read
                           is the same as a note you never wrote. */}
@@ -437,8 +520,13 @@ export function ExpenseTracker({
                 </tbody>
                 <tfoot>
                   <tr className="border-t-2">
-                    <td className="py-2 pr-4 font-semibold" colSpan={5}>
+                    <td className="py-2 pr-4 font-semibold" colSpan={6}>
                       Total · {rows.length} {rows.length === 1 ? "entry" : "entries"}
+                      {setupTotal > 0 && (
+                        <span className="ml-2 font-normal text-xs text-muted-foreground">
+                          Running (in P&amp;L) {formatINR(runningTotal)} · Setup {formatINR(setupTotal)}
+                        </span>
+                      )}
                     </td>
                     <td className="whitespace-nowrap py-2 pr-4 text-right font-bold">{formatINR(total)}</td>
                     <td />

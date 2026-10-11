@@ -25,6 +25,41 @@ export const EXPENSE_TYPE_LABEL: Record<ExpenseType, string> = {
   OTHER: "Other",
 };
 
+/**
+ * Whether a cost recurs or was a one-off to get the flat going.
+ *
+ * Only RUNNING costs reach the Profit & Loss. A setup cost — furniture, the
+ * deposit, the first fit-out — is capital spent once; charging it to the month
+ * it was paid would bury that month in a loss it never really made, and would
+ * make every month after it look better than the business actually is.
+ */
+export const EXPENSE_NATURES = ["RUNNING", "SETUP"] as const;
+
+export type ExpenseNature = (typeof EXPENSE_NATURES)[number];
+
+export const EXPENSE_NATURE_LABEL: Record<ExpenseNature, string> = {
+  RUNNING: "Running expense",
+  SETUP: "Setup expense",
+};
+
+/** Compact label for tables and chips, where the word "expense" is already implied. */
+export const EXPENSE_NATURE_SHORT: Record<ExpenseNature, string> = {
+  RUNNING: "Running",
+  SETUP: "Setup",
+};
+
+export const EXPENSE_NATURE_HINT: Record<ExpenseNature, string> = {
+  RUNNING: "Recurring cost of keeping the flat let. Counted in the P&L.",
+  SETUP: "One-off cost to get the flat going. Tracked, but left out of the P&L.",
+};
+
+/** Costs the Profit & Loss is allowed to charge against a month. */
+export const PNL_EXPENSE_NATURE: ExpenseNature = "RUNNING";
+
+export function isExpenseNature(v: unknown): v is ExpenseNature {
+  return typeof v === "string" && (EXPENSE_NATURES as readonly string[]).includes(v);
+}
+
 /** Who can foot a shared cost. Add a name here and it appears everywhere. */
 export const EXPENSE_SOURCES = ["Prityush", "Ayushi"] as const;
 export type ExpenseSource = (typeof EXPENSE_SOURCES)[number];
@@ -87,6 +122,7 @@ export function utcToDate(d: Date): string {
 export function normalizeExpense(input: {
   listingId?: unknown;
   type?: unknown;
+  nature?: unknown;
   amountRupees?: unknown;
   date?: unknown;
   paidBy?: unknown;
@@ -97,6 +133,12 @@ export function normalizeExpense(input: {
 
   if (!isExpenseType(input.type)) return { ok: false, error: "Pick an expense type." };
   const type = input.type;
+
+  // Absent means RUNNING: a caller that predates the split still records a cost
+  // the P&L counts, which is what it meant before the split existed.
+  if (input.nature != null && !isExpenseNature(input.nature))
+    return { ok: false, error: "Pick whether this is a running or setup expense." };
+  const nature: ExpenseNature = isExpenseNature(input.nature) ? input.nature : "RUNNING";
 
   const rupees = Number(input.amountRupees);
   if (!Number.isFinite(rupees) || rupees <= 0) return { ok: false, error: "Enter an amount above zero." };
@@ -115,12 +157,16 @@ export function normalizeExpense(input: {
   const noteRaw = typeof input.note === "string" ? input.note.trim() : "";
   const note = noteRaw ? noteRaw.slice(0, 500) : null;
 
-  return { ok: true, value: { listingId, type, amount, date, month: monthOfDate(date), paidBy, note } };
+  return {
+    ok: true,
+    value: { listingId, type, nature, amount, date, month: monthOfDate(date), paidBy, note },
+  };
 }
 
 export interface NormalizedExpense {
   listingId: string;
   type: ExpenseType;
+  nature: ExpenseNature;
   amount: number; // paise
   date: string; // "YYYY-MM-DD"
   month: string; // "YYYY-MM"
@@ -133,6 +179,7 @@ export interface ExpenseRow {
   listingId: string;
   label: string;
   type: ExpenseType;
+  nature: ExpenseNature;
   amount: number; // paise
   date: string; // "YYYY-MM-DD"
   month: string;
@@ -143,6 +190,7 @@ export interface ExpenseRow {
 export interface ExpenseFilters {
   listingId?: string;
   type?: string;
+  nature?: string;
   paidBy?: string;
   from?: string;
   to?: string;
@@ -153,6 +201,7 @@ export function filterExpenses(rows: ExpenseRow[], f: ExpenseFilters): ExpenseRo
   return rows.filter((r) => {
     if (f.listingId && f.listingId !== "all" && r.listingId !== f.listingId) return false;
     if (f.type && f.type !== "all" && r.type !== f.type) return false;
+    if (f.nature && f.nature !== "all" && r.nature !== f.nature) return false;
     if (f.paidBy && f.paidBy !== "all" && (r.paidBy ?? "") !== f.paidBy) return false;
     if (f.from && isValidDate(f.from) && r.date < f.from) return false;
     if (f.to && isValidDate(f.to) && r.date > f.to) return false;
@@ -165,7 +214,12 @@ export function sumExpenses(rows: ExpenseRow[]): number {
   return rows.reduce((s, r) => s + r.amount, 0);
 }
 
-const CSV_COLUMNS = ["Date", "Flat", "Type", "Amount (INR)", "Paid by", "Note"] as const;
+/** Total in paise of just the costs of one nature. */
+export function sumExpensesOfNature(rows: ExpenseRow[], nature: ExpenseNature): number {
+  return rows.reduce((s, r) => (r.nature === nature ? s + r.amount : s), 0);
+}
+
+const CSV_COLUMNS = ["Date", "Flat", "Type", "Nature", "Amount (INR)", "Paid by", "Note"] as const;
 
 /**
  * Escape one CSV cell.
@@ -186,6 +240,7 @@ export function expensesToCsv(rows: ExpenseRow[]): string {
         r.date,
         r.label,
         EXPENSE_TYPE_LABEL[r.type],
+        EXPENSE_NATURE_LABEL[r.nature],
         (r.amount / 100).toFixed(2),
         r.paidBy ?? "",
         r.note ?? "",
@@ -194,6 +249,6 @@ export function expensesToCsv(rows: ExpenseRow[]): string {
         .join(",")
     );
   }
-  lines.push(["", "", "Total", (sumExpenses(rows) / 100).toFixed(2), "", ""].map(csvCell).join(","));
+  lines.push(["", "", "", "Total", (sumExpenses(rows) / 100).toFixed(2), "", ""].map(csvCell).join(","));
   return lines.join("\r\n");
 }

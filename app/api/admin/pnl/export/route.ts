@@ -101,7 +101,13 @@ export async function GET(req: Request) {
     ["Staff salaries", rupees(total.staff)],
     ["Total expenses", rupees(total.expenseTotal)],
     ["Net profit", rupees(scopedTotal.profit)],
-    ["Net margin", pct(scopedTotal.margin)],
+    ["Net margin", pct(scopedTotal.margin)]
+  );
+  // Reported, never charged to profit: a one-off fit-out earns across every
+  // month that follows, so billing it to the month it was paid would show a
+  // loss the business never made.
+  if (total.setup > 0) summaryRows.push(["Setup spend (not in P&L)", rupees(total.setup)]);
+  summaryRows.push(
     ["Unbooked (available) days", `${total.unbookedDays}`],
     ["Dots (days gone unsold)", `${total.dots}`]
   );

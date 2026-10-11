@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { utcToDate, type ExpenseRow, type ExpenseType } from "@/lib/expenses";
+import { utcToDate, type ExpenseNature, type ExpenseRow, type ExpenseType } from "@/lib/expenses";
 
 // Server-only. Kept apart from lib/expenses.ts so the constants and pure helpers
 // there stay importable from client components without dragging Prisma in.
@@ -21,6 +21,7 @@ export async function listExpenses(): Promise<ExpenseRow[]> {
     listingId: e.listingId,
     label: flatLabel(e.listing),
     type: e.type as ExpenseType,
+    nature: e.nature as ExpenseNature,
     amount: e.amount,
     date: utcToDate(e.date),
     month: e.month,

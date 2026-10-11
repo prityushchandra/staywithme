@@ -9,7 +9,7 @@ import {
   splitStayByMonth,
   todayInIndia,
 } from "@/lib/pnl-compute";
-import { isExpenseType, type ExpenseType } from "@/lib/expenses";
+import { isExpenseType, PNL_EXPENSE_NATURE, type ExpenseType } from "@/lib/expenses";
 import { ICAL_RESERVED_NOTE } from "@/lib/ical";
 
 // Profit & Loss data model. Everything is in MINOR units (paise).
@@ -25,7 +25,9 @@ import { ICAL_RESERVED_NOTE } from "@/lib/ical";
 // in it rather than crediting everything to the month of check-in.
 // Expenses:
 //   - Recorded expenses : Expense rows (rent, electricity, grocery, …) dated to
-//                         the month they belong to, entered in the expense tracker
+//                         the month they belong to, entered in the expense tracker.
+//                         Only RUNNING costs; one-off SETUP spend is reported
+//                         separately and never charged against profit.
 //   - Staff             : StaffPayroll.pay for that flat + month
 
 export interface PnlListingMonth {
@@ -46,8 +48,11 @@ export interface PnlListingMonth {
   nightsOffline: number;
   nightsOnline: number;
   // Recorded expenses for this flat + month, split by type. Rent is one of
-  // these types, not a special case.
+  // these types, not a special case. RUNNING costs only — setup spend is kept
+  // out so it can't distort the month it happened to be paid in.
   expenseByType: Record<ExpenseType, number>;
+  // One-off setup spend for this flat + month. Reported, never charged to profit.
+  setup: number;
   staff: number;
   // Vacant days that earned nothing: days still open on the calendar (today
   // onward) PLUS dots — days that already ran out of time. See countAvailableDays.
@@ -121,7 +126,7 @@ export async function getPnlData(): Promise<PnlData> {
         prisma.staffPayroll.findMany({ select: { listingId: true, month: true, pay: true } }),
         prisma.availabilityBlock.findMany({ select: { listingId: true, startDate: true, endDate: true, kind: true, note: true } }),
         prisma.listingDotMonth.findMany({ select: { listingId: true, month: true, days: true } }),
-        prisma.expense.findMany({ select: { listingId: true, month: true, type: true, amount: true } }),
+        prisma.expense.findMany({ select: { listingId: true, month: true, type: true, nature: true, amount: true } }),
       ]);
 
     const listingMeta = new Map(
@@ -192,6 +197,7 @@ export async function getPnlData(): Promise<PnlData> {
           nightsOffline: 0,
           nightsOnline: 0,
           expenseByType: emptyExpenseByType(),
+          setup: 0,
           staff: 0,
           unbookedDays: 0,
           dots: 0,
@@ -271,10 +277,17 @@ export async function getPnlData(): Promise<PnlData> {
 
     // Recorded expenses land in the month they were dated to. Unlike the old
     // rent field, nothing is projected — a month reports what it actually cost.
+    //
+    // Only RUNNING costs are charged against the month. Setup spend is kept in
+    // its own bucket: it buys something that earns across every month that
+    // follows, so billing it to the one month it was paid in would show a loss
+    // the business never made.
     for (const e of expenses) {
       if (!monthSet.has(e.month) || !listingMeta.has(e.listingId)) continue;
       if (!isExpenseType(e.type)) continue;
-      cell(e.listingId, e.month).expenseByType[e.type] += e.amount;
+      const c = cell(e.listingId, e.month);
+      if (e.nature === PNL_EXPENSE_NATURE) c.expenseByType[e.type] += e.amount;
+      else c.setup += e.amount;
     }
 
     // Available (still-bookable) days per flat per month — from the current month

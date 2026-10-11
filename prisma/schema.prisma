@@ -669,6 +669,15 @@ enum ExpenseType {
   OTHER
 }
 
+// Whether a cost recurs or was a one-off to get the flat going. Only RUNNING
+// costs belong in the Profit & Loss: a setup cost (furniture, deposit, the
+// first fit-out) is capital spent once, and charging it to the month it was
+// paid would bury that month in a loss it never really made.
+enum ExpenseNature {
+  RUNNING
+  SETUP
+}
+
 // A single cost against one flat, on one date. Replaces the old
 // Listing.monthlyRent: rent is now just an expense of type RENT, so a month the
 // rent changed (or was skipped) tells the truth instead of being back-projected
@@ -679,6 +688,10 @@ model Expense {
   listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
 
   type   ExpenseType
+  // Defaults to RUNNING so every cost recorded before this split existed keeps
+  // counting in the P&L exactly as it did — the alternative silently rewrites
+  // the profit of every past month.
+  nature ExpenseNature @default(RUNNING)
   amount Int // paise
   // The day the cost belongs to. Free-dated on purpose: a bill can be recorded
   // late, or ahead of time for rent that is already committed.
@@ -699,4 +712,5 @@ model Expense {
   @@index([month])
   @@index([date])
   @@index([type])
+  @@index([nature])
 }
