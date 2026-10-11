@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, CalendarDays, X } from "lucide-react";
-import { cn, prefersReducedMotion } from "@/lib/utils";
+import { cn, prefersReducedMotion, scrollBehavior } from "@/lib/utils";
 import {
   dayHint,
   getDayAvailability,
@@ -219,7 +219,7 @@ export function DateRangePicker({
     const t = setTimeout(
       () => {
         popoverRef.current?.scrollIntoView({
-          behavior: reduce ? "auto" : "smooth",
+          behavior: scrollBehavior(true),
           block: "nearest",
         });
       },
@@ -230,12 +230,41 @@ export function DateRangePicker({
 
   // Lock the page behind the mobile overlay so the backdrop doesn't scroll away
   // under the guest's thumb while they pick dates.
+  //
+  // `overflow: hidden` alone isn't enough: it leaves the document scrollable on
+  // iOS Safari, and elsewhere it collapses the scrollable area so the browser
+  // clamps the offset to 0 — which is why finishing a selection used to dump
+  // the guest back at the top of the listing. Taking the body out of flow at a
+  // negative offset holds the view exactly where it was, and the position is
+  // put back by hand on the way out.
   useEffect(() => {
     if (!open || isAnchoredLayout()) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    const body = document.body;
+    const offsetY = window.scrollY;
+    const previous = {
+      overflow: body.style.overflow,
+      position: body.style.position,
+      top: body.style.top,
+      left: body.style.left,
+      right: body.style.right,
+      width: body.style.width,
+    };
+    body.style.overflow = "hidden";
+    body.style.position = "fixed";
+    body.style.top = `-${offsetY}px`;
+    body.style.left = "0";
+    body.style.right = "0";
+    body.style.width = "100%";
     return () => {
-      document.body.style.overflow = previous;
+      Object.assign(body.style, previous);
+      // `scroll-behavior: smooth` is set globally, so an unguarded scrollTo
+      // would animate the restore and lose a race with whatever the panel
+      // scrolls to next. The restore has to land on this frame.
+      const root = document.documentElement;
+      const behavior = root.style.scrollBehavior;
+      root.style.scrollBehavior = "auto";
+      window.scrollTo(0, offsetY);
+      root.style.scrollBehavior = behavior;
     };
   }, [open]);
 

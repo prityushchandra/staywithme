@@ -18,7 +18,7 @@ import {
   type FreshQuote,
   type QuoteOutcome,
 } from "@/lib/quote-check";
-import { cn, prefersReducedMotion } from "@/lib/utils";
+import { cn, prefersReducedMotion, scrollBehavior } from "@/lib/utils";
 
 // The page's ONE Reserve button. The booking card resolves what Reserve should
 // do and publishes it to the booking context; only the active surface (the card
@@ -159,7 +159,7 @@ export function ReserveButton({
       );
       if (!alreadyOnScreen) {
         section.scrollIntoView({
-          behavior: fullscreen || prefersReducedMotion() ? "auto" : "smooth",
+          behavior: scrollBehavior(!fullscreen),
           block: "start",
         });
         // Pointless behind a fullscreen overlay, and the guest lands on an

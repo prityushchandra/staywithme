@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { listingInputSchema, isDuplicateRefCodeError } from "@/lib/validation";
 import { getAmenityIdByKey } from "@/lib/search";
 import { createUniqueRefCode } from "@/lib/refcode";
+import { expandMapsShortLink } from "@/lib/maps";
 import { notifyAdminNewListing } from "@/lib/bookings";
 
 // Create a listing. Admin-only: listing a property is an internal workflow, so
@@ -38,6 +39,8 @@ export async function POST(req: Request) {
 
   // The Property ID may be chosen explicitly; blank means "generate one for me".
   const refCode = d.refCode || (await createUniqueRefCode());
+  // Expanded once here so the listing page never pays for the redirect.
+  const mapsUrl = await expandMapsShortLink(d.mapsUrl);
   let listing;
   try {
     listing = await prisma.listing.create({
@@ -54,7 +57,7 @@ export async function POST(req: Request) {
         country: d.country,
         flatNumber: d.flatNumber,
         block: d.block,
-        mapsUrl: d.mapsUrl || null,
+        mapsUrl,
         // Only an admin may set the curation badge; a host's value is ignored.
         guestFavorite: session.user.isAdmin ? d.guestFavorite : false,
         bedrooms: d.bedrooms,

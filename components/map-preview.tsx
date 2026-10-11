@@ -1,5 +1,5 @@
 import { ArrowUpRight, MapPin } from "lucide-react";
-import { mapEmbedSrc, safeMapsHref } from "@/lib/maps";
+import { mapEmbedSrc, mapsViewHref } from "@/lib/maps";
 
 /**
  * Keyless Google Maps preview. The iframe is inert and an anchor sits on top of
@@ -23,7 +23,7 @@ export function MapPreview({
   address?: string | null;
   locality?: string | null;
 }) {
-  const href = safeMapsHref(mapsUrl);
+  const href = mapsViewHref({ mapsUrl, lat, lng, address });
   if (!href) return null;
 
   const src = mapEmbedSrc({ mapsUrl, lat, lng, address });

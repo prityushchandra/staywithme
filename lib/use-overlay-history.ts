@@ -48,22 +48,53 @@ export function useOverlayHistory(
   useEffect(() => {
     if (!open || !enabled) return;
 
-    window.history.pushState({ ...window.history.state, overlay: true }, "");
+    const history = window.history;
+    // On a pop the browser re-applies the scroll offset it recorded for the
+    // entry underneath. An overlay locks the page while it's up, so that
+    // recorded offset is stale (often 0) and "restoring" it throws the guest
+    // back to the top of the page the moment the overlay closes. The overlay
+    // puts the scroll position back itself, so take the browser out of it.
+    const previousRestoration = history.scrollRestoration;
+    const setRestoration = (mode: ScrollRestoration) => {
+      try {
+        history.scrollRestoration = mode;
+      } catch {
+        // Not supported here; the browser keeps its default behaviour.
+      }
+    };
+    setRestoration("manual");
+
+    history.pushState({ ...history.state, overlay: true }, "");
     poppedByBrowser.current = false;
 
     const onPop = () => {
       // The browser has already removed our entry by the time this fires, so
       // there is nothing left for us to pop in the cleanup below.
       poppedByBrowser.current = true;
+      setRestoration(previousRestoration);
       onCloseRef.current();
     };
     window.addEventListener("popstate", onPop);
 
     return () => {
       window.removeEventListener("popstate", onPop);
-      if (!poppedByBrowser.current && !unmounting.current) {
-        window.history.back();
+      if (poppedByBrowser.current || unmounting.current) {
+        setRestoration(previousRestoration);
+        return;
       }
+
+      // `back()` is asynchronous — the pop, and the scroll restoration being
+      // suppressed with it, land in a later task. Hand the setting back only
+      // once that has happened, with a timeout in case the pop never comes.
+      let timer: ReturnType<typeof setTimeout>;
+      const release = () => {
+        window.removeEventListener("popstate", release);
+        clearTimeout(timer);
+        setRestoration(previousRestoration);
+      };
+      window.addEventListener("popstate", release);
+      timer = setTimeout(release, 1000);
+      history.back();
     };
   }, [open, enabled]);
 }

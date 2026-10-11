@@ -16,7 +16,7 @@ import {
   type MissingTripField,
 } from "@/lib/reserve-prompt";
 import { isRangeAvailable, toUtcDate } from "@/lib/dates";
-import { prefersReducedMotion } from "@/lib/utils";
+import { scrollBehavior } from "@/lib/utils";
 
 // Sticky booking card. Dates & guests come from the shared booking context, so
 // it stays in sync with the on-page availability calendar. It also resolves the
@@ -223,7 +223,7 @@ export function InquiryPanel({
       );
       if (onScreen) return;
       target.scrollIntoView({
-        behavior: prefersReducedMotion() ? "auto" : "smooth",
+        behavior: scrollBehavior(true),
         block: "center",
       });
     });

@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { listingInputSchema, isDuplicateRefCodeError } from "@/lib/validation";
 import { getAmenityIdByKey } from "@/lib/search";
+import { expandMapsShortLink } from "@/lib/maps";
 import { notifyAdminListingUpdated } from "@/lib/bookings";
 
 async function loadOwned(id: string) {
@@ -43,6 +44,8 @@ export async function PATCH(
   const amenityIds = d.amenityKeys
     .map((k) => amenityMap[k])
     .filter((id): id is string => !!id);
+  // Expanded once here so the listing page never pays for the redirect.
+  const mapsUrl = await expandMapsShortLink(d.mapsUrl);
 
   const result = await prisma.$transaction([
     prisma.listingImage.deleteMany({ where: { listingId: id } }),
@@ -62,7 +65,7 @@ export async function PATCH(
         block: d.block,
         // Blank keeps the current Property ID — guests may already be quoting it.
         refCode: d.refCode || ctx.listing.refCode,
-        mapsUrl: d.mapsUrl || null,
+        mapsUrl,
         // Admin-only: a host's submitted value is discarded, and whatever the
         // admin set previously survives a host edit.
         guestFavorite: ctx.session.user.isAdmin

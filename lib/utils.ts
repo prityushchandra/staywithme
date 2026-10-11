@@ -15,3 +15,14 @@ export function prefersReducedMotion(): boolean {
     window.matchMedia("(prefers-reduced-motion: reduce)").matches
   );
 }
+
+/**
+ * Pick a `scrollIntoView`/`scrollTo` behaviour. Never pass `"auto"` when you
+ * mean "jump there now" — `"auto"` defers to the CSS `scroll-behavior`, and
+ * ours is `smooth`, so the scroll lands frames later. Anything that reads
+ * `scrollY` straight after (such as the date picker's body lock) would then
+ * capture the old offset and strand the guest at the top of the page.
+ */
+export function scrollBehavior(animated: boolean): ScrollBehavior {
+  return animated && !prefersReducedMotion() ? "smooth" : "instant";
+}

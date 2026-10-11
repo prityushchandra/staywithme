@@ -34,10 +34,7 @@ export function PricingBreakdown({
         <span>{formatINR(base)}</span>
       </div>
       <div className="flex items-center justify-between text-muted-foreground">
-        <span>
-          Platform Fee ({platformFeePercent}%){" "}
-          <span className="text-xs">(non-refundable)</span>
-        </span>
+        <span>Platform Fee ({platformFeePercent}%)</span>
         <span>{formatINR(platformFee)}</span>
       </div>
       <div className="flex items-center justify-between border-t pt-2 text-base font-semibold">
