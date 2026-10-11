@@ -48,10 +48,21 @@ export function GuestFavoriteBanner({
               </span>
             </div>
             <div className="h-10 w-px bg-brand/20" />
-            <div className="leading-none">
-              <p className="text-3xl font-bold text-brand">{count}</p>
-              <p className="mt-1.5 text-xs text-muted-foreground">Reviews</p>
-            </div>
+            {/* Jumps to the listing page's <section id="reviews">, which carries
+                scroll-mt-24 to clear the sticky header. Plain anchor so this stays
+                a server component and works without JS. */}
+            <a
+              href="#reviews"
+              aria-label={`Jump to ${count} ${count === 1 ? "review" : "reviews"}`}
+              className="group rounded-lg leading-none outline-none ring-brand/60 ring-offset-2 ring-offset-background transition-opacity duration-200 ease-ios hover:opacity-80 focus-visible:ring-2"
+            >
+              <p className="text-3xl font-bold text-brand underline-offset-4 group-hover:underline">
+                {count}
+              </p>
+              <p className="mt-1.5 text-xs text-muted-foreground group-hover:text-foreground">
+                Reviews
+              </p>
+            </a>
           </div>
         )}
       </div>
