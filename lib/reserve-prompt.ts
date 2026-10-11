@@ -55,8 +55,8 @@ export function isSufficientlyVisible(
 }
 
 /**
- * The nudge shown when Reserve can't proceed and the calendar is already on
- * screen. Naming the one date that's missing beats a generic plea.
+ * The nudge shown when Reserve can't proceed and the date picker is already
+ * open. Naming the one date that's missing beats a generic plea.
  */
 export function datePromptMessage(
   kind: "incomplete" | "unavailable",

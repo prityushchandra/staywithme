@@ -20,18 +20,19 @@ import { cn } from "@/lib/utils";
 // on desktop, the floating tab on mobile) renders this, so the guest never sees
 // two Reserve buttons.
 //
-// When the trip still needs dates, Reserve takes the guest straight to the
-// on-page availability calendar (`#dates`) — no modal in the way. If that
-// calendar is already on screen, scrolling to it would look broken, so a small
-// toast says what's missing instead.
+// When the trip still needs dates, Reserve takes the guest down to the booking
+// card and opens its date picker, so picking dates, checking the total and
+// reserving all happen in one place. If the picker is already open and the
+// dates are still missing, scrolling or re-opening would look broken, so a
+// small toast says what's missing instead.
 //
 // When everything IS set, the click first re-checks price and availability
 // against the database. The listing page is ISR-cached, so the figures on
 // screen can be minutes old — this is what stops a guest sending WhatsApp a
 // message for nights that were booked, or at yesterday's price.
 
-/** The on-page two-month availability calendar section. */
-const DATES_SECTION_ID = "dates";
+/** The booking card, which owns the date picker and the price breakdown. */
+const BOOK_SECTION_ID = "book";
 /** The sticky navbar covers the top of the viewport. */
 const NAVBAR_INSET = 64;
 /** On compact screens the floating booking tab covers the bottom. */
@@ -60,7 +61,20 @@ function prefersReducedMotion() {
   );
 }
 
-/** A short tint so the calendar the guest just landed on announces itself. */
+/**
+ * Below `sm` the date picker opens as a fixed fullscreen overlay that locks
+ * body scroll — the same gate `date-range-picker` uses. A smooth scroll started
+ * just before that lock would freeze half-way, so the caller jumps instantly
+ * instead; nobody sees it, because the overlay covers the page either way.
+ */
+function picksDatesFullscreen() {
+  return (
+    typeof window !== "undefined" &&
+    window.matchMedia("(max-width: 639.98px)").matches
+  );
+}
+
+/** A short tint so the booking card the guest just landed on announces itself. */
 function flashAttention(el: HTMLElement) {
   if (typeof el.animate !== "function" || prefersReducedMotion()) return;
   el.animate(
@@ -120,7 +134,7 @@ export function ReserveButton({
   cta: ReserveCta;
   className?: string;
 }) {
-  const { isCompactLayout, setLiveListing } = useBooking();
+  const { isCompactLayout, setLiveListing, pickerOpen, setPickerOpen } = useBooking();
   const { toast } = useToast();
   const [checking, setChecking] = useState(false);
   /** The in-flight or just-settled quote for the current selection. */
@@ -136,32 +150,37 @@ export function ReserveButton({
   const label = isCompactLayout ? cta.shortLabel : cta.label;
 
   /**
-   * Bring the availability calendar into view.
-   * Returns false when it was already there and nothing moved.
+   * Take the guest to the booking card and open its date picker. That card is
+   * where the dates, the total and Reserve all live, so it is the only place a
+   * half-finished trip can actually be completed.
    */
-  function revealDates(): boolean {
-    const section = document.getElementById(DATES_SECTION_ID);
-    if (!section) return false;
-
-    const alreadyOnScreen = isSufficientlyVisible(
-      section.getBoundingClientRect(),
-      window.innerHeight,
-      { top: NAVBAR_INSET, bottom: isCompactLayout ? BOOKING_TAB_INSET : 0 }
-    );
-    if (alreadyOnScreen) return false;
-
-    section.scrollIntoView({
-      behavior: prefersReducedMotion() ? "auto" : "smooth",
-      block: "start",
-    });
-    flashAttention(section);
-    return true;
+  function revealDates() {
+    const section = document.getElementById(BOOK_SECTION_ID);
+    const fullscreen = picksDatesFullscreen();
+    if (section) {
+      const alreadyOnScreen = isSufficientlyVisible(
+        section.getBoundingClientRect(),
+        window.innerHeight,
+        { top: NAVBAR_INSET, bottom: isCompactLayout ? BOOKING_TAB_INSET : 0 }
+      );
+      if (!alreadyOnScreen) {
+        section.scrollIntoView({
+          behavior: fullscreen || prefersReducedMotion() ? "auto" : "smooth",
+          block: "start",
+        });
+        // Pointless behind a fullscreen overlay, and the guest lands on an
+        // already-tinted card when they close it.
+        if (!fullscreen) flashAttention(section);
+      }
+    }
+    setPickerOpen(true);
   }
 
-  // Scrolling to something the guest is already looking at reads as broken, so
-  // when the calendar is on screen we nudge with a toast instead.
+  // Re-opening a picker the guest is already looking at reads as broken, so
+  // once it's open we nudge with a toast instead.
   function promptForDates(message: string) {
-    if (!revealDates()) toast(message);
+    if (pickerOpen) toast(message);
+    else revealDates();
   }
 
   function startCheck(ready: ReadyCta): QuoteCheck {
@@ -218,9 +237,9 @@ export function ReserveButton({
     }
     toast(result.outcome.message, { duration: 4500 });
 
-    // Dates gone: send them back to the calendar, which now knows about the
-    // nights that were taken. A price change deliberately does nothing else —
-    // the new total is on screen and the guest presses Reserve again.
+    // Dates gone: reopen the picker, which now knows about the nights that
+    // were taken. A price change deliberately does nothing else — the new
+    // total is on screen and the guest presses Reserve again.
     if (result.outcome.kind === "unavailable") revealDates();
   }
 

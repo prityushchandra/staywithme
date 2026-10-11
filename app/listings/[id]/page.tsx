@@ -17,7 +17,6 @@ import { relativeTime } from "@/lib/relative-time";
 import { ReviewList } from "@/components/review-list";
 import { ReviewForm } from "@/components/review-form";
 import { BookingProvider } from "@/components/booking-context";
-import { AvailabilitySection } from "@/components/availability-section";
 import { AmenitiesList } from "@/components/amenities-list";
 import { CollapsibleText } from "@/components/collapsible-text";
 import { MapPreview } from "@/components/map-preview";
@@ -170,21 +169,11 @@ export default async function ListingPage({
         </div>
       )}
 
-      {/* Title + meta */}
+      {/* Title + meta. The rating lives in the banner below, not here. */}
       <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-            {listing.title}
-          </h1>
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
-            <a
-              href="#reviews"
-              className="flex items-center gap-1 font-medium text-foreground hover:underline"
-            >
-              <Star className="h-4 w-4 fill-current text-amber-500" /> {ratingLabel}
-            </a>
-          </div>
-        </div>
+        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+          {listing.title}
+        </h1>
         <div className="flex items-center gap-1 rounded-full px-3 py-1.5 hover:bg-muted">
           <WishlistButton listingId={listing.id} size="lg" />
           <span className="text-sm font-medium underline">Save</span>
@@ -202,8 +191,9 @@ export default async function ListingPage({
         <div className="mt-8 grid grid-cols-1 gap-x-12 gap-y-10 lg:grid-cols-3">
           {/* Left: details */}
           <div className="lg:col-span-2">
-            {listing.guestFavorite && (
+            {(listing.guestFavorite || ratingSummary.count > 0) && (
               <GuestFavoriteBanner
+                featured={listing.guestFavorite}
                 average={ratingSummary.average}
                 count={ratingSummary.count}
               />
@@ -247,13 +237,6 @@ export default async function ListingPage({
                 />
               </section>
             )}
-
-            {/* Availability calendar (interactive, synced with the booking card).
-                `#dates` is the scroll target for the Reserve button when a trip
-                is missing its dates. */}
-            <section id="dates" className="scroll-mt-24 border-b py-6">
-              <AvailabilitySection />
-            </section>
 
             {/* Reviews */}
             <section id="reviews" className="scroll-mt-24 border-b py-6">
