@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { mapEmbedSrc, mapsQuery, mapsViewHref, parseLatLng, safeMapsHref } from "./maps";
+import { expandMapsShortLink, mapEmbedSrc, mapsQuery, mapsViewHref, parseLatLng, safeMapsHref } from "./maps";
+import { MAPS_URL_MAX } from "./validation";
 
 // The real URL a maps.app.goo.gl share link redirects to: a place name, no
 // coordinates, and a pile of single-session parameters.
@@ -143,5 +144,42 @@ describe("mapsViewHref", () => {
   it("still refuses anything that isn't http(s)", () => {
     expect(mapsViewHref({ mapsUrl: "javascript:alert(1)", address: "Bengaluru" })).toBeNull();
     expect(mapsViewHref({ mapsUrl: null, lat: 19.076, lng: 72.8777 })).toBeNull();
+  });
+});
+
+describe("expandMapsShortLink", () => {
+  const SHORT = "https://maps.app.goo.gl/abc";
+  const stubRedirect = (location: string) => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(null, { status: 302, headers: { location } })) as typeof fetch;
+    return () => {
+      globalThis.fetch = original;
+    };
+  };
+
+  it("stores the expanded destination so the listing page skips the round trip", async () => {
+    const restore = stubRedirect(SHARED_LINK);
+    try {
+      expect(await expandMapsShortLink(SHORT)).toBe(SHARED_LINK);
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps the short link when the expansion is too long to store", async () => {
+    // Storing an over-length URL used to make the listing fail validation on
+    // every later edit; the short link resolves in a browser just as well.
+    const restore = stubRedirect(`https://maps.google.com/?q=${"a".repeat(MAPS_URL_MAX)}`);
+    try {
+      expect(await expandMapsShortLink(SHORT)).toBe(SHORT);
+    } finally {
+      restore();
+    }
+  });
+
+  it("leaves an already-expanded link alone", async () => {
+    expect(await expandMapsShortLink(SHARED_LINK)).toBe(SHARED_LINK);
+    expect(await expandMapsShortLink("javascript:alert(1)")).toBeNull();
   });
 });

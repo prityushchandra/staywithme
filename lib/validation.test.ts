@@ -3,6 +3,7 @@ import {
   isHttpUrl,
   isDuplicateRefCodeError,
   listingInputSchema,
+  MAPS_URL_MAX,
 } from "./validation";
 
 const baseListing = {
@@ -85,6 +86,19 @@ describe("listingInputSchema — property id, maps link, guest favorite", () => 
     expect(parse({ mapsUrl: "not a url" }).success).toBe(false);
     expect(parse({ mapsUrl: "javascript:alert(1)" }).success).toBe(false);
     expect(parse({ mapsUrl: "https://maps.app.goo.gl/abc" }).success).toBe(true);
+  });
+
+  it("accepts an expanded share link, which carries Google's tracking blobs", () => {
+    // A real maps.app.goo.gl link resolves to a canonical URL well past 600
+    // characters. Capping below that made such a listing impossible to re-save.
+    const expanded = `https://maps.google.com/?q=Brigade+Cornerstone+Utopia,+Bengaluru&ftid=0x3bae13006a42a45f&lucs=${"9".repeat(500)}&g_st=ic`;
+    expect(expanded.length).toBeGreaterThan(500);
+    expect(parse({ mapsUrl: expanded }).success).toBe(true);
+  });
+
+  it("still rejects a maps link beyond the stored ceiling", () => {
+    const r = parse({ mapsUrl: `https://maps.google.com/?q=${"a".repeat(MAPS_URL_MAX)}` });
+    expect(r.success).toBe(false);
   });
 
   it("defaults guestFavorite to false when the client omits it", () => {

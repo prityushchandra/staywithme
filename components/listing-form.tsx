@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { PriceInsight } from "@/components/price-insight";
 import { ImageUploader } from "@/components/image-uploader";
-import { listingInputSchema, PROPERTY_ID_MAX } from "@/lib/validation";
+import { listingInputSchema, MAPS_URL_MAX, PROPERTY_ID_MAX } from "@/lib/validation";
 import { cn } from "@/lib/utils";
 
 const ROOM_TYPES = [
@@ -446,7 +446,7 @@ export function ListingForm({
               value={form.mapsUrl}
               onChange={(e) => set("mapsUrl", e.target.value)}
               placeholder="https://maps.app.goo.gl/…"
-              maxLength={500}
+              maxLength={MAPS_URL_MAX}
             />
             <p className="text-xs text-muted-foreground">
               Optional. Shown to guests as the neighbourhood map — share the area,

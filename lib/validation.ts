@@ -6,6 +6,15 @@ import { z } from "zod";
 export const PROPERTY_ID_RE = /^[A-Z0-9]{3,12}$/;
 export const PROPERTY_ID_MAX = 12;
 
+/**
+ * Cap for a stored Google Maps link. A share link looks short when pasted, but
+ * `expandMapsShortLink` resolves it to Google's canonical URL, which carries
+ * `lucs`/`g_ep` tracking blobs and routinely runs past 600 characters. Capping
+ * near the input length made a listing uneditable the moment its link expanded
+ * past the limit, so the ceiling is the conventional safe URL length instead.
+ */
+export const MAPS_URL_MAX = 2000;
+
 /** True when `value` is a plausible http(s) URL (used for the Maps link). */
 export function isHttpUrl(value: string): boolean {
   let url: URL;
@@ -62,7 +71,7 @@ export const listingInputSchema = z
   mapsUrl: z
     .string()
     .trim()
-    .max(500)
+    .max(MAPS_URL_MAX, "That Google Maps link is too long — re-copy it from the Share menu")
     .refine(
       (s) => s === "" || isHttpUrl(s),
       "Enter a valid Google Maps link starting with http:// or https://"

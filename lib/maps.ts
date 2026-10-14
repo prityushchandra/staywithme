@@ -1,3 +1,5 @@
+import { MAPS_URL_MAX } from "./validation";
+
 export type LatLng = { lat: number; lng: number };
 
 // Coordinates appear in a few shapes across Google Maps links: "/@lat,lng,17z"
@@ -171,8 +173,13 @@ export async function expandMapsShortLink(
       signal: AbortSignal.timeout(5000),
     });
     const location = res.headers.get("location");
-    // Keep what the admin typed if Google answers with anything unexpected.
-    return (location && safeMapsHref(location)) || href;
+    const expanded = location && safeMapsHref(location);
+    // Keep what the admin typed if Google answers with anything unexpected, or
+    // if the expansion is longer than a listing may store — the short link
+    // still resolves in a browser, and storing an over-length URL would make
+    // the listing fail validation on every later edit.
+    if (!expanded || expanded.length > MAPS_URL_MAX) return href;
+    return expanded;
   } catch {
     return href;
   }
