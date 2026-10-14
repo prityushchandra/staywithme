@@ -19,6 +19,7 @@ import {
   summarize,
   perFlatBreakdown,
   emptyExpenseByType,
+  allocateStaffPay,
 } from "./pnl-compute";
 
 const utc = (s: string) => new Date(`${s}T00:00:00.000Z`);
@@ -144,6 +145,43 @@ describe("summarize", () => {
     expect(t.nightsOffline).toBe(2);
     expect(t.nightsDirect).toBe(1);
     expect(t.nightsTotal).toBe(10);
+  });
+});
+
+describe("allocateStaffPay", () => {
+  it("splits pay evenly across the flats it covers", () => {
+    const got = allocateStaffPay(900_000, ["a", "b", "c"]);
+    expect([...got.values()]).toEqual([300_000, 300_000, 300_000]);
+  });
+
+  it("never loses paise to rounding, so the P&L total matches payroll", () => {
+    // 8,900 rupees over 6 flats doesn't divide cleanly; rounding each share on
+    // its own would shed paise and leave P&L disagreeing with the payroll page.
+    const pay = 890_000;
+    const ids = ["a", "b", "c", "d", "e", "f"];
+    const got = allocateStaffPay(pay, ids);
+    expect([...got.values()].reduce((s, n) => s + n, 0)).toBe(pay);
+    expect(got.size).toBe(6);
+  });
+
+  it("charges a single flat the whole salary", () => {
+    expect([...allocateStaffPay(123_457, ["only"]).values()]).toEqual([123_457]);
+  });
+
+  it("yields nothing when there are no flats to charge", () => {
+    expect(allocateStaffPay(500, []).size).toBe(0);
+  });
+
+  it("feeds summarize so staff pay lands in expenses and profit", () => {
+    // The bug this guards: staff pay was read from a table nothing writes, so
+    // every month reported a profit that ignored the cleaner's salary.
+    const alloc = allocateStaffPay(890_000, ["a", "b"]);
+    const t = summarize(
+      [...alloc].map(([listingId, staff]) => row({ listingId, month: "2026-08", revenueOnline: 1_000_000, staff }))
+    );
+    expect(t.staff).toBe(890_000);
+    expect(t.expenseTotal).toBe(890_000);
+    expect(t.profit).toBe(2_000_000 - 890_000);
   });
 });
 

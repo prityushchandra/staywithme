@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { memo } from "@/lib/memo";
 import {
+  allocateStaffPay,
   availableDaysOf,
   eachNight,
   emptyExpenseByType,
@@ -28,7 +29,10 @@ import { ICAL_RESERVED_NOTE } from "@/lib/ical";
 //                         the month they belong to, entered in the expense tracker.
 //                         Only RUNNING costs; one-off SETUP spend is reported
 //                         separately and never charged against profit.
-//   - Staff             : StaffPayroll.pay for that flat + month
+//   - Staff             : StaffMonth.pay — a staff member's net pay for the
+//                         month, spread evenly across the flats that existed in
+//                         it. Pay is recorded per staff per month (not per
+//                         flat), so it has to be allocated to reach this grid.
 
 export interface PnlListingMonth {
   listingId: string;
@@ -106,7 +110,7 @@ export async function getPnlData(): Promise<PnlData> {
       directBookings,
       offlineBookings,
       onlineEarnings,
-      staffPayroll,
+      staffMonths,
       allBlocks,
       dotMonths,
       expenses,
@@ -123,7 +127,11 @@ export async function getPnlData(): Promise<PnlData> {
           select: { listingId: true, checkIn: true, checkOut: true, totalPrice: true, source: true },
         }),
         prisma.onlineEarning.findMany({ select: { listingId: true, month: true, amount: true } }),
-        prisma.staffPayroll.findMany({ select: { listingId: true, month: true, pay: true } }),
+        // Staff pay lives on StaffMonth (per staff, per month). The older
+        // per-flat StaffPayroll table is no longer written by anything, so
+        // reading it here reported stale pay and understated every month that
+        // had been recorded since the payroll model changed.
+        prisma.staffMonth.findMany({ select: { month: true, pay: true } }),
         prisma.availabilityBlock.findMany({ select: { listingId: true, startDate: true, endDate: true, kind: true, note: true } }),
         prisma.listingDotMonth.findMany({ select: { listingId: true, month: true, days: true } }),
         prisma.expense.findMany({ select: { listingId: true, month: true, type: true, nature: true, amount: true } }),
@@ -160,7 +168,7 @@ export async function getPnlData(): Promise<PnlData> {
     for (const s of directStays) keys.push(...s.parts.keys());
     for (const s of offlineStays) keys.push(...s.parts.keys());
     for (const e of onlineEarnings) keys.push(e.month);
-    for (const s of staffPayroll) keys.push(s.month);
+    for (const s of staffMonths) keys.push(s.month);
     for (const l of listings) keys.push(monthKey(l.createdAt));
 
     let minIdx = Math.min(...keys.map(ymToIndex));
@@ -247,8 +255,23 @@ export async function getPnlData(): Promise<PnlData> {
     for (const e of onlineEarnings) {
       if (monthSet.has(e.month) && listingMeta.has(e.listingId)) cell(e.listingId, e.month).revenueOnline += Math.max(0, e.amount);
     }
-    for (const s of staffPayroll) {
-      if (monthSet.has(s.month) && listingMeta.has(s.listingId)) cell(s.listingId, s.month).staff += Math.max(0, s.pay);
+    // Staff pay is recorded per staff per month, so spread each month's pay
+    // across the flats that existed by then — charging a flat for cleaning that
+    // happened before it was onboarded would backdate a cost it never incurred.
+    // If a month somehow predates every flat, fall back to all of them so the
+    // pay still reaches the P&L instead of vanishing.
+    const payByMonth = new Map<string, number>();
+    for (const s of staffMonths) {
+      if (monthSet.has(s.month)) payByMonth.set(s.month, (payByMonth.get(s.month) ?? 0) + Math.max(0, s.pay));
+    }
+    for (const [month, pay] of payByMonth) {
+      if (pay <= 0) continue;
+      const endMs = monthStartMs(indexToYm(ymToIndex(month) + 1));
+      let eligible = listings.filter((l) => l.createdAt.getTime() < endMs).map((l) => l.id);
+      if (eligible.length === 0) eligible = listings.map((l) => l.id);
+      for (const [listingId, share] of allocateStaffPay(pay, eligible)) {
+        cell(listingId, month).staff += share;
+      }
     }
 
     // Airbnb reservations imported from the iCal feed carry no money of their own

@@ -249,6 +249,34 @@ export function emptyExpenseByType(): Record<ExpenseType, number> {
   return Object.fromEntries(EXPENSE_TYPES.map((t) => [t, 0])) as Record<ExpenseType, number>;
 }
 
+/**
+ * Split one staff member's monthly pay across the flats it covers.
+ *
+ * Staff are paid a single monthly salary, not a wage per flat — that is exactly
+ * what StaffMonth records — but the P&L grid is per flat per month, so the cost
+ * has to be attributed somewhere. An even split is the same assumption payroll
+ * already makes: the per-flat-day dock is salary ÷ (flats × 30), so a salary is
+ * treated throughout as evenly divided over the flats a cleaner covers.
+ *
+ * Rounding is cumulative rather than per flat, so the parts add back to `pay`
+ * exactly. Rounding each share on its own would shed a few paise per flat and
+ * leave the P&L total quietly disagreeing with the payroll page.
+ *
+ * An empty flat list yields nothing — the caller is responsible for not dropping
+ * pay on the floor when a month has no flats to charge it to.
+ */
+export function allocateStaffPay(pay: number, listingIds: string[]): Map<string, number> {
+  const out = new Map<string, number>();
+  if (listingIds.length === 0) return out;
+  let allocated = 0;
+  listingIds.forEach((id, i) => {
+    const upto = Math.round((pay * (i + 1)) / listingIds.length);
+    out.set(id, (out.get(id) ?? 0) + (upto - allocated));
+    allocated = upto;
+  });
+  return out;
+}
+
 export function summarize(rows: PnlListingMonth[]): PnlSummary {
   let revenueDirect = 0;
   let revenueOffline = 0;

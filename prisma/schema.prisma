@@ -585,6 +585,10 @@ model StaffMonth {
   @@index([staffId])
 }
 
+// DEPRECATED — superseded by StaffMonth and no longer written or read by any
+// code. Staff are paid one monthly salary rather than a wage per flat, which is
+// what StaffMonth records. Kept only so historical rows aren't destroyed; do NOT
+// read it for reporting. The P&L once did, and silently reported stale pay.
 // Monthly cleaning pay for one staff member and one flat. The base salary is a
 // FIXED monthly amount per flat (₹3,000), independent of whether the month has
 // 30 or 31 days. Each flat gets some free holidays (default 4); every absence
