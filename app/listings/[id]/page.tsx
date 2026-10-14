@@ -9,6 +9,7 @@ import { auth } from "@/lib/auth";
 import { InquiryPanel } from "@/components/inquiry-panel";
 import { Gallery } from "@/components/gallery";
 import { WishlistButton } from "@/components/wishlist-button";
+import { ShareButton } from "@/components/share-button";
 import { TrackView } from "@/components/track-view";
 import { getActiveBlocks } from "@/lib/availability";
 import { syncListingCalendar } from "@/lib/calendar-sync";
@@ -174,9 +175,14 @@ export default async function ListingPage({
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
           {listing.title}
         </h1>
-        <div className="flex items-center gap-1 rounded-full px-3 py-1.5 hover:bg-muted">
-          <WishlistButton listingId={listing.id} size="lg" />
-          <span className="text-sm font-medium underline">Save</span>
+        <div className="flex shrink-0 items-center gap-1">
+          <ShareButton title={listing.title} />
+          {/* Labels are dropped on phones: two labelled pills would squeeze a
+              long title into a column barely wide enough to read. */}
+          <div className="flex items-center gap-1 rounded-full px-2 py-1.5 hover:bg-muted sm:px-3">
+            <WishlistButton listingId={listing.id} size="lg" />
+            <span className="hidden text-sm font-medium underline sm:inline">Save</span>
+          </div>
         </div>
       </div>
 
