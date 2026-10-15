@@ -75,15 +75,18 @@ export function Navbar({
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/90 backdrop-blur">
-      <div className="container flex h-16 items-center justify-between gap-4">
-        <Link href="/" className="flex min-w-0 items-center gap-2 font-bold text-brand">
+      <div className="container flex h-16 items-center justify-between gap-2 sm:gap-4">
+        <Link
+          href="/"
+          className="flex shrink-0 items-center gap-1.5 font-bold text-brand sm:gap-2"
+        >
           {/* The logo mark: the house glyph on its black tile. */}
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-black">
-            <Home className="h-5 w-5" />
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-black sm:h-9 sm:w-9">
+            <Home className="h-4 w-4 sm:h-5 sm:w-5" />
           </span>
           {showSignature ? (
-            <span className="flex min-w-0 flex-col leading-none">
-              <span className="truncate text-lg">StayWithMe</span>
+            <span className="flex flex-col leading-none">
+              <span className="text-base sm:text-lg">StayWithMe</span>
               {/* A playful signature in mirror writing — readable only in a mirror. */}
               <span
                 className="mt-0.5 text-[13px] font-normal text-brand/70"
@@ -100,7 +103,7 @@ export function Navbar({
             </span>
           ) : (
             // Signature off: wordmark sits centred against the logo.
-            <span className="truncate text-lg leading-none">StayWithMe</span>
+            <span className="text-base leading-none sm:text-lg">StayWithMe</span>
           )}
         </Link>
 
@@ -110,7 +113,7 @@ export function Navbar({
             {contactHref && <ContactLink href={contactHref} />}
             <Link
               href="/sign-in"
-              className="relative inline-flex items-center overflow-hidden rounded-full bg-brand-gradient px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition duration-200 ease-ios hover:-translate-y-0.5 hover:shadow-md hover:brightness-110 active:translate-y-0 active:scale-[0.97] sm:px-5"
+              className="relative inline-flex items-center overflow-hidden rounded-full bg-brand-gradient px-3 py-2 text-xs font-semibold text-white shadow-sm transition duration-200 ease-ios hover:-translate-y-0.5 hover:shadow-md hover:brightness-110 active:translate-y-0 active:scale-[0.97] sm:px-5 sm:py-2.5 sm:text-sm"
             >
               {/* Same sheen sweep as the hero banner pill. */}
               <span
@@ -215,10 +218,12 @@ function ContactLink({ href }: { href: string }) {
       rel="noopener noreferrer"
       aria-label="Contact us on WhatsApp"
       title="Chat with us on WhatsApp"
-      className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-[#25D366]/40 bg-[#25D366]/10 px-3 py-2 text-xs font-semibold text-[#128C7E] transition duration-200 ease-ios hover:bg-[#25D366]/20 active:scale-[0.97] sm:px-4 sm:text-sm"
+      className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-[#25D366]/40 bg-[#25D366]/10 px-2.5 py-2 text-xs font-semibold text-[#128C7E] transition duration-200 ease-ios hover:bg-[#25D366]/20 active:scale-[0.97] sm:gap-1.5 sm:px-4 sm:text-sm"
     >
       <MessageCircle className="h-4 w-4 shrink-0" />
-      Contact us
+      {/* Below ~375px the label would squeeze the wordmark out; the icon and
+          the aria-label still say "contact us" there. */}
+      <span className="hidden min-[375px]:inline">Contact us</span>
     </a>
   );
 }
