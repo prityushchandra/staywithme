@@ -68,7 +68,7 @@ export function ReserveChoiceDialog({
         side="bottom"
         className="mx-auto gap-5 rounded-t-3xl p-6 sm:max-w-lg sm:rounded-3xl sm:p-7"
       >
-        <div>
+        <div className="pr-8">
           <SheetTitle className="text-xl">How would you like to book?</SheetTitle>
           <p className="mt-1 text-sm text-muted-foreground">
             {nights} night{nights === 1 ? "" : "s"} · {formatINR(total)} with us
@@ -80,15 +80,20 @@ export function ReserveChoiceDialog({
             type="button"
             disabled={locked}
             onClick={() => choose("direct")}
-            className="group relative overflow-hidden rounded-2xl border-2 border-brand bg-brand/5 p-4 text-left transition hover:bg-brand/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+            className="rounded-2xl border-2 border-brand bg-brand/5 p-4 text-left transition hover:bg-brand/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
           >
-            <span className="absolute right-3 top-3 rounded-full bg-brand px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">
-              Best price
-            </span>
             <div className="flex items-start gap-3">
               <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-brand" />
-              <div className="pr-20">
-                <p className="font-semibold">Book with us</p>
+              {/* The badge sits in the title row rather than floating over the
+                  card, so it can never land on top of the words and the copy
+                  below it gets the full width of the button to wrap in. */}
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <p className="font-semibold">Book with us</p>
+                  <span className="rounded-full bg-brand px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">
+                    Best price
+                  </span>
+                </div>
                 <p className="mt-1 text-sm text-muted-foreground">
                   No Airbnb service fee, no accommodation tax on top, and our best
                   direct discount — you keep the difference, and we get to look
@@ -118,7 +123,7 @@ export function ReserveChoiceDialog({
           >
             <div className="flex items-start gap-3">
               <ArrowUpRight className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
-              <div>
+              <div className="min-w-0 flex-1">
                 <p className="font-semibold">Book on Airbnb</p>
                 <p className="mt-1 text-sm text-muted-foreground">
                   Prefer Airbnb&apos;s checkout? We&apos;ll open the same flat on
@@ -137,12 +142,10 @@ export function ReserveChoiceDialog({
         >
           <div className="flex items-start gap-3">
             <MessageCircle className="mt-0.5 h-5 w-5 shrink-0 text-[#128C7E]" />
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="font-semibold">Message us on WhatsApp</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Ask anything about the flat, sort out a late check-in, or talk
-                through a better rate for a longer stay. A real person reads
-                every message and replies — no bots, no forms.
+                Before booking, if you have any queries you can reach me here.
               </p>
             </div>
           </div>
