@@ -37,10 +37,18 @@ type CheckoutOptions = {
   currency: string;
   description: string;
   prefill: { name: string; contact: string; email: string };
+  /**
+   * Handed a function that force-closes the gateway. The caller keeps it so it
+   * can tear the window down if the guest abandons the booking from our side —
+   * otherwise an orphaned Razorpay overlay would sit on top of the page with
+   * nothing listening to it.
+   */
+  onReady?: (close: () => void) => void;
 };
 
 type RazorpayInstance = {
   open: () => void;
+  close: () => void;
   on: (event: string, handler: (response: unknown) => void) => void;
 };
 
@@ -51,25 +59,42 @@ declare global {
 }
 
 const SCRIPT_SRC = "https://checkout.razorpay.com/v1/checkout.js";
+// A request that is merely *stalled* (captive portal, aggressive blocker) never
+// fires onerror, so without a deadline the caller would wait forever.
+const SCRIPT_TIMEOUT_MS = 20_000;
 
 function loadRazorpayScript(): Promise<void> {
   return new Promise((resolve, reject) => {
     if (typeof window === "undefined") return reject(new Error("Payment gateway unavailable"));
     if (window.Razorpay) return resolve();
+
+    let settled = false;
+    const done = (err?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (err) reject(err);
+      else resolve();
+    };
+    const timer = setTimeout(
+      () =>
+        done(
+          new Error(
+            "The payment window is taking too long to load. Check your connection or disable any ad blocker, then try again."
+          )
+        ),
+      SCRIPT_TIMEOUT_MS
+    );
+
     const existing = document.querySelector<HTMLScriptElement>(`script[src="${SCRIPT_SRC}"]`);
-    if (existing) {
-      existing.addEventListener("load", () => resolve());
-      existing.addEventListener("error", () =>
-        reject(new Error("Could not load the payment window"))
-      );
-      return;
+    const script = existing ?? document.createElement("script");
+    script.addEventListener("load", () => done());
+    script.addEventListener("error", () => done(new Error("Could not load the payment window")));
+    if (!existing) {
+      script.src = SCRIPT_SRC;
+      script.async = true;
+      document.body.appendChild(script);
     }
-    const script = document.createElement("script");
-    script.src = SCRIPT_SRC;
-    script.async = true;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Could not load the payment window"));
-    document.body.appendChild(script);
   });
 }
 
@@ -80,6 +105,20 @@ export async function openRazorpayCheckout(
   if (!window.Razorpay) throw new Error("Payment gateway unavailable");
 
   return new Promise<RazorpayHandlerResponse>((resolve, reject) => {
+    // Razorpay can emit both `payment.failed` and `ondismiss` for one attempt;
+    // whichever lands first wins and the rest are ignored.
+    let settled = false;
+    const succeed = (r: RazorpayHandlerResponse) => {
+      if (settled) return;
+      settled = true;
+      resolve(r);
+    };
+    const fail = (e: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(e);
+    };
+
     const rzp = new window.Razorpay!({
       key: opts.keyId,
       order_id: opts.razorpayOrderId,
@@ -89,20 +128,39 @@ export async function openRazorpayCheckout(
       description: opts.description,
       prefill: opts.prefill,
       theme: { color: "#0f766e" },
-      handler: (response: RazorpayHandlerResponse) => resolve(response),
+      // Retrying inside Razorpay's own window would leave our handler detached
+      // from the second attempt, so a failure always comes back to us instead.
+      retry: { enabled: false },
+      handler: (response: RazorpayHandlerResponse) => succeed(response),
       modal: {
-        confirm_close: true,
-        ondismiss: () => reject(new RazorpayCheckoutError("dismissed", "Payment cancelled")),
+        // No "are you sure?" step: it renders inside Razorpay's iframe, and a
+        // guest pressing Back expects to leave. Nothing is lost either way —
+        // a dismissed checkout is reconciled against the gateway afterwards.
+        confirm_close: false,
+        escape: true,
+        ondismiss: () => fail(new RazorpayCheckoutError("dismissed", "Payment cancelled")),
       },
     });
     rzp.on("payment.failed", (response: unknown) => {
       const err = response as { error?: { description?: string } };
-      reject(
+      fail(
         new RazorpayCheckoutError(
           "failed",
           err?.error?.description || "Payment failed — please try again"
         )
       );
+      try {
+        rzp.close();
+      } catch {
+        /* already gone */
+      }
+    });
+    opts.onReady?.(() => {
+      try {
+        rzp.close();
+      } catch {
+        /* already gone */
+      }
     });
     rzp.open();
   });

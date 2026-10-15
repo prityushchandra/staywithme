@@ -12,14 +12,19 @@ import {
   CalendarCheck,
   LayoutDashboard,
   LogOut,
+  MessageCircle,
   Plus,
   type LucideIcon,
 } from "lucide-react";
 
+const CONTACT_MESSAGE = "Hi chandra, I want to book your property.";
+
 export function Navbar({
   showSignature = true,
+  whatsappNumber,
 }: {
   showSignature?: boolean;
+  whatsappNumber?: string;
 }) {
   const { data: session } = useSession();
   const router = useRouter();
@@ -41,6 +46,16 @@ export function Navbar({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const close = () => setOpen(false);
+
+  // Reachable from the status bar on every page, signed in or not — the
+  // floating button is hidden on small screens while a listing is open.
+  const contactDigits = (whatsappNumber ?? "").replace(/\D/g, "");
+  const contactHref =
+    contactDigits.length >= 10
+      ? `https://wa.me/${
+          contactDigits.length === 10 ? `91${contactDigits}` : contactDigits
+        }?text=${encodeURIComponent(CONTACT_MESSAGE)}`
+      : null;
 
   useEffect(() => {
     if (!open) return;
@@ -92,6 +107,7 @@ export function Navbar({
         {/* Logged out: a single entry point — sign-in figures out log in vs sign up. */}
         {!user ? (
           <div className="flex items-center gap-2 sm:gap-3">
+            {contactHref && <ContactLink href={contactHref} />}
             <Link
               href="/sign-in"
               className="relative inline-flex items-center overflow-hidden rounded-full bg-brand-gradient px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition duration-200 ease-ios hover:-translate-y-0.5 hover:shadow-md hover:brightness-110 active:translate-y-0 active:scale-[0.97]"
@@ -106,6 +122,7 @@ export function Navbar({
           </div>
         ) : (
           <div className="flex items-center gap-2">
+            {contactHref && <ContactLink href={contactHref} />}
             {/* Listing a property is an admin-only workflow. */}
             {user.isAdmin && (
               <Link
@@ -187,6 +204,21 @@ export function Navbar({
         )}
       </div>
     </header>
+  );
+}
+
+function ContactLink({ href }: { href: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="Contact us on WhatsApp"
+      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[#25D366]/40 bg-[#25D366]/10 px-2.5 py-2 text-sm font-semibold text-[#128C7E] transition duration-200 ease-ios hover:bg-[#25D366]/20 active:scale-[0.97] sm:px-3.5"
+    >
+      <MessageCircle className="h-4 w-4 shrink-0" />
+      <span className="hidden sm:inline">Contact us</span>
+    </a>
   );
 }
 

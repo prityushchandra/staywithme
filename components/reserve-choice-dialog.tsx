@@ -82,7 +82,7 @@ export function ReserveChoiceDialog({
                   </li>
                   <li className="flex items-center gap-2">
                     <ShieldCheck className="h-4 w-4 text-brand" />
-                    Secure payment, confirmed by a real person
+                    Secure payment
                   </li>
                 </ul>
               </div>

@@ -35,7 +35,11 @@ const ACCEPT = "image/jpeg,image/png,application/pdf";
 const MAX_DOC_BYTES = 4 * 1024 * 1024;
 
 type UploadedDoc = { id: string; name: string; docName: string; docSize: number };
-type Stage = "form" | "paying" | "done";
+/**
+ * "paying" spans order creation and the gateway window; "verifying" is the few
+ * seconds after Razorpay hands back a signature, which must not be interrupted.
+ */
+type Stage = "form" | "paying" | "verifying" | "done";
 
 function prettySize(bytes: number) {
   return bytes < 1024 * 1024
@@ -85,6 +89,9 @@ export function BookDirectSheet({
   );
   const [uploading, setUploading] = useState<number | null>(null);
   const fileInputs = useRef<(HTMLInputElement | null)[]>([]);
+  // Set while Razorpay's window is up, so we can tear it down if the guest
+  // backs out of the booking from our side instead of theirs.
+  const closeCheckout = useRef<(() => void) | null>(null);
 
   // Guest count can change behind the sheet (the card is still live); keep the
   // per-guest rows in step without discarding what has already been uploaded.
@@ -195,8 +202,13 @@ export function BookDirectSheet({
         currency: order.currency ?? "INR",
         description: order.description ?? propertyName,
         prefill: { name: names[0] || guestName || "", contact: phone.trim(), email: "" },
+        onReady: (dismiss) => {
+          closeCheckout.current = dismiss;
+        },
       });
+      closeCheckout.current = null;
 
+      setStage("verifying");
       const verify = await fetch(`/api/bookings/online/${bookingId}/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -206,9 +218,11 @@ export function BookDirectSheet({
       if (!verify.ok) throw new Error(result.error || "We could not confirm that payment.");
       setStage("done");
     } catch (err) {
+      closeCheckout.current = null;
       // A dismissed sheet is not a failure — but the guest may still have been
       // debited in a flaky network, so ask the gateway before giving up.
       if (err instanceof RazorpayCheckoutError && err.reason === "dismissed" && bookingId) {
+        setStage("verifying");
         const recon = await fetch(`/api/bookings/online/${bookingId}/verify`, { method: "POST" })
           .then((r) => r.json())
           .catch(() => ({ paid: false }));
@@ -224,8 +238,23 @@ export function BookDirectSheet({
     }
   }
 
+  /** Escape hatch for the rare case where the gateway never opens at all. */
+  function abandonPayment() {
+    closeCheckout.current?.();
+    closeCheckout.current = null;
+    setStage("form");
+  }
+
   function close(next: boolean) {
-    if (!next && stage === "paying") return; // never yank the sheet mid-payment
+    // Only the verify round-trip is genuinely uninterruptible. Blocking the
+    // whole payment stage is what used to trap guests whose gateway window
+    // failed to appear.
+    if (!next && stage === "verifying") return;
+    if (!next && stage === "paying") {
+      closeCheckout.current?.();
+      closeCheckout.current = null;
+      setStage("form");
+    }
     if (!next && stage === "done") {
       setStage("form");
       setBookingId(null);
@@ -239,12 +268,29 @@ export function BookDirectSheet({
   const waLink = `https://wa.me/${waNumber}?text=${encodeURIComponent(
     `Hi Chandra, I've just paid for ${propertyName} (${checkIn} to ${checkOut}). Could you please confirm my booking?`
   )}`;
+  const waHelpLink = `https://wa.me/${waNumber}?text=${encodeURIComponent(
+    `Hi Chandra, I'm booking ${propertyName} (${checkIn} to ${checkOut}) and need some help.`
+  )}`;
 
   return (
-    <Sheet open={open} onOpenChange={close}>
+    // Radix locks the page while a modal dialog is open: it sets
+    // `pointer-events: none` on <body> and traps focus inside the sheet.
+    // Razorpay injects its window as a sibling of our portal, so under those
+    // rules it renders but cannot be clicked or typed into — the guest sees a
+    // frozen payment screen. Standing down to non-modal for the duration of
+    // the gateway hands the page back.
+    <Sheet open={open} onOpenChange={close} modal={stage === "form" || stage === "done"}>
       <SheetContent
         side="bottom"
         className="mx-auto max-h-[92vh] gap-5 rounded-t-3xl p-6 sm:max-w-lg sm:rounded-3xl"
+        // Razorpay's iframe counts as "outside", so without this the sheet
+        // would dismiss itself the moment the guest touched the gateway.
+        onInteractOutside={(e) => {
+          if (stage === "paying" || stage === "verifying") e.preventDefault();
+        }}
+        onEscapeKeyDown={(e) => {
+          if (stage === "verifying") e.preventDefault();
+        }}
       >
         {stage === "done" ? (
           <div className="flex flex-col items-center gap-4 py-4 text-center">
@@ -395,10 +441,14 @@ export function BookDirectSheet({
                 variant="brand"
                 size="lg"
                 className="w-full"
-                disabled={!ready || stage === "paying" || starting}
+                disabled={!ready || stage !== "form" || starting}
                 onClick={pay}
               >
-                {stage === "paying" ? (
+                {stage === "verifying" ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Confirming your payment…
+                  </>
+                ) : stage === "paying" ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Opening payment…
                   </>
@@ -408,13 +458,33 @@ export function BookDirectSheet({
                   </>
                 )}
               </Button>
-              {!ready && (
+              {stage === "paying" && (
+                // Sits behind the gateway when it opens normally, so the guest
+                // only ever sees this if the payment window failed to appear.
+                <button
+                  type="button"
+                  onClick={abandonPayment}
+                  className="mt-2 w-full text-center text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                >
+                  Payment window didn&apos;t open? Tap to go back
+                </button>
+              )}
+              {stage === "form" && !ready && (
                 <p className="mt-2 text-center text-xs text-muted-foreground">
                   {!allNamesIn || !allDocsIn
                     ? "Add every guest's name and ID to continue"
                     : "Add your reason for visit and a contact number"}
                 </p>
               )}
+              <a
+                href={waHelpLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 flex items-center justify-center gap-2 rounded-full py-2 text-xs font-medium text-[#128C7E] transition hover:bg-[#25D366]/10"
+              >
+                <MessageCircle className="h-4 w-4" />
+                Need help? Chat with us on WhatsApp
+              </a>
             </div>
           </>
         )}

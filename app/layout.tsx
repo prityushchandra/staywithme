@@ -66,7 +66,10 @@ export default async function RootLayout({
               and inside <body> so its viewport can sit above the fixed mobile
               booking tab. This layout stays a server component. */}
           <ToastProvider>
-            <Navbar showSignature={settings.showSignature} />
+            <Navbar
+              showSignature={settings.showSignature}
+              whatsappNumber={settings.whatsappNumber}
+            />
             <main className="min-h-[calc(100vh-4rem)]">{children}</main>
             <footer className="border-t py-8 text-center text-sm text-muted-foreground">
               © {new Date().getFullYear()} StayWithMe
