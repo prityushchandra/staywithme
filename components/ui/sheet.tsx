@@ -4,6 +4,7 @@ import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { guardNestedOverlay } from "@/lib/nested-overlay";
 
 const Sheet = DialogPrimitive.Root;
 const SheetTrigger = DialogPrimitive.Trigger;
@@ -30,11 +31,23 @@ const SheetContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
     side?: "left" | "right" | "bottom";
   }
->(({ className, children, side = "right", ...props }, ref) => (
+>(({ className, children, side = "right", onPointerDownOutside, onFocusOutside, onInteractOutside, ...props }, ref) => (
   <SheetPortal>
     <SheetOverlay />
     <DialogPrimitive.Content
       ref={ref}
+      onPointerDownOutside={(e) => {
+        guardNestedOverlay(e);
+        onPointerDownOutside?.(e);
+      }}
+      onFocusOutside={(e) => {
+        guardNestedOverlay(e);
+        onFocusOutside?.(e);
+      }}
+      onInteractOutside={(e) => {
+        guardNestedOverlay(e);
+        onInteractOutside?.(e);
+      }}
       className={cn(
         "fixed z-50 flex flex-col gap-4 overflow-y-auto bg-background p-6 shadow-lg transition duration-300 ease-ios data-[state=open]:animate-in data-[state=closed]:animate-out",
         side === "right" &&

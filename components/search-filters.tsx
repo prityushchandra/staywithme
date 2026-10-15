@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,6 +35,25 @@ export function SearchFilters({
   const [bathrooms, setBathrooms] = useState(Number(params.get("bathrooms") ?? 0));
   const [amenityKeys, setAmenityKeys] = useState<string[]>(params.getAll("amenities"));
 
+  // The search bar above can change the URL on its own (new dates, new
+  // destination). This panel is not remounted by that navigation, so without a
+  // resync it keeps showing the pre-navigation dates and silently reverts them
+  // the next time Apply is pressed.
+  const urlKey = params.toString();
+  useEffect(() => {
+    setCheckIn(params.get("checkIn") ?? "");
+    setCheckOut(params.get("checkOut") ?? "");
+    setMinPrice(params.get("minPrice") ?? "");
+    setMaxPrice(params.get("maxPrice") ?? "");
+    setRoomType(params.getAll("roomType"));
+    setBedrooms(Number(params.get("bedrooms") ?? 0));
+    setBathrooms(Number(params.get("bathrooms") ?? 0));
+    setAmenityKeys(params.getAll("amenities"));
+    // `params` is a fresh object each render; the serialised query is the real
+    // dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlKey]);
+
   function toggle(list: string[], set: (v: string[]) => void, value: string) {
     set(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
   }
@@ -42,7 +61,7 @@ export function SearchFilters({
   function apply() {
     const next = new URLSearchParams();
     // Preserve the top search context.
-    for (const key of ["destination", "guests"]) {
+    for (const key of ["destination", "guests", "infants"]) {
       const v = params.get(key);
       if (v) next.set(key, v);
     }
@@ -71,7 +90,7 @@ export function SearchFilters({
     setBathrooms(0);
     setAmenityKeys([]);
     const next = new URLSearchParams();
-    for (const key of ["destination", "guests"]) {
+    for (const key of ["destination", "guests", "infants"]) {
       const v = params.get(key);
       if (v) next.set(key, v);
     }

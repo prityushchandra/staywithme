@@ -333,6 +333,13 @@ export function DateRangePicker({
   // (the sticky booking card, a sheet, an animated wrapper) can never turn its
   // `position: fixed` centring into "centred inside that ancestor". The
   // anchored desktop popover stays inline, next to its trigger.
+  //
+  // Being outside the tree has two consequences when the trigger lives inside a
+  // Radix modal (the mobile Filters sheet), both handled on the wrapper below:
+  // that modal sets `pointer-events: none` on <body>, which the portal would
+  // otherwise inherit and become untappable; and it is "outside" as far as the
+  // modal's dismiss-on-outside-click is concerned, so the wrapper is tagged
+  // `data-nested-overlay` for SheetContent/DialogContent to recognise.
   const portal = (node: ReactNode) =>
     isFullscreenOverlay && typeof document !== "undefined"
       ? createPortal(node, document.body)
@@ -375,7 +382,10 @@ export function DateRangePicker({
         // ~100vw popover hung off-screen inside the narrow booking card).
         // `sm:contents` dissolves this wrapper from `sm` up, so the calendar
         // goes back to being anchored under the trigger exactly as before.
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:contents">
+        <div
+          data-nested-overlay=""
+          className="pointer-events-auto fixed inset-0 z-[60] flex items-center justify-center p-3 sm:contents"
+        >
           <button
             type="button"
             aria-label="Close calendar"

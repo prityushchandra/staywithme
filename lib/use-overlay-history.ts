@@ -24,6 +24,48 @@ import { useEffect, useRef } from "react";
  * Cloning keeps the URL and the router tree identical to the entry underneath,
  * which is what makes popping back a no-op for Next and a pure close for us.
  */
+/**
+ * Overlays that are currently holding a history entry, oldest first. A date
+ * picker opened inside the mobile filter sheet puts two entries on the stack,
+ * and only the top one may answer a Back gesture — otherwise one Back closes
+ * the whole pile at once.
+ */
+const overlayStack: symbol[] = [];
+
+/**
+ * `history.back()` calls we made ourselves, in the order we made them. Closing
+ * an overlay pops its own entry, and that pop is indistinguishable from a real
+ * Back gesture at the `popstate` listener — so without this queue the overlay
+ * *underneath* hears its neighbour tidying up and closes itself too.
+ *
+ * Each ticket self-expires: if `back()` somehow never produces a pop, a stale
+ * ticket would silently swallow the guest's next real Back.
+ */
+const expectedPops: { matched: boolean }[] = [];
+const programmaticPops = new WeakSet<PopStateEvent>();
+
+function expectOwnPop() {
+  const ticket = { matched: false };
+  expectedPops.push(ticket);
+  setTimeout(() => {
+    if (ticket.matched) return;
+    const i = expectedPops.indexOf(ticket);
+    if (i >= 0) expectedPops.splice(i, 1);
+  }, 1000);
+}
+
+// Registered at module scope so it always runs before the per-overlay listeners
+// added later in effects, and has therefore already classified the event by the
+// time they look at it.
+if (typeof window !== "undefined") {
+  window.addEventListener("popstate", (event) => {
+    const ticket = expectedPops.shift();
+    if (!ticket) return;
+    ticket.matched = true;
+    programmaticPops.add(event);
+  });
+}
+
 export function useOverlayHistory(
   open: boolean,
   onClose: () => void,
@@ -66,11 +108,25 @@ export function useOverlayHistory(
 
     history.pushState({ ...history.state, overlay: true }, "");
     poppedByBrowser.current = false;
+    const id = Symbol("overlay");
+    overlayStack.push(id);
 
-    const onPop = () => {
+    const forget = () => {
+      const i = overlayStack.lastIndexOf(id);
+      if (i >= 0) overlayStack.splice(i, 1);
+    };
+
+    const onPop = (event: PopStateEvent) => {
+      // Another overlay popping its own entry as it closes. Not a Back gesture
+      // aimed at us — reacting to it would close this overlay too.
+      if (programmaticPops.has(event)) return;
+      // A real Back dismisses only the overlay on top of the pile; the ones
+      // underneath keep their history entries for the Backs that follow.
+      if (overlayStack[overlayStack.length - 1] !== id) return;
       // The browser has already removed our entry by the time this fires, so
       // there is nothing left for us to pop in the cleanup below.
       poppedByBrowser.current = true;
+      forget();
       setRestoration(previousRestoration);
       onCloseRef.current();
     };
@@ -78,6 +134,7 @@ export function useOverlayHistory(
 
     return () => {
       window.removeEventListener("popstate", onPop);
+      forget();
       if (poppedByBrowser.current || unmounting.current) {
         setRestoration(previousRestoration);
         return;
@@ -94,6 +151,7 @@ export function useOverlayHistory(
       };
       window.addEventListener("popstate", release);
       timer = setTimeout(release, 1000);
+      expectOwnPop();
       history.back();
     };
   }, [open, enabled]);
