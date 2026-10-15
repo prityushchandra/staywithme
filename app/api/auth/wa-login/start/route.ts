@@ -11,8 +11,19 @@ import { normalizeWhatsAppNumber } from "@/lib/whatsapp";
 // Gupshup business number), NOT the public inquiry contact in PlatformSettings —
 // otherwise the verification message never reaches the bot. Falls back to the
 // settings number only when the Gupshup source isn't configured (dev/Twilio).
-export async function POST() {
-  const { token, code } = await startWaLogin();
+export async function POST(req: Request) {
+  // The number typed on the sign-in screen. Recorded so the webhook can refuse a
+  // code sent from a different WhatsApp account; it is only ever an equality
+  // constraint, so it can never grant access to a number the sender can't prove.
+  let claimedPhone: string | null = null;
+  try {
+    const body = (await req.json()) as { phone?: unknown };
+    if (typeof body?.phone === "string") claimedPhone = body.phone;
+  } catch {
+    // No/!JSON body — fall back to binding the login to whoever sends the code.
+  }
+
+  const { token, code } = await startWaLogin(claimedPhone);
   const settings = await getPlatformSettings();
   const botNumber = process.env.GUPSHUP_SOURCE || settings.whatsappNumber;
   const number = normalizeWhatsAppNumber(botNumber);

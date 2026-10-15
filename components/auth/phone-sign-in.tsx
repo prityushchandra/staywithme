@@ -183,6 +183,20 @@ export function PhoneSignIn() {
     [complete]
   );
 
+  // Wrong WhatsApp number. The bot has already told the sender why it failed, so
+  // surface the same thing here rather than leaving the tab spinning until the
+  // request times out and blames the delay.
+  const failWrongNumber = React.useCallback(() => {
+    stopPolling();
+    clearPending();
+    setError(
+      "That code was sent from a different WhatsApp number. Send it from the number you entered, or change the number and try again."
+    );
+    setStart(null);
+    setPhase("idle");
+    setIdStep("profile");
+  }, [stopPolling]);
+
   const poll = React.useCallback(
     (token: string, profile: { phone: string; firstName: string; lastName: string }) => {
       stopPolling();
@@ -196,6 +210,8 @@ export function PhoneSignIn() {
           if (data.status === "verified") {
             stopPolling();
             onVerified(!!data.needsProfile, token, profile);
+          } else if (data.status === "rejected") {
+            failWrongNumber();
           } else if (data.status === "expired" || data.status === "unknown") {
             stopPolling();
             clearPending();
@@ -209,7 +225,7 @@ export function PhoneSignIn() {
         }
       }, 2000);
     },
-    [stopPolling, onVerified]
+    [stopPolling, onVerified, failWrongNumber]
   );
 
   // Resume a login that was mid-flight when the browser discarded this page's
@@ -245,13 +261,15 @@ export function PhoneSignIn() {
           if (data.status === "verified") {
             stopPolling();
             onVerified(!!data.needsProfile, token, { phone, firstName, lastName });
+          } else if (data.status === "rejected") {
+            failWrongNumber();
           }
         })
         .catch(() => {});
     }
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [phase, start, phone, firstName, lastName, stopPolling, onVerified]);
+  }, [phase, start, phone, firstName, lastName, stopPolling, onVerified, failWrongNumber]);
 
   async function onContinue(e: React.FormEvent) {
     e.preventDefault();
@@ -293,7 +311,13 @@ export function PhoneSignIn() {
     signingRef.current = false;
     setPhase("waiting");
     try {
-      const res = await fetch("/api/auth/wa-login/start", { method: "POST" });
+      // The typed number goes with the request so the webhook can refuse a code
+      // sent from a different WhatsApp account.
+      const res = await fetch("/api/auth/wa-login/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: phone.trim() }),
+      });
       const data = (await res.json().catch(() => ({}))) as Partial<StartResp>;
       if (!res.ok || !data.token || !data.waLink) throw new Error("start failed");
       const started = data as StartResp;

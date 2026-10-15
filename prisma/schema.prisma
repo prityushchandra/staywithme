@@ -146,7 +146,11 @@ model WhatsAppLogin {
   token      String    @unique // browser secret (polled, used to mint the session)
   code       String // short human code, sent in the WhatsApp message, matched server-side
   phone      String? // verified sender's E.164 — set only when the WA message arrives
-  status     String    @default("PENDING") // PENDING | VERIFIED | CONSUMED
+  // E.164 typed on the sign-in screen. Never grants access on its own; the
+  // webhook requires the verified sender to match it, so a code sent from a
+  // different WhatsApp account is refused instead of silently binding.
+  claimedPhone String?
+  status     String    @default("PENDING") // PENDING | VERIFIED | CONSUMED | REJECTED
   verifiedAt DateTime?
   expiresAt  DateTime
   createdAt  DateTime  @default(now())

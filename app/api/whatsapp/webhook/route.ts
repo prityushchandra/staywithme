@@ -467,10 +467,14 @@ async function handle(fromRaw: string, body: string): Promise<string | null> {
   // and before the admin gate. The account is bound to THIS verified sender.
   const loginCode = parseWaLoginCode(body);
   if (loginCode) {
-    const ok = await verifyWaLogin(loginCode, phone);
-    return ok
-      ? "✅ Verified! Head back to the StayWithMe tab — you're being logged in now."
-      : "That login request has expired or was already used. Please start again from the StayWithMe sign-in screen.";
+    const res = await verifyWaLogin(loginCode, phone);
+    if (res.ok) return "✅ Verified! Head back to the StayWithMe tab — you're being logged in now.";
+    if (res.reason === "mismatch") {
+      // Deliberately doesn't name the number the sign-in was started for: this
+      // sender isn't that person and shouldn't learn someone else's number.
+      return "❌ Couldn't verify — this sign-in was started for a different WhatsApp number. Open StayWithMe, enter the number you're messaging from, and try again.";
+    }
+    return "That login request has expired or was already used. Please start again from the StayWithMe sign-in screen.";
   }
 
   const user = await prisma.user.findUnique({ where: { phone }, select: { isAdmin: true } });
