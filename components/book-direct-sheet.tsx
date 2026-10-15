@@ -128,10 +128,26 @@ export function BookDirectSheet({
   }, [propertyId, checkIn, checkOut, guests]);
 
   // Open the draft as soon as the sheet appears so the ID uploads have somewhere
-  // to go. Re-opening after a reset starts a fresh one.
+  // to go. Re-opening after a reset starts a fresh one. Only ever while the
+  // form is up: a draft created mid-payment would race the attempt in flight.
   useEffect(() => {
-    if (open && !bookingId && !starting) void startDraft();
-  }, [open, bookingId, starting, startDraft]);
+    if (open && !bookingId && !starting && stage === "form") void startDraft();
+  }, [open, bookingId, starting, stage, startDraft]);
+
+  // A draft belongs to the dates and headcount it was created with, and the
+  // booking card behind this sheet stays live — the gateway stage deliberately
+  // stands down to non-modal so a stuck payment window can't trap anyone. If
+  // the trip moves, the draft on hand is for a stay the guest has left, so drop
+  // it; the effect above then opens one for the trip actually on screen.
+  const tripKey = `${propertyId}|${checkIn}|${checkOut}|${guests}`;
+  const lastTrip = useRef(tripKey);
+  useEffect(() => {
+    if (lastTrip.current === tripKey) return;
+    lastTrip.current = tripKey;
+    setBookingId(null);
+    setDocs(Array.from({ length: guests }, () => null));
+    setError(null);
+  }, [tripKey, guests]);
 
   async function uploadDoc(index: number, file: File) {
     const name = names[index]?.trim();
@@ -250,15 +266,21 @@ export function BookDirectSheet({
     // whole payment stage is what used to trap guests whose gateway window
     // failed to appear.
     if (!next && stage === "verifying") return;
-    if (!next && stage === "paying") {
-      closeCheckout.current?.();
-      closeCheckout.current = null;
-      setStage("form");
-    }
-    if (!next && stage === "done") {
+    if (!next) {
+      if (stage === "paying") {
+        closeCheckout.current?.();
+        closeCheckout.current = null;
+      }
+      // Every close starts the next attempt from scratch. Keeping the draft
+      // used to mean a guest who backed out of a payment, picked new dates and
+      // reserved again was handed the *old* booking: the draft effect sees an
+      // id and never asks for another, so they would have paid for the stay
+      // they just moved away from. Reopening on unchanged dates costs nothing
+      // — the server hands the same draft and its uploads straight back.
       setStage("form");
       setBookingId(null);
       setDocs(Array.from({ length: guests }, () => null));
+      setError(null);
     }
     onOpenChange(next);
   }

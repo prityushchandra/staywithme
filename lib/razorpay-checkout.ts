@@ -59,9 +59,26 @@ declare global {
 }
 
 const SCRIPT_SRC = "https://checkout.razorpay.com/v1/checkout.js";
+// Razorpay animates its own teardown, so give it a moment before we check.
+const OVERLAY_SWEEP_MS = 600;
 // A request that is merely *stalled* (captive portal, aggressive blocker) never
 // fires onerror, so without a deadline the caller would wait forever.
 const SCRIPT_TIMEOUT_MS = 20_000;
+
+/**
+ * Razorpay normally takes its own overlay away, but a `close()` that races the
+ * window's open animation — which is exactly what happens on `payment.failed`,
+ * or when we force the gateway shut from our side — can leave the container
+ * behind. It is `position: fixed` at a near-maximum z-index, so an empty
+ * leftover swallows every tap on the page: the guest goes back to the listing,
+ * presses Reserve, and nothing at all happens. Clear it once checkout is over.
+ */
+function sweepCheckoutOverlay() {
+  if (typeof document === "undefined") return;
+  document
+    .querySelectorAll(".razorpay-container, .razorpay-backdrop")
+    .forEach((el) => el.remove());
+}
 
 function loadRazorpayScript(): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -108,15 +125,18 @@ export async function openRazorpayCheckout(
     // Razorpay can emit both `payment.failed` and `ondismiss` for one attempt;
     // whichever lands first wins and the rest are ignored.
     let settled = false;
-    const succeed = (r: RazorpayHandlerResponse) => {
-      if (settled) return;
+    const settle = () => {
+      if (settled) return false;
       settled = true;
-      resolve(r);
+      // However checkout ended, nothing of the gateway may outlive it.
+      window.setTimeout(sweepCheckoutOverlay, OVERLAY_SWEEP_MS);
+      return true;
+    };
+    const succeed = (r: RazorpayHandlerResponse) => {
+      if (settle()) resolve(r);
     };
     const fail = (e: Error) => {
-      if (settled) return;
-      settled = true;
-      reject(e);
+      if (settle()) reject(e);
     };
 
     const rzp = new window.Razorpay!({

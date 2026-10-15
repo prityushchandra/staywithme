@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { WhatsAppContactButton } from "@/components/whatsapp-contact-button";
@@ -93,6 +93,14 @@ function quoteKey(cta: ReadyCta) {
   );
 }
 
+/** The stay itself, ignoring price — what the options dialog and the booking
+ *  sheet are about. A live price correction must not close them. */
+function tripKey(cta: ReserveCta) {
+  if (cta.kind !== "ready") return null;
+  const d = cta.details;
+  return [d.propertyId, d.checkIn, d.checkOut, d.guests, d.infants].join("|");
+}
+
 /**
  * Ask the server what this stay really costs and whether it's still free.
  * Returns null whenever we couldn't get a trustworthy answer — offline, a
@@ -145,6 +153,42 @@ export function ReserveButton({
   const anchorRef = useRef<HTMLAnchorElement | null>(null);
   const [choiceOpen, setChoiceOpen] = useState(false);
   const [directOpen, setDirectOpen] = useState(false);
+
+  // Both overlays below only render while the trip is complete, but this
+  // component stays mounted when it isn't — so a flag left `true` by an
+  // abandoned attempt outlives the dialog it belonged to. The next Reserve then
+  // calls `setChoiceOpen(true)` on a value that is already `true`, React has
+  // nothing to re-render, and the guest taps a button that does nothing at all.
+  // Resetting the moment the stay changes keeps the flags and the screen in
+  // step. (Adjusting state during render rather than in an effect, so the
+  // stale overlay never gets a frame to flash in.)
+  const trip = tripKey(cta);
+  const lastTrip = useRef(trip);
+  if (lastTrip.current !== trip) {
+    lastTrip.current = trip;
+    setChoiceOpen(false);
+    setDirectOpen(false);
+    setChecking(false);
+    checkRef.current = null;
+    busyRef.current = false;
+  }
+
+  // Radix hands `pointer-events` back to <body> when the last modal closes, but
+  // the options dialog closing in the same tick as the booking sheet opens —
+  // and the sheet flipping modality as the gateway comes and goes — can leave
+  // the lock behind with nothing on screen to explain it. A page that silently
+  // ignores every tap is indistinguishable from a crash, so once neither
+  // overlay is up, make sure nothing is still holding the page down.
+  useEffect(() => {
+    if (choiceOpen || directOpen) return;
+    const timer = window.setTimeout(() => {
+      if (document.querySelector('[role="dialog"][data-state="open"]')) return;
+      if (document.body.style.pointerEvents === "none") {
+        document.body.style.pointerEvents = "";
+      }
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [choiceOpen, directOpen]);
 
   // With an Airbnb listing or online payments switched on there is more than
   // one way to book, so a cleared Reserve opens the options instead of going
@@ -230,14 +274,14 @@ export function ReserveButton({
     }, 0);
   }
 
-  function applyResult(result: QuoteResult, anchor: HTMLAnchorElement) {
+  function applyResult(result: QuoteResult) {
     checkRef.current = null; // consumed — the next press asks again
 
     if (result.outcome.kind === "proceed") {
       // The price and the nights are good. Where that leads depends on how many
       // doors this listing has.
       if (hasChoices) setChoiceOpen(true);
-      else openWhatsApp(anchor);
+      else openWhatsApp(anchorRef.current);
       return;
     }
 
@@ -269,8 +313,12 @@ export function ReserveButton({
     const anchor = (event.target as HTMLElement | null)?.closest?.(
       "a"
     ) as HTMLAnchorElement | null;
-    if (!anchor) return;
-    anchorRef.current = anchor;
+    if (anchor) anchorRef.current = anchor;
+    // A press that missed the link has no WhatsApp message to re-fire, so on a
+    // listing whose only door is WhatsApp the browser handles it better than we
+    // can. Where there are other ways to book there is still a dialog to open,
+    // and bailing out here is what made Reserve look dead.
+    if (!anchor && !hasChoices) return;
 
     // Second tap while the first is still being checked, or right after
     // WhatsApp opened: swallow it rather than send a duplicate enquiry.
@@ -294,14 +342,14 @@ export function ReserveButton({
     event.stopPropagation();
 
     if (settled) {
-      applyResult(settled, anchor);
+      applyResult(settled);
       return;
     }
 
     busyRef.current = true;
     setChecking(true);
     check.promise
-      .then((result) => applyResult(result, anchor))
+      .then((result) => applyResult(result))
       .finally(() => {
         busyRef.current = false;
         setChecking(false);
