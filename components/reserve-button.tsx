@@ -21,6 +21,7 @@ import {
   type QuoteOutcome,
 } from "@/lib/quote-check";
 import { cn, prefersReducedMotion, scrollBehavior } from "@/lib/utils";
+import { buildWhatsAppLink } from "@/lib/whatsapp";
 
 // The page's ONE Reserve button. The booking card resolves what Reserve should
 // do and publishes it to the booking context; only the active surface (the card
@@ -261,17 +262,38 @@ export function ReserveButton({
   }
 
   function openWhatsApp(anchor: HTMLAnchorElement | null) {
-    if (!anchor) return;
-    // Re-fire the guest's own click so the WhatsApp link, its tracking beacon
-    // and the message body all stay exactly as they were.
     openedAtRef.current = Date.now();
-    bypassRef.current = true;
-    anchor.click();
-    // Safety net: if that click never reached our handler, don't leave the
-    // next genuine press unchecked.
-    window.setTimeout(() => {
-      bypassRef.current = false;
-    }, 0);
+    if (anchor) {
+      // Re-fire the guest's own click so the WhatsApp link, its tracking beacon
+      // and the message body all stay exactly as they were.
+      bypassRef.current = true;
+      anchor.click();
+      // Safety net: if that click never reached our handler, don't leave the
+      // next genuine press unchecked.
+      window.setTimeout(() => {
+        bypassRef.current = false;
+      }, 0);
+      return;
+    }
+
+    // WhatsApp is a headline option in the dialog, and the guest can reach it
+    // from a press that never touched the link behind the CTA — so there may be
+    // no click to re-fire. Doing nothing is the one unacceptable answer, so
+    // rebuild the identical link from the same helper the button uses. Choosing
+    // from the dialog is itself a user gesture, which keeps this out of the
+    // popup blocker.
+    if (!ready) return;
+    fetch("/api/track", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "WHATSAPP_CLICK", listingId: ready.details.propertyId }),
+      keepalive: true,
+    }).catch(() => {});
+    window.open(
+      buildWhatsAppLink(ready.whatsappNumber, ready.details),
+      "_blank",
+      "noopener,noreferrer"
+    );
   }
 
   function applyResult(result: QuoteResult) {

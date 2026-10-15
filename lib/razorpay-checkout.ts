@@ -59,25 +59,63 @@ declare global {
 }
 
 const SCRIPT_SRC = "https://checkout.razorpay.com/v1/checkout.js";
-// Razorpay animates its own teardown, so give it a moment before we check.
-const OVERLAY_SWEEP_MS = 600;
+// Razorpay animates its own teardown and only hides the container at the end of
+// it, so a leftover is only suspicious once that animation has had time to run.
+const OVERLAY_GRACE_MS = 600;
 // A request that is merely *stalled* (captive portal, aggressive blocker) never
 // fires onerror, so without a deadline the caller would wait forever.
 const SCRIPT_TIMEOUT_MS = 20_000;
 
+// Counts the checkouts this module has opened and not yet settled, so the
+// stranded-overlay check below can never fire against a window that a second
+// attempt has legitimately put back on screen.
+let openCheckouts = 0;
+
 /**
- * Razorpay normally takes its own overlay away, but a `close()` that races the
- * window's open animation — which is exactly what happens on `payment.failed`,
- * or when we force the gateway shut from our side — can leave the container
- * behind. It is `position: fixed` at a near-maximum z-index, so an empty
- * leftover swallows every tap on the page: the guest goes back to the listing,
- * presses Reserve, and nothing at all happens. Clear it once checkout is over.
+ * An overlay only matters if a tap actually lands on it, so ask the document
+ * instead of trusting the style: a container that is hidden, zero-sized, fully
+ * transparent to clicks or simply covered never comes back from
+ * `elementFromPoint`. Several points are sampled because Razorpay's window is
+ * full-screen on a phone but a centred card on a desktop.
  */
-function sweepCheckoutOverlay() {
+function isSwallowingTaps(el: HTMLElement): boolean {
+  const rect = el.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return false;
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  return [
+    [w / 2, h / 2],
+    [w / 2, h * 0.15],
+    [w / 2, h * 0.85],
+  ].some(([x, y]) => {
+    const hit = document.elementFromPoint(Math.floor(x), Math.floor(y));
+    return hit instanceof Node && el.contains(hit);
+  });
+}
+
+/**
+ * Razorpay keeps exactly one `.razorpay-container` for the lifetime of the
+ * page: checkout.js builds it the moment it loads, parks its single checkout
+ * <iframe> inside it, and reuses both for every `new Razorpay(...)`. Closing a
+ * window hides that container rather than removing it, so finding one in the
+ * DOM after checkout is normal and must be left alone — detaching it strands
+ * the cached iframe, whose `contentWindow` then reads null forever, and the
+ * next `open()` gives up with Razorpay's own "This browser is not supported"
+ * alert.
+ *
+ * Hiding it is safe, because opening a window sets `display: block` again. We
+ * only do that when the container has genuinely been left on screen and is
+ * intercepting taps, which happens when the frame never acknowledges the
+ * `close()` we post into it — it has not finished loading, or the connection
+ * died mid-payment. Left alone that empty full-screen layer sits at the
+ * maximum z-index and swallows every press on the listing underneath.
+ */
+function hideStrandedCheckoutOverlay() {
   if (typeof document === "undefined") return;
-  document
-    .querySelectorAll(".razorpay-container, .razorpay-backdrop")
-    .forEach((el) => el.remove());
+  if (openCheckouts > 0) return;
+  document.querySelectorAll<HTMLElement>(".razorpay-container").forEach((el) => {
+    if (isSwallowingTaps(el)) el.style.display = "none";
+  });
 }
 
 function loadRazorpayScript(): Promise<void> {
@@ -128,8 +166,8 @@ export async function openRazorpayCheckout(
     const settle = () => {
       if (settled) return false;
       settled = true;
-      // However checkout ended, nothing of the gateway may outlive it.
-      window.setTimeout(sweepCheckoutOverlay, OVERLAY_SWEEP_MS);
+      openCheckouts--;
+      window.setTimeout(hideStrandedCheckoutOverlay, OVERLAY_GRACE_MS);
       return true;
     };
     const succeed = (r: RazorpayHandlerResponse) => {
@@ -182,6 +220,10 @@ export async function openRazorpayCheckout(
         /* already gone */
       }
     });
+    // A container still up from an earlier attempt would cover this one, and
+    // opening resets it to `display: block` anyway, so clear it first.
+    hideStrandedCheckoutOverlay();
+    openCheckouts++;
     rzp.open();
   });
 }
