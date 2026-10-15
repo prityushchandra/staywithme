@@ -1,0 +1,424 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import {
+  AlertCircle,
+  CheckCircle2,
+  FileText,
+  Loader2,
+  Lock,
+  MessageCircle,
+  Phone,
+  Trash2,
+  Upload,
+} from "lucide-react";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { formatINR } from "@/lib/pricing";
+import { openRazorpayCheckout, RazorpayCheckoutError } from "@/lib/razorpay-checkout";
+import { normalizeWhatsAppNumber } from "@/lib/whatsapp";
+
+// "Book with us": the direct-payment path. Everything the admin needs to accept
+// a stranger into a flat is collected here — a government ID per guest, why they
+// are coming, and a number that actually rings — and the pay button stays locked
+// until all of it is present.
+//
+// The uploads go up one at a time as they are chosen rather than in a single
+// giant submit: a 4-guest booking is 4 small requests instead of one 16 MB one,
+// and the guest sees each ID land instead of staring at a spinner.
+
+const ACCEPT = "image/jpeg,image/png,application/pdf";
+const MAX_DOC_BYTES = 4 * 1024 * 1024;
+
+type UploadedDoc = { id: string; name: string; docName: string; docSize: number };
+type Stage = "form" | "paying" | "done";
+
+function prettySize(bytes: number) {
+  return bytes < 1024 * 1024
+    ? `${Math.max(1, Math.round(bytes / 1024))} KB`
+    : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export function BookDirectSheet({
+  open,
+  onOpenChange,
+  propertyId,
+  propertyName,
+  checkIn,
+  checkOut,
+  nights,
+  guests,
+  total,
+  guestName,
+  guestPhone,
+  whatsappNumber,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  propertyId: string;
+  propertyName: string;
+  checkIn: string;
+  checkOut: string;
+  nights: number;
+  guests: number;
+  total: number;
+  guestName?: string;
+  guestPhone?: string;
+  whatsappNumber: string;
+}) {
+  const [bookingId, setBookingId] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [stage, setStage] = useState<Stage>("form");
+  const [error, setError] = useState<string | null>(null);
+
+  const [reason, setReason] = useState("");
+  const [phone, setPhone] = useState(guestPhone ?? "");
+  const [names, setNames] = useState<string[]>(() =>
+    Array.from({ length: guests }, (_, i) => (i === 0 ? guestName ?? "" : ""))
+  );
+  const [docs, setDocs] = useState<(UploadedDoc | null)[]>(() =>
+    Array.from({ length: guests }, () => null)
+  );
+  const [uploading, setUploading] = useState<number | null>(null);
+  const fileInputs = useRef<(HTMLInputElement | null)[]>([]);
+
+  // Guest count can change behind the sheet (the card is still live); keep the
+  // per-guest rows in step without discarding what has already been uploaded.
+  useEffect(() => {
+    setNames((prev) =>
+      Array.from({ length: guests }, (_, i) => prev[i] ?? (i === 0 ? guestName ?? "" : ""))
+    );
+    setDocs((prev) => Array.from({ length: guests }, (_, i) => prev[i] ?? null));
+  }, [guests, guestName]);
+
+  const startDraft = useCallback(async () => {
+    setStarting(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/bookings/online", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ listingId: propertyId, checkIn, checkOut, guests }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not start your booking.");
+      setBookingId(data.bookingId as string);
+      // A reused draft may already carry IDs from an abandoned attempt.
+      const existing = (data.docs ?? []) as UploadedDoc[];
+      if (existing.length) {
+        setDocs((prev) => prev.map((d, i) => existing[i] ?? d));
+        setNames((prev) => prev.map((n, i) => existing[i]?.name ?? n));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start your booking.");
+    } finally {
+      setStarting(false);
+    }
+  }, [propertyId, checkIn, checkOut, guests]);
+
+  // Open the draft as soon as the sheet appears so the ID uploads have somewhere
+  // to go. Re-opening after a reset starts a fresh one.
+  useEffect(() => {
+    if (open && !bookingId && !starting) void startDraft();
+  }, [open, bookingId, starting, startDraft]);
+
+  async function uploadDoc(index: number, file: File) {
+    const name = names[index]?.trim();
+    if (!name) {
+      setError(`Enter guest ${index + 1}'s name before uploading their ID.`);
+      return;
+    }
+    if (file.size > MAX_DOC_BYTES) {
+      setError(`${file.name} is larger than 4 MB. Please upload a smaller scan.`);
+      return;
+    }
+    if (!bookingId) return;
+
+    setUploading(index);
+    setError(null);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      body.append("name", name);
+      const res = await fetch(`/api/bookings/online/${bookingId}/docs`, { method: "POST", body });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Upload failed.");
+      setDocs((prev) => prev.map((d, i) => (i === index ? (data.doc as UploadedDoc) : d)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Upload failed.");
+    } finally {
+      setUploading(null);
+      const input = fileInputs.current[index];
+      if (input) input.value = "";
+    }
+  }
+
+  async function removeDoc(index: number) {
+    const doc = docs[index];
+    if (!doc || !bookingId) return;
+    setDocs((prev) => prev.map((d, i) => (i === index ? null : d)));
+    await fetch(`/api/bookings/online/${bookingId}/docs?docId=${encodeURIComponent(doc.id)}`, {
+      method: "DELETE",
+    }).catch(() => {});
+  }
+
+  const allDocsIn = docs.every((d) => d !== null);
+  const allNamesIn = names.every((n) => n.trim().length > 1);
+  const ready =
+    Boolean(bookingId) &&
+    allDocsIn &&
+    allNamesIn &&
+    reason.trim().length >= 3 &&
+    phone.trim().length >= 6;
+
+  async function pay() {
+    if (!bookingId || !ready) return;
+    setStage("paying");
+    setError(null);
+    try {
+      const res = await fetch(`/api/bookings/online/${bookingId}/pay`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reasonForVisit: reason.trim(), contactPhone: phone.trim() }),
+      });
+      const order = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(order.error || "Could not start the payment.");
+
+      const handler = await openRazorpayCheckout({
+        keyId: order.keyId,
+        razorpayOrderId: order.razorpayOrderId,
+        amount: order.amount,
+        currency: order.currency ?? "INR",
+        description: order.description ?? propertyName,
+        prefill: { name: names[0] || guestName || "", contact: phone.trim(), email: "" },
+      });
+
+      const verify = await fetch(`/api/bookings/online/${bookingId}/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(handler),
+      });
+      const result = await verify.json().catch(() => ({}));
+      if (!verify.ok) throw new Error(result.error || "We could not confirm that payment.");
+      setStage("done");
+    } catch (err) {
+      // A dismissed sheet is not a failure — but the guest may still have been
+      // debited in a flaky network, so ask the gateway before giving up.
+      if (err instanceof RazorpayCheckoutError && err.reason === "dismissed" && bookingId) {
+        const recon = await fetch(`/api/bookings/online/${bookingId}/verify`, { method: "POST" })
+          .then((r) => r.json())
+          .catch(() => ({ paid: false }));
+        if (recon?.paid) {
+          setStage("done");
+          return;
+        }
+        setStage("form");
+        return;
+      }
+      setError(err instanceof Error ? err.message : "Payment failed.");
+      setStage("form");
+    }
+  }
+
+  function close(next: boolean) {
+    if (!next && stage === "paying") return; // never yank the sheet mid-payment
+    if (!next && stage === "done") {
+      setStage("form");
+      setBookingId(null);
+      setDocs(Array.from({ length: guests }, () => null));
+    }
+    onOpenChange(next);
+  }
+
+  const waNumber = normalizeWhatsAppNumber(whatsappNumber);
+  const callHref = `tel:+${waNumber}`;
+  const waLink = `https://wa.me/${waNumber}?text=${encodeURIComponent(
+    `Hi Chandra, I've just paid for ${propertyName} (${checkIn} to ${checkOut}). Could you please confirm my booking?`
+  )}`;
+
+  return (
+    <Sheet open={open} onOpenChange={close}>
+      <SheetContent
+        side="bottom"
+        className="mx-auto max-h-[92vh] gap-5 rounded-t-3xl p-6 sm:max-w-lg sm:rounded-3xl"
+      >
+        {stage === "done" ? (
+          <div className="flex flex-col items-center gap-4 py-4 text-center">
+            <CheckCircle2 className="h-14 w-14 text-brand" />
+            <div>
+              <SheetTitle className="text-xl">Payment received</SheetTitle>
+              <p className="mt-2 text-sm text-muted-foreground">
+                We&apos;ve held {checkIn} → {checkOut} for you. Chandra is reviewing
+                your details now and you&apos;ll get a WhatsApp the moment it&apos;s
+                confirmed — usually within a few hours.
+              </p>
+            </div>
+            <div className="grid w-full grid-cols-2 gap-2">
+              <Button asChild variant="outline">
+                <a href={callHref}>
+                  <Phone className="mr-2 h-4 w-4" /> Call us
+                </a>
+              </Button>
+              <Button asChild variant="outline">
+                <a href={waLink} target="_blank" rel="noopener noreferrer">
+                  <MessageCircle className="mr-2 h-4 w-4" /> WhatsApp
+                </a>
+              </Button>
+            </div>
+            <Button asChild variant="brand" className="w-full">
+              <Link href="/my-bookings">View my booking</Link>
+            </Button>
+          </div>
+        ) : (
+          <>
+            <div>
+              <SheetTitle className="text-xl">Book with us</SheetTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {propertyName} · {nights} night{nights === 1 ? "" : "s"} ·{" "}
+                {guests} guest{guests === 1 ? "" : "s"}
+              </p>
+            </div>
+
+            <div className="space-y-1">
+              <Label htmlFor="reason">Reason for visit</Label>
+              <Textarea
+                id="reason"
+                rows={2}
+                value={reason}
+                maxLength={500}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Work trip, family visit, exams, relocation…"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label htmlFor="contactPhone">Contact number</Label>
+              <Input
+                id="contactPhone"
+                type="tel"
+                inputMode="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+91 98765 43210"
+              />
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <Label>Government ID for each guest</Label>
+                <p className="text-xs text-muted-foreground">
+                  Aadhaar, passport or driving licence — JPG, PNG or PDF, up to 4 MB.
+                  Stored privately and only ever seen by your host.
+                </p>
+              </div>
+
+              {names.map((name, i) => {
+                const doc = docs[i];
+                return (
+                  <div key={i} className="rounded-xl border p-3">
+                    <Input
+                      value={name}
+                      placeholder={`Guest ${i + 1} full name`}
+                      maxLength={120}
+                      onChange={(e) =>
+                        setNames((prev) => prev.map((n, j) => (j === i ? e.target.value : n)))
+                      }
+                    />
+                    {doc ? (
+                      <div className="mt-2 flex items-center gap-2 rounded-lg bg-brand/5 px-3 py-2 text-sm">
+                        <FileText className="h-4 w-4 shrink-0 text-brand" />
+                        <span className="min-w-0 flex-1 truncate">{doc.docName}</span>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {prettySize(doc.docSize)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeDoc(i)}
+                          aria-label={`Remove guest ${i + 1}'s ID`}
+                          className="shrink-0 rounded p-1 text-muted-foreground transition hover:text-destructive"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <input
+                          ref={(el) => {
+                            fileInputs.current[i] = el;
+                          }}
+                          type="file"
+                          accept={ACCEPT}
+                          className="sr-only"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) void uploadDoc(i, file);
+                          }}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="mt-2 w-full"
+                          disabled={uploading !== null || !bookingId}
+                          onClick={() => fileInputs.current[i]?.click()}
+                        >
+                          {uploading === i ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <Upload className="mr-2 h-4 w-4" />
+                          )}
+                          {uploading === i ? "Uploading…" : "Upload ID"}
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {error && (
+              <p className="flex items-start gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                {error}
+              </p>
+            )}
+
+            <div className="sticky bottom-0 -mx-6 border-t bg-background px-6 pb-1 pt-3">
+              <div className="mb-2 flex items-baseline justify-between">
+                <span className="text-sm text-muted-foreground">Total</span>
+                <span className="text-lg font-semibold">{formatINR(total)}</span>
+              </div>
+              <Button
+                variant="brand"
+                size="lg"
+                className="w-full"
+                disabled={!ready || stage === "paying" || starting}
+                onClick={pay}
+              >
+                {stage === "paying" ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Opening payment…
+                  </>
+                ) : (
+                  <>
+                    <Lock className="mr-2 h-4 w-4" /> Pay {formatINR(total)}
+                  </>
+                )}
+              </Button>
+              {!ready && (
+                <p className="mt-2 text-center text-xs text-muted-foreground">
+                  {!allNamesIn || !allDocsIn
+                    ? "Add every guest's name and ID to continue"
+                    : "Add your reason for visit and a contact number"}
+                </p>
+              )}
+            </div>
+          </>
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+}

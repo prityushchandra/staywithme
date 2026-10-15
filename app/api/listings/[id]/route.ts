@@ -66,6 +66,7 @@ export async function PATCH(
         // Blank keeps the current Property ID — guests may already be quoting it.
         refCode: d.refCode || ctx.listing.refCode,
         mapsUrl,
+        airbnbUrl: d.airbnbUrl || null,
         // Admin-only: a host's submitted value is discarded, and whatever the
         // admin set previously survives a host edit.
         guestFavorite: ctx.session.user.isAdmin

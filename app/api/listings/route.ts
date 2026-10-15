@@ -58,6 +58,7 @@ export async function POST(req: Request) {
         flatNumber: d.flatNumber,
         block: d.block,
         mapsUrl,
+        airbnbUrl: d.airbnbUrl || null,
         // Only an admin may set the curation badge; a host's value is ignored.
         guestFavorite: session.user.isAdmin ? d.guestFavorite : false,
         bedrooms: d.bedrooms,

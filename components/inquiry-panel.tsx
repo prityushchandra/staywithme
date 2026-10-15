@@ -50,6 +50,8 @@ export function InquiryPanel({
   checkOutTime,
   blockedRanges: blockedRangesProp = [],
   isAuthenticated = false,
+  airbnbUrl,
+  canPayOnline = false,
 }: {
   propertyId: string;
   refCode?: string;
@@ -67,6 +69,10 @@ export function InquiryPanel({
   checkOutTime?: string;
   blockedRanges?: { startDate: string; endDate: string }[];
   isAuthenticated?: boolean;
+  /** The same flat on Airbnb, when the host has listed it there. */
+  airbnbUrl?: string | null;
+  /** True when Razorpay is configured, so the guest can pay us directly. */
+  canPayOnline?: boolean;
 }) {
   const {
     checkIn,
@@ -150,9 +156,13 @@ export function InquiryPanel({
     }
     return {
       kind: "ready",
-      label: "Reserve on WhatsApp",
+      // With more than one way to book, Reserve opens the options rather than
+      // jumping straight to WhatsApp — so don't promise WhatsApp on the button.
+      label: airbnbUrl || canPayOnline ? "Reserve" : "Reserve on WhatsApp",
       shortLabel: "Reserve",
       whatsappNumber,
+      airbnbUrl: airbnbUrl ?? null,
+      canPayOnline,
       details: {
         propertyName,
         propertyId,
@@ -202,6 +212,8 @@ export function InquiryPanel({
     discountedPrice,
     monthlyPrice,
     platformFeePercent,
+    airbnbUrl,
+    canPayOnline,
   ]);
 
   useEffect(() => {

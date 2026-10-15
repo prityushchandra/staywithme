@@ -4,6 +4,8 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { WhatsAppContactButton } from "@/components/whatsapp-contact-button";
+import { ReserveChoiceDialog, type ReserveChoice } from "@/components/reserve-choice-dialog";
+import { BookDirectSheet } from "@/components/book-direct-sheet";
 import { useToast } from "@/components/ui/toast";
 import { useBooking, type ReserveCta } from "@/components/booking-context";
 import {
@@ -139,6 +141,18 @@ export function ReserveButton({
   const bypassRef = useRef(false);
   /** When WhatsApp was last opened, so a double-tap doesn't send two messages. */
   const openedAtRef = useRef(0);
+  /** The WhatsApp link behind the CTA, so the options dialog can still use it. */
+  const anchorRef = useRef<HTMLAnchorElement | null>(null);
+  const [choiceOpen, setChoiceOpen] = useState(false);
+  const [directOpen, setDirectOpen] = useState(false);
+
+  // With an Airbnb listing or online payments switched on there is more than
+  // one way to book, so a cleared Reserve opens the options instead of going
+  // straight to WhatsApp. With neither, nothing about the old flow changes.
+  const ready = cta.kind === "ready" ? cta : null;
+  const airbnbUrl = ready?.airbnbUrl ?? null;
+  const canPayOnline = ready?.canPayOnline ?? false;
+  const hasChoices = Boolean(airbnbUrl) || canPayOnline;
 
   // The floating tab is narrow, so it gets the terse label.
   const label = isCompactLayout ? cta.shortLabel : cta.label;
@@ -202,20 +216,28 @@ export function ReserveButton({
     return check;
   }
 
+  function openWhatsApp(anchor: HTMLAnchorElement | null) {
+    if (!anchor) return;
+    // Re-fire the guest's own click so the WhatsApp link, its tracking beacon
+    // and the message body all stay exactly as they were.
+    openedAtRef.current = Date.now();
+    bypassRef.current = true;
+    anchor.click();
+    // Safety net: if that click never reached our handler, don't leave the
+    // next genuine press unchecked.
+    window.setTimeout(() => {
+      bypassRef.current = false;
+    }, 0);
+  }
+
   function applyResult(result: QuoteResult, anchor: HTMLAnchorElement) {
     checkRef.current = null; // consumed — the next press asks again
 
     if (result.outcome.kind === "proceed") {
-      // Re-fire the guest's own click so the WhatsApp link, its tracking beacon
-      // and the message body all stay exactly as they were.
-      openedAtRef.current = Date.now();
-      bypassRef.current = true;
-      anchor.click();
-      // Safety net: if that click never reached our handler, don't leave the
-      // next genuine press unchecked.
-      window.setTimeout(() => {
-        bypassRef.current = false;
-      }, 0);
+      // The price and the nights are good. Where that leads depends on how many
+      // doors this listing has.
+      if (hasChoices) setChoiceOpen(true);
+      else openWhatsApp(anchor);
       return;
     }
 
@@ -248,6 +270,7 @@ export function ReserveButton({
       "a"
     ) as HTMLAnchorElement | null;
     if (!anchor) return;
+    anchorRef.current = anchor;
 
     // Second tap while the first is still being checked, or right after
     // WhatsApp opened: swallow it rather than send a duplicate enquiry.
@@ -259,7 +282,7 @@ export function ReserveButton({
 
     const check = startCheck(ready);
     const settled = check.peek();
-    if (settled?.outcome.kind === "proceed") {
+    if (settled?.outcome.kind === "proceed" && !hasChoices) {
       // Warmed up on pointer-down and nothing moved — let the browser handle
       // the click natively, which keeps the link out of the popup blocker.
       checkRef.current = null;
@@ -286,28 +309,69 @@ export function ReserveButton({
   }
 
   if (cta.kind === "ready") {
+    const d = cta.details;
     return (
-      // `display: contents` leaves the button's own layout untouched; this
-      // wrapper exists only to intercept the click before the link opens.
-      <span
-        className="contents"
-        onPointerDownCapture={() => {
-          // Head start, so the common "nothing changed" case usually resolves
-          // before the click even lands.
-          if (!busyRef.current && Date.now() - openedAtRef.current >= DOUBLE_TAP_MS) {
-            startCheck(cta);
-          }
-        }}
-        onClickCapture={(event) => handleReadyClick(event, cta)}
-      >
-        <WhatsAppContactButton
-          className={cn(className, checking && "pointer-events-none opacity-80")}
-          variant="brand"
-          label={checking ? "Checking…" : label}
-          whatsappNumber={cta.whatsappNumber}
-          details={cta.details}
-        />
-      </span>
+      <>
+        {/* `display: contents` leaves the button's own layout untouched; this
+            wrapper exists only to intercept the click before the link opens. */}
+        <span
+          className="contents"
+          onPointerDownCapture={() => {
+            // Head start, so the common "nothing changed" case usually resolves
+            // before the click even lands.
+            if (!busyRef.current && Date.now() - openedAtRef.current >= DOUBLE_TAP_MS) {
+              startCheck(cta);
+            }
+          }}
+          onClickCapture={(event) => handleReadyClick(event, cta)}
+        >
+          <WhatsAppContactButton
+            className={cn(className, checking && "pointer-events-none opacity-80")}
+            variant="brand"
+            label={checking ? "Checking…" : label}
+            whatsappNumber={cta.whatsappNumber}
+            details={cta.details}
+          />
+        </span>
+
+        {hasChoices && (
+          <ReserveChoiceDialog
+            open={choiceOpen}
+            onOpenChange={setChoiceOpen}
+            airbnbUrl={airbnbUrl}
+            canPayOnline={canPayOnline}
+            total={d.totalMinorUnits ?? 0}
+            nights={d.nights ?? 1}
+            onChoose={(choice: ReserveChoice) => {
+              setChoiceOpen(false);
+              if (choice === "airbnb" && airbnbUrl) {
+                window.open(airbnbUrl, "_blank", "noopener,noreferrer");
+              } else if (choice === "direct") {
+                setDirectOpen(true);
+              } else {
+                openWhatsApp(anchorRef.current);
+              }
+            }}
+          />
+        )}
+
+        {canPayOnline && (
+          <BookDirectSheet
+            open={directOpen}
+            onOpenChange={setDirectOpen}
+            propertyId={d.propertyId}
+            propertyName={d.propertyName}
+            checkIn={d.checkIn ?? ""}
+            checkOut={d.checkOut ?? ""}
+            nights={d.nights ?? 1}
+            guests={d.guests ?? 1}
+            total={d.totalMinorUnits ?? 0}
+            guestName={d.guestName}
+            guestPhone={d.guestPhone}
+            whatsappNumber={cta.whatsappNumber}
+          />
+        )}
+      </>
     );
   }
 

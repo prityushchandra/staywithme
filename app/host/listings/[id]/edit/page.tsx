@@ -74,6 +74,7 @@ export default async function EditListingPage({
             block: listing.block ?? "",
             refCode: listing.refCode ?? "",
             mapsUrl: listing.mapsUrl ?? "",
+            airbnbUrl: listing.airbnbUrl ?? "",
             guestFavorite: listing.guestFavorite,
             bedrooms: listing.bedrooms,
             bathrooms: listing.bathrooms,

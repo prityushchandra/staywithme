@@ -9,6 +9,7 @@ import {
   Menu,
   User,
   Heart,
+  CalendarCheck,
   LayoutDashboard,
   LogOut,
   Plus,
@@ -149,6 +150,9 @@ export function Navbar({
                   <div className="my-1 border-t" />
                   <MenuLink href="/account" Icon={User} onClick={close}>
                     Account
+                  </MenuLink>
+                  <MenuLink href="/my-bookings" Icon={CalendarCheck} onClick={close}>
+                    My bookings
                   </MenuLink>
                   {user.isAdmin && (
                     <MenuLink href="/host/listings/new" Icon={Plus} onClick={close}>

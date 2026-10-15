@@ -231,6 +231,11 @@ model Listing {
   // still held in the confidential fields above.
   mapsUrl String?
 
+  // Public Airbnb listing URL for the same flat. When set, "Reserve" offers the
+  // guest a choice: book on Airbnb, or book direct with us (cheaper, since the
+  // Airbnb service fee disappears).
+  airbnbUrl String?
+
   // Admin curation badge, shown as a banner on the listing page.
   guestFavorite Boolean @default(false)
 
@@ -405,6 +410,10 @@ model Review {
 // A guest's reservation request. Created on "Reserve"; an admin confirms or
 // cancels it (in-app or via the WhatsApp bot). On confirm we block the dates and
 // notify host + guest over WhatsApp.
+//
+// Online bookings take a second route: the guest pays through Razorpay, the
+// dates are held immediately, and the booking sits at AWAITING_APPROVAL until an
+// admin has reviewed the guest IDs and accepted it.
 model Booking {
   id        String  @id @default(cuid())
   listingId String
@@ -418,18 +427,66 @@ model Booking {
   totalAmount Int      @default(0) // paise snapshot of the guest-facing total
   amountPaid  Int      @default(0) // paise received from the guest (rest is due)
 
-  status         String    @default("PENDING") // PENDING | CONFIRMED | CANCELLED
+  // PENDING          — legacy stub awaiting admin action
+  // AWAITING_APPROVAL — guest paid online; admin must review the IDs and accept
+  // CONFIRMED        — stay is on; this is the ONLY status P&L counts as revenue
+  // CANCELLED        — rejected or cancelled; dates released
+  status         String    @default("PENDING")
   // The availability block created on confirm (so cancel can remove it).
   blockId        String?
   // Set when the 3-days-before-check-in reminder has been sent (dedup).
   reminderSentAt DateTime?
 
+  // --- Self-serve online booking (Razorpay) ---------------------------------
+  // How the reservation reached us. WHATSAPP is the long-standing bot/admin
+  // flow; ONLINE is the guest-paid "Book with us" checkout.
+  source String @default("WHATSAPP") // WHATSAPP | ONLINE
+
+  // Collected before payment and shown to the admin during approval.
+  reasonForVisit String? @db.Text
+  contactPhone   String?
+
+  razorpayOrderId   String?   @unique
+  razorpayPaymentId String?
+  paidAt            DateTime?
+  approvedAt        DateTime?
+  cancelledAt       DateTime?
+  adminNote         String?   @db.Text
+
+  // Unguessable token letting a guest open their own receipt without a session.
+  publicToken String? @unique
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  idDocs BookingGuest[]
 
   @@index([listingId])
   @@index([guestId])
   @@index([status])
+  @@index([source])
+}
+
+// One staying guest and their government ID, captured before an online booking
+// can be paid for.
+//
+// The document is stored as raw bytes in OUR database and served only through an
+// admin-authenticated route. There is deliberately no public URL, no CDN copy
+// and no third-party bucket for an identity document anywhere in this system.
+model BookingGuest {
+  id        String  @id @default(cuid())
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  name    String
+  docData Bytes
+  docMime String // image/jpeg | image/png | application/pdf
+  docName String
+  docSize Int    @default(0) // bytes, for display
+
+  createdAt DateTime @default(now())
+
+  @@index([bookingId])
 }
 
 model AnalyticsEvent {

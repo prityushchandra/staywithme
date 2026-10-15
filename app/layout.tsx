@@ -7,6 +7,7 @@ import { ToastProvider } from "@/components/ui/toast";
 import { Navbar } from "@/components/navbar";
 import { TrackVisit } from "@/components/track-visit";
 import { AppIntro } from "@/components/app-intro";
+import { ContactUsButton } from "@/components/contact-us-button";
 import { appleSplashLinks } from "@/lib/apple-splash";
 import { getPlatformSettings } from "@/lib/settings";
 
@@ -70,6 +71,7 @@ export default async function RootLayout({
             <footer className="border-t py-8 text-center text-sm text-muted-foreground">
               © {new Date().getFullYear()} StayWithMe
             </footer>
+            <ContactUsButton whatsappNumber={settings.whatsappNumber} />
           </ToastProvider>
         </Providers>
         <SpeedInsights />

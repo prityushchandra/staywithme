@@ -61,7 +61,16 @@ export function BookingReceiptPdf(d: BookingReceiptData): React.ReactElement<Doc
         <View style={s.header}>
           <View>
             <Text style={s.brand}>StayWithMe</Text>
-            <Text style={s.hTitle}>Booking Receipt{d.source === "AIRBNB" ? " · Airbnb" : ""}</Text>
+            <Text style={s.hTitle}>
+              Booking Receipt
+              {d.source === "AIRBNB"
+                ? " · Airbnb"
+                : d.source === "ONLINE"
+                  ? " · Paid online"
+                  : d.source === "CANCELLED"
+                    ? " · Cancelled"
+                    : ""}
+            </Text>
           </View>
           <View>
             <Text style={s.num}>{d.number}</Text>

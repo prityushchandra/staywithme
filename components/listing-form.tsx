@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { PriceInsight } from "@/components/price-insight";
 import { ImageUploader } from "@/components/image-uploader";
-import { listingInputSchema, MAPS_URL_MAX, PROPERTY_ID_MAX } from "@/lib/validation";
+import { listingInputSchema, AIRBNB_URL_MAX, MAPS_URL_MAX, PROPERTY_ID_MAX } from "@/lib/validation";
 import { cn } from "@/lib/utils";
 
 const ROOM_TYPES = [
@@ -49,6 +49,7 @@ export interface ListingFormInitial {
   block: string;
   refCode?: string;
   mapsUrl?: string;
+  airbnbUrl?: string;
   guestFavorite?: boolean;
   bedrooms: number;
   bathrooms: number;
@@ -107,6 +108,7 @@ export function ListingForm({
     block: initial?.block ?? "",
     refCode: initial?.refCode ?? "",
     mapsUrl: initial?.mapsUrl ?? "",
+    airbnbUrl: initial?.airbnbUrl ?? "",
     guestFavorite: initial?.guestFavorite ?? false,
     bedrooms: initial?.bedrooms ?? 1,
     bathrooms: initial?.bathrooms ?? 1,
@@ -451,6 +453,22 @@ export function ListingForm({
             <p className="text-xs text-muted-foreground">
               Optional. Shown to guests as the neighbourhood map — share the area,
               not your front door.
+            </p>
+          </div>
+          <div className="space-y-1 sm:col-span-2">
+            <Label htmlFor="airbnbUrl">Airbnb listing link</Label>
+            <Input
+              id="airbnbUrl"
+              type="url"
+              inputMode="url"
+              value={form.airbnbUrl}
+              onChange={(e) => set("airbnbUrl", e.target.value)}
+              placeholder="https://www.airbnb.co.in/rooms/12345678"
+              maxLength={AIRBNB_URL_MAX}
+            />
+            <p className="text-xs text-muted-foreground">
+              Optional. When set, guests who tap Reserve can choose between booking
+              on Airbnb or booking direct with us.
             </p>
           </div>
         </div>

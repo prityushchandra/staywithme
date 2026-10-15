@@ -1,24 +1,31 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { formatINR } from "@/lib/pricing";
-import { IndianRupee, KeyRound } from "lucide-react";
+import { IndianRupee, KeyRound, Phone } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { BookingActions } from "@/components/admin/booking-actions";
 import { OfflineBookingActions, OfflineBookingForm } from "@/components/admin/offline-booking-form";
 import { OfflineBookingEdit } from "@/components/admin/offline-booking-edit";
 import { SendReceiptButton } from "@/components/admin/send-receipt-button";
+import { OnlineBookingReview } from "@/components/admin/online-booking-review";
 import { getPlatformSettings } from "@/lib/settings";
 import { bookingReceiptFileName } from "@/lib/receipts";
 
 export const metadata = { title: "Admin · Bookings" };
 export const dynamic = "force-dynamic";
 
-const STATUSES = ["ALL", "PENDING", "CONFIRMED", "CANCELLED"] as const;
+const STATUSES = ["ALL", "PENDING", "AWAITING_APPROVAL", "CONFIRMED", "CANCELLED"] as const;
 const VARIANT: Record<string, "warning" | "success" | "destructive" | "secondary"> = {
   PENDING: "warning",
+  AWAITING_APPROVAL: "warning",
   CONFIRMED: "success",
   CANCELLED: "destructive",
 };
+
+/** "AWAITING_APPROVAL" → "Awaiting approval". */
+function statusLabel(s: string) {
+  return s.charAt(0) + s.slice(1).toLowerCase().replace(/_/g, " ");
+}
 
 const FIELD =
   "block h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
@@ -92,12 +99,15 @@ export default async function AdminBookingsPage({
   const flatWhere = flatId ? { listingId: flatId } : {};
   const filtersOn = Boolean(fromStr || toStr || flatId);
 
-  const [bookings, listings, offlineBookings, settings] = await Promise.all([
+  const [bookings, listings, offlineBookings, settings, pendingOnline] = await Promise.all([
     prisma.booking.findMany({
       where: {
         ...(active && active !== "ALL" ? { status: active } : {}),
         ...flatWhere,
         ...stayWhere,
+        // Abandoned "book with us" carts are not bookings — nothing was paid
+        // and no dates are held, so they'd only be noise here.
+        NOT: { source: "ONLINE", status: "PENDING" },
       },
       include: {
         listing: { select: { id: true, title: true } },
@@ -123,6 +133,18 @@ export default async function AdminBookingsPage({
       take: 100,
     }),
     getPlatformSettings(),
+    // Paid online and waiting on a human. Deliberately ignores the filters —
+    // money is sitting here and it must never be filtered out of sight.
+    prisma.booking.findMany({
+      where: { status: "AWAITING_APPROVAL", source: "ONLINE" },
+      include: {
+        listing: { select: { title: true, flatNumber: true, checkInTime: true, checkOutTime: true } },
+        guest: { select: { name: true, phone: true } },
+        idDocs: { select: { id: true, name: true, docName: true }, orderBy: { createdAt: "asc" } },
+      },
+      orderBy: { paidAt: "asc" },
+      take: 50,
+    }),
   ]);
 
   const origin = process.env.NEXTAUTH_URL ?? "https://staywithme.co.in";
@@ -146,6 +168,50 @@ export default async function AdminBookingsPage({
   return (
     <div className="space-y-5">
       <h1 className="text-2xl font-bold tracking-tight">Bookings</h1>
+
+      {pendingOnline.length > 0 && (
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight">
+              Online bookings awaiting your approval
+              <span className="ml-2 rounded-full bg-amber-500 px-2 py-0.5 text-xs font-bold text-white align-middle">
+                {pendingOnline.length}
+              </span>
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              These guests have already paid and their dates are held. Check their
+              IDs, then accept or cancel.
+            </p>
+          </div>
+          <div className="space-y-3">
+            {pendingOnline.map((b) => (
+              <OnlineBookingReview
+                key={b.id}
+                booking={{
+                  id: b.id,
+                  listingTitle: `${b.listing.flatNumber || b.listing.title}`,
+                  guestName: b.guest.name ?? "Guest",
+                  guestPhone: b.guest.phone,
+                  contactPhone: b.contactPhone,
+                  checkIn: fmt(b.checkIn),
+                  checkOut: fmt(b.checkOut),
+                  checkInTime: b.listing.checkInTime,
+                  checkOutTime: b.listing.checkOutTime,
+                  nights: nights(b.checkIn, b.checkOut),
+                  guests: b.guests,
+                  totalAmount: b.totalAmount,
+                  amountPaid: b.amountPaid,
+                  reasonForVisit: b.reasonForVisit,
+                  adminNote: b.adminNote,
+                  paidAt: b.paidAt?.toISOString() ?? null,
+                  razorpayPaymentId: b.razorpayPaymentId,
+                  docs: b.idDocs,
+                }}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="space-y-3">
         <div>
@@ -362,7 +428,7 @@ export default async function AdminBookingsPage({
         )}
       </section>
 
-      <h2 className="text-xl font-semibold tracking-tight">WhatsApp Bookings</h2>
+      <h2 className="text-xl font-semibold tracking-tight">Guest bookings</h2>
 
       <div className="flex flex-wrap gap-2">
         {STATUSES.map((s) => {
@@ -381,7 +447,7 @@ export default async function AdminBookingsPage({
                 isActive ? "border-foreground bg-foreground text-background" : "hover:border-foreground"
               }`}
             >
-              {s.charAt(0) + s.slice(1).toLowerCase()}
+              {statusLabel(s)}
             </Link>
           );
         })}
@@ -393,30 +459,55 @@ export default async function AdminBookingsPage({
         </div>
       ) : (
         <div className="space-y-3">
-          {bookings.map((b) => (
-            <div key={b.id} className="rounded-xl border p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Link href={`/listings/${b.listing.id}`} className="break-words font-semibold hover:underline">
-                      {b.listing.title}
-                    </Link>
-                    <Badge variant={VARIANT[b.status] ?? "secondary"}>{b.status}</Badge>
-                    <span className="font-mono text-xs text-muted-foreground">#{b.id.slice(-6)}</span>
+          {bookings.map((b) => {
+            const phone = b.contactPhone ?? b.guest.phone;
+            const tel = phone ? phone.replace(/\D/g, "") : "";
+            const telHref = tel.length >= 10 ? `tel:+${tel.length === 10 ? `91${tel}` : tel}` : null;
+            return (
+              <div key={b.id} className="rounded-xl border p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Link href={`/listings/${b.listing.id}`} className="break-words font-semibold hover:underline">
+                        {b.listing.title}
+                      </Link>
+                      <Badge variant={VARIANT[b.status] ?? "secondary"}>{statusLabel(b.status)}</Badge>
+                      {b.source === "ONLINE" && <Badge variant="secondary">Paid online</Badge>}
+                      <span className="font-mono text-xs text-muted-foreground">#{b.id.slice(-6)}</span>
+                    </div>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {fmt(b.checkIn)} → {fmt(b.checkOut)} · {b.guests} guest{b.guests > 1 ? "s" : ""} ·{" "}
+                      {formatINR(b.totalAmount)}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Guest: {b.guest.name ?? "—"}
+                      {phone ? ` · ${phone}` : ""}
+                    </p>
+                    {telHref && (
+                      <a
+                        href={telHref}
+                        className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-sky-600 px-3 py-1 text-xs font-medium text-white transition hover:brightness-110"
+                      >
+                        <Phone className="h-3.5 w-3.5" /> Call
+                      </a>
+                    )}
                   </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {fmt(b.checkIn)} → {fmt(b.checkOut)} · {b.guests} guest{b.guests > 1 ? "s" : ""} ·{" "}
-                    {formatINR(b.totalAmount)}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    Guest: {b.guest.name ?? "—"}
-                    {b.guest.phone ? ` · ${b.guest.phone}` : ""}
-                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {b.source === "ONLINE" && b.publicToken && b.status !== "PENDING" && (
+                      <a
+                        href={`/api/receipts/booking/${b.id}?t=${b.publicToken}&download=1`}
+                        download
+                        className="rounded-lg border px-3 py-1.5 text-sm font-medium transition hover:border-foreground"
+                      >
+                        Receipt
+                      </a>
+                    )}
+                    <BookingActions bookingId={b.id} status={b.status} source={b.source} />
+                  </div>
                 </div>
-                <BookingActions bookingId={b.id} status={b.status} />
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

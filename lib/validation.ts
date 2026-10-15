@@ -15,6 +15,9 @@ export const PROPERTY_ID_MAX = 12;
  */
 export const MAPS_URL_MAX = 2000;
 
+/** Cap for a stored Airbnb listing link. Airbnb room URLs carry long query blobs. */
+export const AIRBNB_URL_MAX = 500;
+
 /** True when `value` is a plausible http(s) URL (used for the Maps link). */
 export function isHttpUrl(value: string): boolean {
   let url: URL;
@@ -26,6 +29,33 @@ export function isHttpUrl(value: string): boolean {
   return (
     (url.protocol === "http:" || url.protocol === "https:") &&
     url.hostname.includes(".")
+  );
+}
+
+/**
+ * True when `value` points at Airbnb itself.
+ *
+ * Guests are sent straight to this link from the Reserve dialog, so a typo or a
+ * hostile paste must never become an open redirect. "airbnb" has to be the
+ * registrable name — every label after it must look like a TLD — which accepts
+ * airbnb.com, www.airbnb.co.in and fr.airbnb.com while rejecting
+ * airbnb.example.com.
+ */
+export function isAirbnbUrl(value: string): boolean {
+  if (!isHttpUrl(value)) return false;
+  let host: string;
+  try {
+    host = new URL(value).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (host === "abnb.me") return true; // Airbnb's own share shortener
+  const labels = host.split(".");
+  const i = labels.indexOf("airbnb");
+  return (
+    i >= 0 &&
+    i < labels.length - 1 &&
+    labels.slice(i + 1).every((l) => /^[a-z]{2,3}$/.test(l))
   );
 }
 
@@ -75,6 +105,17 @@ export const listingInputSchema = z
     .refine(
       (s) => s === "" || isHttpUrl(s),
       "Enter a valid Google Maps link starting with http:// or https://"
+    )
+    .optional(),
+  // Optional public Airbnb listing link for the same flat. When set, Reserve
+  // offers the guest a choice between Airbnb and booking direct.
+  airbnbUrl: z
+    .string()
+    .trim()
+    .max(AIRBNB_URL_MAX, "That Airbnb link is too long — re-copy it from the Share menu")
+    .refine(
+      (s) => s === "" || isAirbnbUrl(s),
+      "Enter an Airbnb listing link, e.g. https://www.airbnb.co.in/rooms/12345678"
     )
     .optional(),
   // Admin-only curation flag. A host may submit it, but the API ignores the

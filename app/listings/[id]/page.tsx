@@ -6,6 +6,7 @@ import { getPublishedListingById, getListingByIdAnyStatus } from "@/lib/data-acc
 import { getPlatformSettings } from "@/lib/settings";
 import { prisma } from "@/lib/db";
 import { auth } from "@/lib/auth";
+import { razorpayConfigured } from "@/lib/razorpay";
 import { InquiryPanel } from "@/components/inquiry-panel";
 import { Gallery } from "@/components/gallery";
 import { WishlistButton } from "@/components/wishlist-button";
@@ -111,6 +112,9 @@ export default async function ListingPage({
 
   const userId = session?.user?.id;
   const isAuthenticated = Boolean(userId);
+  // Only offer "book with us" when the gateway is actually wired up; otherwise
+  // the whole flow degrades to the WhatsApp enquiry it has always been.
+  const canPayOnline = razorpayConfigured();
   // Only a guest who actually completed a stay here may review — unless an admin
   // has opened reviews to everyone. Either way, anyone can READ the reviews below.
   const isGuestViewer = Boolean(userId) && userId !== listing.host.id;
@@ -307,6 +311,8 @@ export default async function ListingPage({
               checkOutTime={listing.checkOutTime ?? undefined}
               blockedRanges={serializedBlocks}
               isAuthenticated={isAuthenticated}
+              airbnbUrl={listing.airbnbUrl}
+              canPayOnline={canPayOnline}
             />
           </div>
         </div>

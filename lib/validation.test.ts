@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   isHttpUrl,
+  isAirbnbUrl,
   isDuplicateRefCodeError,
   listingInputSchema,
   MAPS_URL_MAX,
@@ -37,6 +38,22 @@ describe("isHttpUrl", () => {
     expect(isHttpUrl("https://localhost")).toBe(false);
     expect(isHttpUrl("maps.google.com")).toBe(false);
     expect(isHttpUrl("")).toBe(false);
+  });
+});
+
+describe("isAirbnbUrl", () => {
+  it("accepts Airbnb's own hosts and share links", () => {
+    expect(isAirbnbUrl("https://www.airbnb.co.in/rooms/12345678")).toBe(true);
+    expect(isAirbnbUrl("https://airbnb.com/rooms/9?source_impression_id=x")).toBe(true);
+    expect(isAirbnbUrl("https://fr.airbnb.com/rooms/9")).toBe(true);
+    expect(isAirbnbUrl("https://abnb.me/abcdef")).toBe(true);
+  });
+
+  it("rejects lookalike hosts that would become an open redirect", () => {
+    expect(isAirbnbUrl("https://airbnb.evil.com/rooms/1")).toBe(false);
+    expect(isAirbnbUrl("https://notairbnb.com/rooms/1")).toBe(false);
+    expect(isAirbnbUrl("https://airbnb.com.attacker.net/x")).toBe(false);
+    expect(isAirbnbUrl("javascript:alert(1)")).toBe(false);
   });
 });
 

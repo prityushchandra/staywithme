@@ -2,11 +2,19 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { confirmBooking, cancelBooking } from "@/lib/bookings";
+import { approveOnlineBooking, rejectOnlineBooking } from "@/lib/online-bookings";
 
-const schema = z.object({ action: z.enum(["confirm", "cancel"]) });
+const schema = z.object({
+  action: z.enum(["confirm", "cancel", "approve", "reject"]),
+  note: z.string().trim().max(500).optional(),
+});
 
 // Admin confirms or cancels a booking. Confirm blocks the dates + notifies host
 // & guest over WhatsApp; cancel frees the dates + notifies.
+//
+// "approve"/"reject" are the online (paid) variants: the money has already been
+// taken, so approve only flips the status and messages everyone, while reject
+// releases the nights WITHOUT a refund, per the stated policy.
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -22,10 +30,15 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   }
 
+  const { action, note } = parsed.data;
   const result =
-    parsed.data.action === "confirm"
+    action === "confirm"
       ? await confirmBooking(id)
-      : await cancelBooking(id);
+      : action === "cancel"
+        ? await cancelBooking(id)
+        : action === "approve"
+          ? await approveOnlineBooking(id)
+          : await rejectOnlineBooking(id, note);
 
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: 400 });

@@ -40,13 +40,17 @@ export type ReserveCta = { label: string; shortLabel: string } & (
   | { kind: "unavailable" }
   /** Signed-out guest: send them to sign-in first. */
   | { kind: "login"; href: string }
-  /** Everything is set — open WhatsApp with the pre-filled enquiry. */
+  /** Everything is set — open the booking options (Airbnb / pay direct / WhatsApp). */
   | {
       kind: "ready";
       whatsappNumber: string;
       details: InquiryDetails;
       /** What the card is quoting, so Reserve can re-check it live on click. */
       quote: QuoteSnapshot;
+      /** The same flat on Airbnb, when the host has listed it there. */
+      airbnbUrl?: string | null;
+      /** True when Razorpay is configured, so "Book with us" can take money. */
+      canPayOnline?: boolean;
     }
 );
 
