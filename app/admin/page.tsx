@@ -28,18 +28,19 @@ export const metadata = { title: "Admin · Dashboard" };
 export const dynamic = "force-dynamic";
 
 export default async function AdminDashboard() {
-  const [overview, topListings, topHosts, traffic, earnings, pendingReviews] = await Promise.all([
+  const [overview, topListings, topHosts, traffic, earnings, pendingReviews, pendingBookings] = await Promise.all([
     getPlatformOverview(),
     getTopListings(5),
     getTopHosts(5),
     getTrafficMetrics(),
     getEarnings(),
     prisma.review.count({ where: { status: "PENDING" } }),
+    prisma.booking.count({ where: { source: "ONLINE", status: "AWAITING_APPROVAL" } }),
   ]);
 
   const pending = overview.listingsByStatus.PENDING ?? 0;
   const published = overview.listingsByStatus.PUBLISHED ?? 0;
-  const allCaughtUp = pending === 0 && pendingReviews === 0;
+  const allCaughtUp = pending === 0 && pendingReviews === 0 && pendingBookings === 0;
 
   const kpis = [
     { label: "Users", value: overview.users, sub: `${overview.hosts} hosts`, Icon: Users },
@@ -78,6 +79,23 @@ export default async function AdminDashboard() {
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
+            {pendingBookings > 0 && (
+              <Link
+                href="/admin/guest-bookings"
+                className="flex items-center justify-between rounded-xl border bg-amber-50/60 p-5 transition-colors hover:border-foreground"
+              >
+                <div>
+                  <div className="text-2xl font-bold">{pendingBookings}</div>
+                  <div className="text-sm text-muted-foreground">
+                    guest booking{pendingBookings > 1 ? "s" : ""} awaiting approval
+                  </div>
+                  <span className="mt-1 inline-block text-sm font-medium text-brand">
+                    Review now →
+                  </span>
+                </div>
+                <ClipboardCheck className="h-7 w-7 shrink-0 text-brand" />
+              </Link>
+            )}
             {pending > 0 && (
               <Link
                 href="/admin/listings?status=PENDING"

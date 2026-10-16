@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Check, FileText, MessageCircle, Phone, X } from "lucide-react";
+import { AlertTriangle, Check, MessageCircle, Phone, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { BookingAttachments, type BookingDocument } from "@/components/admin/booking-attachments";
 import { formatINR } from "@/lib/pricing";
 
 // One paid-but-unapproved online booking, with everything the admin needs to
@@ -28,7 +29,7 @@ export type OnlineBookingCard = {
   adminNote: string | null;
   paidAt: string | null;
   razorpayPaymentId: string | null;
-  docs: { id: string; name: string; docName: string }[];
+  docs: BookingDocument[];
 };
 
 function digits(phone: string | null) {
@@ -131,19 +132,7 @@ export function OnlineBookingReview({ booking: b }: { booking: OnlineBookingCard
           </dl>
 
           <div className="flex flex-wrap items-center gap-2">
-            {b.docs.map((d) => (
-              <a
-                key={d.id}
-                href={`/api/admin/bookings/docs/${d.id}`}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-full border bg-background px-3 py-1 text-xs font-medium transition hover:border-foreground"
-                title={d.docName}
-              >
-                <FileText className="h-3.5 w-3.5" />
-                {d.name}
-              </a>
-            ))}
+            <BookingAttachments docs={b.docs} />
             {b.docs.length === 0 && (
               <span className="text-xs text-destructive">No IDs attached.</span>
             )}

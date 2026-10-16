@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   ListChecks,
   CalendarCheck,
+  UserCheck,
   Star,
   Users,
   Tags,
@@ -25,13 +26,14 @@ type NavItem = {
   label: string;
   Icon: LucideIcon;
   exact?: boolean;
-  badge?: "listings" | "reviews";
+  badge?: "listings" | "reviews" | "bookings";
 };
 
 const NAV: NavItem[] = [
   { href: "/admin", label: "Dashboard", Icon: LayoutDashboard, exact: true },
   { href: "/admin/listings", label: "Listings", Icon: ListChecks, badge: "listings" },
   { href: "/admin/bookings", label: "Bookings", Icon: CalendarCheck },
+  { href: "/admin/guest-bookings", label: "Guest bookings", Icon: UserCheck, badge: "bookings" },
   { href: "/admin/earnings", label: "Airbnb earnings", Icon: IndianRupee },
   { href: "/admin/expenses", label: "Expense tracker", Icon: Receipt },
   { href: "/admin/pnl", label: "P&L", Icon: TrendingUp },
@@ -47,14 +49,18 @@ const NAV: NavItem[] = [
 export function AdminNav({
   pendingListings,
   pendingReviews,
+  pendingBookings,
 }: {
   pendingListings: number;
   pendingReviews: number;
+  pendingBookings: number;
 }) {
   const pathname = usePathname();
 
   const count = (key?: NavItem["badge"]) =>
-    key === "listings" ? pendingListings : key === "reviews" ? pendingReviews : 0;
+    key === "listings" ? pendingListings
+      : key === "reviews" ? pendingReviews
+        : key === "bookings" ? pendingBookings : 0;
 
   return (
     <nav className="flex flex-wrap gap-1.5 lg:flex-col lg:flex-nowrap lg:gap-1">
@@ -65,6 +71,7 @@ export function AdminNav({
           <Link
             key={href}
             href={href}
+            aria-current={active ? "page" : undefined}
             className={cn(
               "flex items-center gap-2.5 whitespace-nowrap rounded-lg border px-3 py-2 text-sm font-medium transition duration-200 ease-ios active:scale-[0.97]",
               active

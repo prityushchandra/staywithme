@@ -9,15 +9,16 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const session = await auth();
   if (!session?.user?.isAdmin) redirect("/");
 
-  // Cache the nav badge counts briefly so every admin navigation doesn't pay two
+  // Cache the nav badge counts briefly so every admin navigation doesn't pay extra
   // DB round-trips. Admin mutations call clearMemo(), so they refresh on change.
-  const [pendingListings, pendingReviews] = await memo(
+  const [pendingListings, pendingReviews, pendingBookings] = await memo(
     "admin-pending-counts",
     15_000,
     () =>
       Promise.all([
         prisma.listing.count({ where: { status: "PENDING" } }),
         prisma.review.count({ where: { status: "PENDING" } }),
+        prisma.booking.count({ where: { source: "ONLINE", status: "AWAITING_APPROVAL" } }),
       ])
   );
 
@@ -32,6 +33,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
             <AdminNav
               pendingListings={pendingListings}
               pendingReviews={pendingReviews}
+              pendingBookings={pendingBookings}
             />
           </div>
         </aside>
