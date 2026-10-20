@@ -62,15 +62,16 @@ export function SettingsForm({
   return (
     <form onSubmit={save} className="max-w-lg space-y-6">
       <div className="space-y-1">
-        <Label htmlFor="wa">Platform WhatsApp number</Label>
+        <Label htmlFor="wa">Guest contact / WhatsApp number</Label>
         <Input
           id="wa"
           value={form.whatsappNumber}
           onChange={(e) => set("whatsappNumber", e.target.value)}
-          placeholder="+918789194107"
+          placeholder="+919113805548"
         />
         <p className="text-xs text-muted-foreground">
-          Every inquiry across the platform routes to this number.
+          Every inquiry and guest support call routes to this number. Admin
+          sign-in and the WhatsApp verification bot are configured separately.
         </p>
       </div>
 

@@ -324,7 +324,7 @@ model ListingAmenity {
 
 model PlatformSettings {
   id                   String   @id @default("singleton")
-  whatsappNumber       String   @default("+918789194107")
+  whatsappNumber       String   @default("+919113805548")
   platformFeePercent   Int      @default(10)
   suggestedPriceMin    Int      @default(220000) // ₹2,200 in paise
   suggestedPriceMax    Int      @default(250000) // ₹2,500 in paise

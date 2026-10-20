@@ -37,7 +37,7 @@ export interface InquiryDetails {
   totalMinorUnits: number;
 }
 
-/** Strip everything but digits from a stored number like "+91 8789194107". */
+/** Strip everything but digits from a stored number like "+91 9113805548". */
 export function normalizeWhatsAppNumber(raw: string): string {
   return raw.replace(/\D/g, "");
 }
@@ -126,7 +126,7 @@ export function buildInquiryMessage(details: InquiryDetails): string {
 
 /**
  * Build the full wa.me link to the platform number with the encoded message.
- * @param whatsappNumber raw number from PlatformSettings (e.g. "+918789194107")
+ * @param whatsappNumber raw number from PlatformSettings (e.g. "+919113805548")
  */
 export function buildWhatsAppLink(
   whatsappNumber: string,

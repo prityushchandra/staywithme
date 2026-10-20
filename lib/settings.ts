@@ -4,7 +4,7 @@ import type { PlatformSettings } from "@prisma/client";
 
 const DEFAULTS = {
   id: "singleton",
-  whatsappNumber: "+918789194107",
+  whatsappNumber: "+919113805548",
   platformFeePercent: 10,
   suggestedPriceMin: 220000,
   suggestedPriceMax: 250000,
@@ -33,7 +33,7 @@ const getCachedSettings = unstable_cache(readPlatformSettings, ["platform-settin
 
 /**
  * Read the single PlatformSettings row, creating it with defaults if missing.
- * This is the ONLY home for the WhatsApp number, platform fee, suggested price
+ * This is the ONLY home for the guest contact number, platform fee, suggested price
  * range, and branding toggles. Hosts have no access; only admin endpoints update
  * it. The admin settings route calls revalidateTag("settings") on save.
  */
