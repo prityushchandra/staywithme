@@ -560,12 +560,31 @@ model OfflineBooking {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  receipts Receipt[]
+  receipts     Receipt[]
+  guestDetails OfflineBookingGuest[]
 
   @@index([listingId])
   @@index([source])
   @@index([status])
   @@index([checkIn])
+}
+
+model OfflineBookingGuest {
+  id        String         @id @default(cuid())
+  bookingId String
+  booking   OfflineBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  position  Int
+  name      String
+
+  // Optional IDs stay private, using the same database storage as guest bookings.
+  docData Bytes?
+  docMime String?
+  docName String?
+  docSize Int     @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@unique([bookingId, position])
 }
 
 // Manually-entered ONLINE channel earnings (Airbnb, Booking.com, etc.) for a

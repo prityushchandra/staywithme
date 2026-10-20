@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { privateGuestDocumentResponse } from "@/lib/booking-documents";
 
 // Reads raw bytes out of the database — never cache, never prerender.
 export const dynamic = "force-dynamic";
@@ -26,16 +27,5 @@ export async function GET(
     where: { id: docId },
     select: { docData: true, docMime: true, docName: true },
   });
-  if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
-
-  const body = new Uint8Array(doc.docData);
-  return new NextResponse(body, {
-    headers: {
-      "Content-Type": doc.docMime,
-      "Content-Length": String(body.byteLength),
-      "Content-Disposition": `inline; filename="${doc.docName.replace(/["\\]/g, "")}"`,
-      "Cache-Control": "no-store, private",
-      "X-Content-Type-Options": "nosniff",
-    },
-  });
+  return privateGuestDocumentResponse(doc);
 }

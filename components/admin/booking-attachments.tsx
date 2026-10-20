@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 
-export type BookingDocument = { id: string; name: string; docName: string };
+export type BookingDocument = { id: string; name: string; docName: string; source?: "guest" | "manual" };
 
 type DocumentSource =
   | { kind: "image"; url: string; width: number; height: number }
@@ -114,7 +114,8 @@ function PdfPage({
 }
 
 function DocumentPreview({ attachment }: { attachment: BookingDocument }) {
-  const href = `/api/admin/bookings/docs/${encodeURIComponent(attachment.id)}`;
+  const basePath = attachment.source === "manual" ? "/api/admin/offline-bookings/docs" : "/api/admin/bookings/docs";
+  const href = `${basePath}/${encodeURIComponent(attachment.id)}`;
   const [source, setSource] = useState<DocumentSource | null>(null);
   const [pdfPage, setPdfPage] = useState<PDFPageProxy | null>(null);
   const [pageNumber, setPageNumber] = useState(1);

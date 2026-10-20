@@ -9,6 +9,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DateRangePicker } from "@/components/date-range-picker";
+import {
+  applyUploadedGuests, GuestUploadErrors, OfflineGuestFields, offlineGuestDrafts,
+  offlineGuestPayload, uploadOfflineGuestFiles,
+  type GuestUpload, type GuestUploadFailure, type OfflineGuestDraft, type OfflineGuestRecord,
+} from "@/components/admin/offline-guest-fields";
 
 export type OfflineBookingEditData = {
   id: string;
@@ -22,6 +27,7 @@ export type OfflineBookingEditData = {
   amountPaid: number; // paise
   source: string;
   note: string | null;
+  guestDetails: readonly OfflineGuestRecord[];
 };
 
 type ConflictRange = { startDate: string; endDate: string; kind: string; guestName?: string | null };
@@ -41,15 +47,8 @@ function kindLabel(kind: string) {
   return "Blocked";
 }
 
-export function OfflineBookingEdit({ booking }: { booking: OfflineBookingEditData }) {
-  const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [conflicts, setConflicts] = useState<ConflictRange[] | null>(null);
-  const [blockedRanges, setBlockedRanges] = useState<{ startDate: string; endDate: string }[]>([]);
-
-  const [form, setForm] = useState({
+function initialForm(booking: OfflineBookingEditData) {
+  return {
     guestName: booking.guestName,
     guestPhone: booking.guestPhone ?? "",
     guests: booking.guests,
@@ -59,7 +58,20 @@ export function OfflineBookingEdit({ booking }: { booking: OfflineBookingEditDat
     amountPaid: paiseToRupees(booking.amountPaid),
     source: booking.source,
     note: booking.note ?? "",
-  });
+  };
+}
+
+export function OfflineBookingEdit({ booking }: { booking: OfflineBookingEditData }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [conflicts, setConflicts] = useState<ConflictRange[] | null>(null);
+  const [blockedRanges, setBlockedRanges] = useState<{ startDate: string; endDate: string }[]>([]);
+  const [form, setForm] = useState(() => initialForm(booking));
+  const [guestDrafts, setGuestDrafts] = useState<OfflineGuestDraft[]>(() => offlineGuestDrafts(booking.guestDetails));
+  const [uploadFailures, setUploadFailures] = useState<GuestUploadFailure[]>([]);
+  const [uploadProgress, setUploadProgress] = useState("");
 
   // Fetch the flat's blocks (minus THIS booking's own range) so the picker shows
   // real conflicts but still lets you keep or move the dates.
@@ -83,10 +95,40 @@ export function OfflineBookingEdit({ booking }: { booking: OfflineBookingEditDat
     setConflicts(null);
   }
 
+  async function finishUploads(uploads: readonly GuestUpload[]) {
+    const result = await uploadOfflineGuestFiles(booking.id, uploads, (guest, current, total) => {
+      setUploadProgress(`Uploading Guest ${guest}'s ID (${current} of ${total})...`);
+    });
+    setGuestDrafts((current) => applyUploadedGuests(current, result.saved));
+    setUploadFailures(result.failed);
+    setConflicts(null);
+    if (result.failed.length === 0) setOpen(false);
+    router.refresh();
+  }
+
+  async function retryUploads() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await finishUploads(uploadFailures.map(({ upload }) => upload));
+    } finally {
+      setUploadProgress("");
+      setBusy(false);
+    }
+  }
+
   async function submit(override: boolean) {
+    if (busy || uploadFailures.length > 0) return;
     setError("");
     if (!form.checkIn || !form.checkOut) {
       setError("Select check-in and check-out dates.");
+      return;
+    }
+    let guests: ReturnType<typeof offlineGuestPayload>;
+    try {
+      guests = offlineGuestPayload(guestDrafts, Number(form.guests), form.guestName);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Check the guest details.");
       return;
     }
     setBusy(true);
@@ -105,6 +147,8 @@ export function OfflineBookingEdit({ booking }: { booking: OfflineBookingEditDat
           source: form.source,
           note: form.note.trim() || null,
           override,
+          guestDetails: guests.guestDetails,
+          removeDocumentIds: guests.removeDocumentIds,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -116,17 +160,24 @@ export function OfflineBookingEdit({ booking }: { booking: OfflineBookingEditDat
         setError(data.error ?? "Could not save changes.");
         return;
       }
-      setOpen(false);
-      setConflicts(null);
-      router.refresh();
+      await finishUploads(guests.uploads);
+    } catch {
+      setError("Could not save changes. Check your connection and try again.");
     } finally {
+      setUploadProgress("");
       setBusy(false);
     }
   }
 
   if (!open) {
     return (
-      <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
+      <Button type="button" variant="outline" size="sm" onClick={() => {
+        setForm(initialForm(booking));
+        setGuestDrafts(offlineGuestDrafts(booking.guestDetails));
+        setUploadFailures([]);
+        setError("");
+        setOpen(true);
+      }}>
         <Pencil className="h-3.5 w-3.5" /> Edit
       </Button>
     );
@@ -134,10 +185,10 @@ export function OfflineBookingEdit({ booking }: { booking: OfflineBookingEditDat
 
   return (
     <div className="mt-3 w-full space-y-3 rounded-xl border bg-muted/20 p-4">
-      <div className="grid gap-3 md:grid-cols-2">
+      <fieldset disabled={busy || uploadFailures.length > 0} className="grid gap-3 md:grid-cols-2">
         <div className="space-y-1">
-          <Label>Guest name</Label>
-          <Input value={form.guestName} onChange={(e) => set("guestName", e.target.value)} />
+          <Label>Primary guest name</Label>
+          <Input maxLength={120} value={form.guestName} onChange={(e) => set("guestName", e.target.value)} />
         </div>
         <div className="space-y-1">
           <Label>Guest phone</Label>
@@ -145,7 +196,7 @@ export function OfflineBookingEdit({ booking }: { booking: OfflineBookingEditDat
         </div>
         <div className="space-y-1">
           <Label>Guests</Label>
-          <Input type="number" min={1} value={form.guests || ""} onChange={(e) => set("guests", e.target.value === "" ? 0 : Number(e.target.value))} />
+          <Input type="number" min={1} max={50} value={form.guests || ""} onChange={(e) => set("guests", e.target.value === "" ? 0 : Number(e.target.value))} />
         </div>
         <div className="space-y-1">
           <Label>Source</Label>
@@ -181,9 +232,24 @@ export function OfflineBookingEdit({ booking }: { booking: OfflineBookingEditDat
           <Label>Note</Label>
           <Textarea value={form.note} onChange={(e) => set("note", e.target.value)} />
         </div>
-      </div>
+      </fieldset>
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      <OfflineGuestFields
+        drafts={guestDrafts}
+        count={Number(form.guests)}
+        primaryName={form.guestName}
+        onChange={setGuestDrafts}
+        disabled={busy || uploadFailures.length > 0}
+      />
+
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      {uploadProgress && <p role="status" className="text-sm text-muted-foreground">{uploadProgress}</p>}
+      <GuestUploadErrors
+        failed={uploadFailures}
+        busy={busy}
+        onRetry={() => void retryUploads()}
+        onContinue={() => { setOpen(false); setUploadFailures([]); router.refresh(); }}
+      />
 
       {conflicts && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
@@ -204,10 +270,10 @@ export function OfflineBookingEdit({ booking }: { booking: OfflineBookingEditDat
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2">
+      {uploadFailures.length === 0 && <div className="flex flex-wrap gap-2">
         <Button type="button" size="sm" onClick={() => submit(false)} disabled={busy}>{busy ? "Saving…" : "Save changes"}</Button>
         <Button type="button" size="sm" variant="outline" onClick={() => { setOpen(false); setConflicts(null); setError(""); }} disabled={busy}>Cancel</Button>
-      </div>
+      </div>}
     </div>
   );
 }

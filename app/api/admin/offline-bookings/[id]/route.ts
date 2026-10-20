@@ -5,6 +5,11 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { rangesOverlap, toUtcDate } from "@/lib/dates";
 import { clearMemo } from "@/lib/memo";
+import {
+  offlineGuestDetailsSchema,
+  OfflineGuestDetailsError,
+  saveOfflineGuestDetails,
+} from "@/lib/offline-booking-guests";
 
 async function requireAdmin() {
   const session = await auth();
@@ -24,6 +29,8 @@ const patchSchema = z.object({
   status: z.enum(["CONFIRMED", "CANCELLED"]).optional(),
   // Book on top of already-blocked dates when moving the stay.
   override: z.boolean().optional(),
+  guestDetails: offlineGuestDetailsSchema.optional(),
+  removeDocumentIds: z.array(z.string().min(1)).max(50).optional(),
 });
 
 function toPaise(rupees: number) {
@@ -117,60 +124,73 @@ export async function PATCH(
   if (input.status) {
     data.status = input.status;
     if (input.status === "CANCELLED") {
-      if (booking.blockId) await prisma.availabilityBlock.deleteMany({ where: { id: booking.blockId } });
       data.blockId = null;
     }
   }
 
   const willBeConfirmed = (input.status ?? booking.status) !== "CANCELLED";
-  const guestNameFinal = (input.guestName ?? booking.guestName) as string;
-  const guestsFinal = (input.guests ?? booking.guests) as number;
+  try {
+    await prisma.$transaction(async (tx) => {
+      const updated = await tx.offlineBooking.update({ where: { id }, data });
+      const guestNameFinal = updated.guestName;
+      const guestsFinal = updated.guests;
 
-  await prisma.$transaction(async (tx) => {
-    await tx.offlineBooking.update({ where: { id }, data });
-
-    // Keep the block's dates/guest in sync (only while the booking is active and
-    // wasn't just cancelled above).
-    if ((datesChanged || input.guestName !== undefined || input.guests !== undefined) && willBeConfirmed && data.blockId !== null) {
-      if (booking.blockId) {
-        await tx.availabilityBlock.update({
-          where: { id: booking.blockId },
-          data: { startDate: newCheckIn, endDate: newCheckOut, guestName: guestNameFinal, guests: guestsFinal },
-        });
-      } else if (datesChanged) {
-        const block = await tx.availabilityBlock.create({
-          data: { listingId: booking.listingId, startDate: newCheckIn, endDate: newCheckOut, kind: "BOOKING", guestName: guestNameFinal, guests: guestsFinal },
-        });
-        await tx.offlineBooking.update({ where: { id }, data: { blockId: block.id } });
+      if (input.guestDetails !== undefined || input.guests !== undefined ||
+          input.guestName !== undefined || input.removeDocumentIds !== undefined) {
+        await saveOfflineGuestDetails(
+          tx, id, guestsFinal, guestNameFinal, input.guestDetails, input.removeDocumentIds ?? []
+        );
       }
-    }
+      if (input.status === "CANCELLED" && booking.blockId) {
+        await tx.availabilityBlock.deleteMany({ where: { id: booking.blockId } });
+      }
 
-    // Refresh the receipt snapshot so mirrored data stays consistent (the PDF is
-    // generated live from the booking, so it already reflects the edit).
-    const receiptId = booking.receipts[0]?.id;
-    if (receiptId) {
-      await tx.receipt.update({
-        where: { id: receiptId },
-        data: {
+      // Keep the block and receipt consistent with the guest edits.
+      if ((datesChanged || input.guestName !== undefined || input.guests !== undefined) && willBeConfirmed && data.blockId !== null) {
+        if (booking.blockId) {
+          await tx.availabilityBlock.update({
+            where: { id: booking.blockId },
+            data: { startDate: newCheckIn, endDate: newCheckOut, guestName: guestNameFinal, guests: guestsFinal },
+          });
+        } else if (datesChanged) {
+          const block = await tx.availabilityBlock.create({
+            data: { listingId: booking.listingId, startDate: newCheckIn, endDate: newCheckOut, kind: "BOOKING", guestName: guestNameFinal, guests: guestsFinal },
+          });
+          await tx.offlineBooking.update({ where: { id }, data: { blockId: block.id } });
+        }
+      }
+
+      const receiptId = booking.receipts[0]?.id;
+      if (receiptId) {
+        await tx.receipt.update({
+          where: { id: receiptId },
           data: {
-            guestName: guestNameFinal,
-            guestPhone: (input.guestPhone !== undefined ? input.guestPhone : booking.guestPhone) || null,
-            listingTitle: booking.listing.title,
-            flat: flatLabel(booking.listing),
-            checkIn: newCheckIn.toISOString(),
-            checkOut: newCheckOut.toISOString(),
-            checkInTime: booking.listing.checkInTime,
-            checkOutTime: booking.listing.checkOutTime,
-            guests: guestsFinal,
-            totalPrice,
-            amountPaid,
-            due: Math.max(0, totalPrice - amountPaid),
-            source: input.source ?? booking.source,
+            data: {
+              guestName: guestNameFinal,
+              guestPhone: (input.guestPhone !== undefined ? input.guestPhone : booking.guestPhone) || null,
+              listingTitle: booking.listing.title,
+              flat: flatLabel(booking.listing),
+              checkIn: newCheckIn.toISOString(),
+              checkOut: newCheckOut.toISOString(),
+              checkInTime: booking.listing.checkInTime,
+              checkOutTime: booking.listing.checkOutTime,
+              guests: guestsFinal,
+              totalPrice,
+              amountPaid,
+              due: Math.max(0, totalPrice - amountPaid),
+              source: input.source ?? booking.source,
+            },
           },
-        },
-      });
+        });
+      }
+    });
+  } catch (error) {
+    if (error instanceof OfflineGuestDetailsError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
     }
-  });
+    console.error("[offline-bookings] could not update booking", error);
+    return NextResponse.json({ error: "Could not save booking changes." }, { status: 500 });
+  }
 
   revalidateTag("listings");
   clearMemo();

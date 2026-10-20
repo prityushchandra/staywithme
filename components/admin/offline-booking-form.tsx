@@ -8,10 +8,15 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DateRangePicker } from "@/components/date-range-picker";
+import {
+  applyUploadedGuests, GuestUploadErrors, OfflineGuestFields,
+  offlineGuestPayload, uploadOfflineGuestFiles,
+  type GuestUpload, type GuestUploadFailure, type OfflineGuestDraft,
+} from "@/components/admin/offline-guest-fields";
 
 export type OfflineBookingListing = { id: string; label: string };
 
-type Success = { receiptNumber: string; receiptUrl: string };
+type Success = { id: string; receiptNumber: string; receiptUrl: string };
 type ConflictRange = { startDate: string; endDate: string; kind: string; guestName?: string | null };
 
 function fmtDay(iso: string) {
@@ -31,6 +36,9 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
   const [conflicts, setConflicts] = useState<ConflictRange[] | null>(null);
   const [blockedRanges, setBlockedRanges] = useState<{ startDate: string; endDate: string }[]>([]);
   const [blocksVersion, setBlocksVersion] = useState(0);
+  const [guestDrafts, setGuestDrafts] = useState<OfflineGuestDraft[]>([]);
+  const [uploadFailures, setUploadFailures] = useState<GuestUploadFailure[]>([]);
+  const [uploadProgress, setUploadProgress] = useState("");
   const [form, setForm] = useState({
     listingId: listings[0]?.id ?? "",
     guestName: "",
@@ -69,6 +77,34 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
     setForm((current) => ({ ...current, [name]: value }));
   }
 
+  function resetForm() {
+    setForm((current) => ({ ...current, guestName: "", guestPhone: "", guests: 1, checkIn: "", checkOut: "", totalPrice: "", amountPaid: "", note: "" }));
+    setGuestDrafts([]);
+    setUploadFailures([]);
+    setError("");
+  }
+
+  async function finishUploads(bookingId: string, uploads: readonly GuestUpload[]) {
+    const result = await uploadOfflineGuestFiles(bookingId, uploads, (guest, current, total) => {
+      setUploadProgress(`Uploading Guest ${guest}'s ID (${current} of ${total})...`);
+    });
+    setGuestDrafts((current) => applyUploadedGuests(current, result.saved));
+    setUploadFailures(result.failed);
+    if (result.failed.length === 0) resetForm();
+    router.refresh();
+  }
+
+  async function retryUploads() {
+    if (!success || submitting) return;
+    setSubmitting(true);
+    try {
+      await finishUploads(success.id, uploadFailures.map(({ upload }) => upload));
+    } finally {
+      setUploadProgress("");
+      setSubmitting(false);
+    }
+  }
+
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setConflicts(null);
@@ -76,11 +112,19 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
   }
 
   async function doSubmit(override: boolean) {
+    if (submitting || uploadFailures.length > 0) return;
     setError("");
     setSuccess(null);
 
     if (!form.checkIn || !form.checkOut) {
       setError("Select check-in and check-out dates.");
+      return;
+    }
+    let guests: ReturnType<typeof offlineGuestPayload>;
+    try {
+      guests = offlineGuestPayload(guestDrafts, Number(form.guests), form.guestName);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Check the guest details.");
       return;
     }
     setSubmitting(true);
@@ -95,6 +139,7 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
           totalPrice: Number(form.totalPrice),
           amountPaid: Number(form.amountPaid || 0),
           override,
+          guestDetails: guests.guestDetails,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -107,14 +152,14 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
         setError(data.error ?? "Could not record booking.");
         return;
       }
-      setSuccess({ receiptNumber: data.receiptNumber, receiptUrl: data.receiptUrl });
+      setSuccess({ id: data.id, receiptNumber: data.receiptNumber, receiptUrl: data.receiptUrl });
       setConflicts(null);
-      setForm((current) => ({ ...current, guestName: "", guestPhone: "", guests: 1, checkIn: "", checkOut: "", totalPrice: "", amountPaid: "", note: "" }));
       setBlocksVersion((v) => v + 1);
-      router.refresh();
+      await finishUploads(data.id, guests.uploads);
     } catch {
       setError("Something went wrong.");
     } finally {
+      setUploadProgress("");
       setSubmitting(false);
     }
   }
@@ -127,7 +172,7 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
   return (
     <div className="space-y-4 rounded-xl border p-4">
       <form onSubmit={submit} className="space-y-4">
-        <div className="grid gap-4 md:grid-cols-2">
+        <fieldset disabled={submitting || uploadFailures.length > 0} className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2 md:col-span-2">
             <Label>Listing</Label>
             <Select value={form.listingId} onValueChange={(value) => { setField("listingId", value); setConflicts(null); }}>
@@ -138,8 +183,8 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
             </Select>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="guestName">Guest name</Label>
-            <Input id="guestName" value={form.guestName} onChange={(e) => setField("guestName", e.target.value)} required />
+            <Label htmlFor="guestName">Primary guest name</Label>
+            <Input id="guestName" maxLength={120} value={form.guestName} onChange={(e) => setField("guestName", e.target.value)} required />
           </div>
           <div className="space-y-2">
             <Label htmlFor="guestPhone">Guest phone</Label>
@@ -147,7 +192,7 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
           </div>
           <div className="space-y-2">
             <Label htmlFor="guests">Guests</Label>
-            <Input id="guests" type="number" min={1} value={form.guests || ""} onChange={(e) => setField("guests", e.target.value === "" ? 0 : Number(e.target.value))} required />
+            <Input id="guests" type="number" min={1} max={50} value={form.guests || ""} onChange={(e) => setField("guests", e.target.value === "" ? 0 : Number(e.target.value))} required />
           </div>
           <div className="space-y-2">
             <Label>Source</Label>
@@ -191,9 +236,24 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
             <Label htmlFor="note">Note</Label>
             <Textarea id="note" value={form.note} onChange={(e) => setField("note", e.target.value)} placeholder="Optional internal note" />
           </div>
-        </div>
+        </fieldset>
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        <OfflineGuestFields
+          drafts={guestDrafts}
+          count={Number(form.guests)}
+          primaryName={form.guestName}
+          onChange={setGuestDrafts}
+          disabled={submitting || uploadFailures.length > 0}
+        />
+
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+        {uploadProgress && <p role="status" className="text-sm text-muted-foreground">{uploadProgress}</p>}
+        <GuestUploadErrors
+          failed={uploadFailures}
+          busy={submitting}
+          onRetry={() => void retryUploads()}
+          onContinue={resetForm}
+        />
 
         {conflicts && (
           <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
@@ -223,7 +283,9 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
           </div>
         )}
 
-        <Button type="submit" disabled={submitting || listings.length === 0}>{submitting ? "Recording…" : "Record booking"}</Button>
+        <Button type="submit" disabled={submitting || uploadFailures.length > 0 || listings.length === 0}>
+          {uploadFailures.length > 0 ? "Booking already recorded" : submitting ? uploadProgress ? "Uploading IDs..." : "Recording…" : "Record booking"}
+        </Button>
       </form>
 
       {success && (

@@ -30,9 +30,7 @@ import crypto from "crypto";
 const DAY_MS = 86_400_000;
 /** Longest stay the online path will take money for. */
 export const MAX_NIGHTS = 365;
-/** Per-file ceiling for an uploaded ID. Generous for a phone photo or a scan. */
-export const MAX_DOC_BYTES = 4 * 1024 * 1024;
-export const ALLOWED_DOC_MIMES = ["image/jpeg", "image/png", "application/pdf"] as const;
+export { MAX_DOC_BYTES, ALLOWED_DOC_MIMES } from "./booking-documents";
 
 export type Fail = { ok: false; error: string };
 const fail = (error: string): Fail => ({ ok: false, error });

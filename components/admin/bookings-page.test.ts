@@ -42,12 +42,73 @@ const booking = {
   listing,
   idDocs: [{ id: "example-doc", name: "Maya", docName: "example-id.png" }],
 };
+const manualBooking = {
+  id: "manual-booking", listingId: listing.id, guestName: "Manual Primary", guestPhone: "+919876543210",
+  guests: 2, checkIn: new Date("2025-10-02T00:00:00Z"), checkOut: new Date("2025-10-05T00:00:00Z"),
+  totalPrice: 900000, amountPaid: 900000, due: 0, source: "AIRBNB", status: "CONFIRMED", note: "Synthetic stay",
+  publicToken: "manual-token", listing,
+  guestDetails: [
+    { id: "manual-doc", position: 0, name: "Manual Primary", docName: "manual-id.pdf", docSize: 100 },
+    { id: "manual-name", position: 1, name: "Manual Companion", docName: null, docSize: 0 },
+  ],
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
   db.listing.findMany.mockResolvedValue([listing]);
   db.offlineBooking.findMany.mockResolvedValue([]);
   db.booking.findMany.mockResolvedValue([]);
+});
+
+describe("combined past booking history", () => {
+  it("merges guest and manual stays chronologically with every supplied guest and ID", async () => {
+    db.offlineBooking.findMany.mockResolvedValue([manualBooking]);
+    db.booking.findMany.mockResolvedValue([{
+      ...booking, checkIn: new Date("2025-10-10T00:00:00Z"), checkOut: new Date("2025-10-12T00:00:00Z"),
+    }]);
+    const html = renderToStaticMarkup(await AdminBookingsPage({
+      kind: "offline", searchParams: Promise.resolve({ view: "past" }),
+    }));
+    expect(html).toContain("Guest + manual booking history");
+    expect(html).not.toContain("Record a booking");
+    expect(html).toContain("Manual Companion");
+    expect(html).toContain("View Manual Primary&#x27;s attachment");
+    expect(html).toContain("View Maya&#x27;s attachment");
+    expect(html).toContain("No Aadhaar / ID uploaded.");
+    expect(html.indexOf('data-booking-kind="guest"')).toBeLessThan(html.indexOf('data-booking-kind="manual"'));
+    expect(html).toContain('name="view" value="past"');
+    expect(db.booking.findMany).toHaveBeenCalledOnce();
+    expect(db.booking.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { checkOut: { lt: expect.any(Date) }, NOT: { source: "ONLINE", status: "PENDING" } },
+      orderBy: [{ checkOut: "desc" }, { checkIn: "desc" }],
+    }));
+    const manualQuery = db.offlineBooking.findMany.mock.calls[0][0];
+    expect(manualQuery.include.guestDetails.select.docData).toBeUndefined();
+    expect(manualQuery.include.guestDetails.select.docName).toBe(true);
+  });
+
+  it("applies the same flat, overlap and status filters to both booking sources", async () => {
+    const params = { view: "past", status: "CANCELLED", from: "2025-10-01", to: "2025-10-31", flat: listing.id };
+    const html = renderToStaticMarkup(await AdminBookingsPage({ kind: "offline", searchParams: Promise.resolve(params) }));
+    const shared = {
+      listingId: listing.id, status: "CANCELLED",
+      checkIn: { lt: new Date("2025-11-01T00:00:00Z") },
+      checkOut: { gt: new Date("2025-10-01T00:00:00Z"), lt: expect.any(Date) },
+    };
+    expect(db.offlineBooking.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: shared }));
+    expect(db.booking.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { ...shared, NOT: { source: "ONLINE", status: "PENDING" } },
+    }));
+    expect(html).toContain('href="/admin/bookings?view=past"');
+    expect(html).toContain('action="/admin/bookings"');
+    expect(html).toContain("No past bookings match these filters.");
+  });
+
+  it.each(["GUEST", "MANUAL"])("can filter history to %s without querying the other source", async (source) => {
+    await AdminBookingsPage({ kind: "offline", searchParams: Promise.resolve({ view: "past", source }) });
+    expect(db.booking.findMany).toHaveBeenCalledTimes(source === "GUEST" ? 1 : 0);
+    expect(db.offlineBooking.findMany).toHaveBeenCalledTimes(source === "MANUAL" ? 1 : 0);
+  });
 });
 
 describe("separate admin booking tabs", () => {

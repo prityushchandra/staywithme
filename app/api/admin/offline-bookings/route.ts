@@ -6,6 +6,11 @@ import { prisma } from "@/lib/db";
 import { addBlock, toUtcDate } from "@/lib/availability";
 import { withReceiptNumber } from "@/lib/receipts";
 import { syncOfflineBooking, syncReceipt } from "@/lib/google-sheets";
+import {
+  normalizeOfflineGuests,
+  offlineGuestDetailsSchema,
+  OfflineGuestDetailsError,
+} from "@/lib/offline-booking-guests";
 
 async function requireAdmin() {
   const session = await auth();
@@ -23,6 +28,7 @@ const bookingSchema = z.object({
   amountPaid: z.coerce.number().min(0).default(0),
   source: z.enum(["OFFLINE", "AIRBNB"]).default("OFFLINE"),
   note: z.string().trim().max(500).optional(),
+  guestDetails: offlineGuestDetailsSchema.optional(),
   // Admin chose to book on top of already-blocked dates.
   override: z.boolean().default(false),
 });
@@ -64,6 +70,13 @@ export async function POST(req: Request) {
   }
 
   const input = parsed.data;
+  let guestDetails: ReturnType<typeof normalizeOfflineGuests>;
+  try {
+    guestDetails = normalizeOfflineGuests(input.guestName, input.guestDetails, input.guests);
+  } catch (error) {
+    if (!(error instanceof OfflineGuestDetailsError)) throw error;
+    return NextResponse.json({ error: error.message }, { status: 400 });
+  }
   const checkIn = toUtcDate(input.checkIn);
   const checkOut = toUtcDate(input.checkOut);
   if (checkOut.getTime() <= checkIn.getTime()) {
@@ -136,6 +149,7 @@ export async function POST(req: Request) {
             blockId: blockResult.block.id,
             publicToken: crypto.randomUUID().replace(/-/g, ""),
             createdById: session?.user?.id ?? null,
+            guestDetails: { create: guestDetails },
           },
         });
 
