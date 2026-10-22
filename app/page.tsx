@@ -87,8 +87,7 @@ export default async function HomePage() {
             <h2 className="mb-4 text-lg font-semibold">Stays you&apos;ll love</h2>
             {listings.length === 0 ? (
               <div className="rounded-xl border border-dashed p-12 text-center text-muted-foreground">
-                No published listings yet. Seed the database or approve a listing to
-                see it here.
+                No stays are available right now. Please check back soon.
               </div>
             ) : rest.length === 0 ? (
               <p className="text-sm text-muted-foreground">
