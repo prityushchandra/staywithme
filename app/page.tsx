@@ -4,6 +4,7 @@ import { getRatingSummaries } from "@/lib/reviews";
 import { ListingCard } from "@/components/listing-card";
 import { SearchBar } from "@/components/search-bar";
 import { SearchDatesProvider } from "@/components/search-dates-context";
+import { HomepageListingManager } from "@/components/admin/homepage-listing-controls";
 
 // The homepage output is identical for every visitor (wishlist/session state is
 // resolved client-side), so we cache the rendered page and refresh it in the
@@ -64,46 +65,50 @@ export default async function HomePage() {
       </section>
 
       <div className="container py-6">
-        {featured.length > 0 && (
-          <section className="mt-6">
-            <h2 className="mb-4 text-lg font-semibold">✨ Featured stays</h2>
-            <div className="grid grid-cols-1 gap-x-6 gap-y-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {featured.map((listing) => (
-                <ListingCard
-                  key={listing.id}
-                  listing={toListingCardData(listing)}
-                  platformFeePercent={settings.platformFeePercent}
-                  rating={ratings.get(listing.id)}
-                />
-              ))}
-            </div>
-          </section>
-        )}
-
-        <section className="mt-6">
-          <h2 className="mb-4 text-lg font-semibold">Stays you&apos;ll love</h2>
-          {listings.length === 0 ? (
-            <div className="rounded-xl border border-dashed p-12 text-center text-muted-foreground">
-              No published listings yet. Seed the database or approve a listing to
-              see it here.
-            </div>
-          ) : rest.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Every stay is featured above ✨
-            </p>
-          ) : (
-            <div className="grid grid-cols-1 gap-x-6 gap-y-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {rest.map((listing) => (
-                <ListingCard
-                  key={listing.id}
-                  listing={toListingCardData(listing)}
-                  platformFeePercent={settings.platformFeePercent}
-                  rating={ratings.get(listing.id)}
-                />
-              ))}
-            </div>
+        <HomepageListingManager listingIds={[...new Set([...listings, ...featured].map((listing) => listing.id))]}>
+          {featured.length > 0 && (
+            <section className="mt-6">
+              <h2 className="mb-4 text-lg font-semibold">✨ Featured stays</h2>
+              <div className="grid grid-cols-1 gap-x-6 gap-y-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {featured.map((listing) => (
+                  <ListingCard
+                    key={listing.id}
+                    listing={toListingCardData(listing)}
+                    platformFeePercent={settings.platformFeePercent}
+                    rating={ratings.get(listing.id)}
+                    showVisibilityToggle
+                  />
+                ))}
+              </div>
+            </section>
           )}
-        </section>
+
+          <section className="mt-6">
+            <h2 className="mb-4 text-lg font-semibold">Stays you&apos;ll love</h2>
+            {listings.length === 0 ? (
+              <div className="rounded-xl border border-dashed p-12 text-center text-muted-foreground">
+                No published listings yet. Seed the database or approve a listing to
+                see it here.
+              </div>
+            ) : rest.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Every stay is featured above ✨
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 gap-x-6 gap-y-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {rest.map((listing) => (
+                  <ListingCard
+                    key={listing.id}
+                    listing={toListingCardData(listing)}
+                    platformFeePercent={settings.platformFeePercent}
+                    rating={ratings.get(listing.id)}
+                    showVisibilityToggle
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+        </HomepageListingManager>
       </div>
     </SearchDatesProvider>
   );

@@ -219,6 +219,7 @@ model Listing {
   status          ListingStatus @default(DRAFT)
   rejectionReason String?
   featured        Boolean       @default(false) // admin homepage curation
+  isVisible       Boolean       @default(true)
 
   // External calendar import (e.g. the host's Airbnb iCal export URL). Synced
   // dates land as AvailabilityBlock rows of kind "ICAL" so we never double-book.

@@ -2,6 +2,7 @@
 // Every query here forces status = PUBLISHED so the approval gate cannot be
 // bypassed page-by-page. Draft / Pending / Rejected / Approved-but-unpublished
 // listings are never returned to the public.
+// Discovery also respects visibility; direct links and existing stays remain valid.
 
 import { unstable_cache } from "next/cache";
 import { prisma } from "./db";
@@ -12,8 +13,8 @@ import { memo, clearMemo } from "./memo";
 
 // Public listing reads change only when a host/admin mutates listings, which
 // call revalidateTag("listings"). A short revalidate window is a safety net so
-// any missed invalidation self-heals. This keeps warm page loads off the
-// remote database (the dominant latency cost).
+// any missed invalidation self-heals. Discovery uses this tag-aware cache only:
+// process-local memo entries cannot be invalidated on other Vercel instances.
 const LISTINGS_CACHE = { tags: ["listings"], revalidate: 60 };
 
 const publicListingArgs = {
@@ -74,7 +75,7 @@ export function toListingCardData(l: {
 const cachedRankedListings = unstable_cache(
   async (): Promise<PublicListing[]> => {
     const listings = await prisma.listing.findMany({
-      where: { status: "PUBLISHED" },
+      where: { status: "PUBLISHED", isVisible: true },
       ...publicListingArgs,
       orderBy: { createdAt: "desc" },
     });
@@ -90,7 +91,7 @@ const cachedRankedListings = unstable_cache(
       click: settings?.rankWeightClick ?? 5,
     });
   },
-  ["ranked-published-listings"],
+  ["ranked-visible-published-listings"],
   LISTINGS_CACHE
 );
 
@@ -99,9 +100,7 @@ export async function getPublishedListings(options?: {
   take?: number;
   skip?: number;
 }): Promise<PublicListing[]> {
-  const ranked = await memo("ranked-listings", 60_000, () =>
-    cachedRankedListings()
-  );
+  const ranked = await cachedRankedListings();
   const skip = options?.skip ?? 0;
   const page =
     options?.take !== undefined
@@ -114,21 +113,19 @@ export async function getPublishedListings(options?: {
 const cachedFeaturedListings = unstable_cache(
   async (take: number): Promise<PublicListing[]> => {
     return prisma.listing.findMany({
-      where: { status: "PUBLISHED", featured: true },
+      where: { status: "PUBLISHED", featured: true, isVisible: true },
       ...publicListingArgs,
       orderBy: { createdAt: "desc" },
       take,
     });
   },
-  ["featured-listings"],
+  ["visible-featured-listings"],
   LISTINGS_CACHE
 );
 
 /** Fetch published, admin-featured listings for the homepage. */
 export async function getFeaturedListings(take = 8): Promise<PublicListing[]> {
-  const list = await memo(`featured:${take}`, 60_000, () =>
-    cachedFeaturedListings(take)
-  );
+  const list = await cachedFeaturedListings(take);
   // Cards only show the cover photo.
   return list.map((l) => ({ ...l, images: l.images.slice(0, 1) }));
 }
@@ -225,7 +222,7 @@ export async function getPublishedListingsByIds(
 ): Promise<PublicListing[]> {
   if (!ids.length) return [];
   const list = await prisma.listing.findMany({
-    where: { id: { in: ids }, status: "PUBLISHED" },
+    where: { id: { in: ids }, status: "PUBLISHED", isVisible: true },
     ...publicListingArgs,
     orderBy: { createdAt: "desc" },
   });

@@ -2,9 +2,9 @@ import { describe, it, expect } from "vitest";
 import { buildListingWhere } from "./search";
 
 describe("buildListingWhere", () => {
-  it("always forces PUBLISHED status (approval gate)", () => {
-    const w = buildListingWhere({}, 10);
-    expect(w.status).toBe("PUBLISHED");
+  it.each([{}, { destination: "goa", guests: 4, amenities: ["wifi"] }])("keeps approval and visibility gates with filters %j", (params) => {
+    const w = buildListingWhere(params, 10);
+    expect(w).toMatchObject({ status: "PUBLISHED", isVisible: true });
   });
 
   it("searches destination across city/country/title, case-insensitive", () => {

@@ -45,13 +45,13 @@ function totalRupeesToBasePaise(totalRupees: number, feePercent: number): number
 
 /**
  * Build the Prisma where-clause for a search. Always forces PUBLISHED, so the
- * approval gate holds even here.
+ * approval and guest-visibility gates hold even here.
  */
 export function buildListingWhere(
   params: SearchParams,
   platformFeePercent: number
 ): Prisma.ListingWhereInput {
-  const where: Prisma.ListingWhereInput = { status: "PUBLISHED" };
+  const where: Prisma.ListingWhereInput = { status: "PUBLISHED", isVisible: true };
   const and: Prisma.ListingWhereInput[] = [];
 
   if (params.destination?.trim()) {
@@ -174,7 +174,7 @@ const cachedSearch = unstable_cache(
       click: settings?.rankWeightClick ?? 5,
     }).slice(0, 60);
   },
-  ["search-listings"],
+  ["visible-search-listings"],
   { tags: ["listings", "reviews"], revalidate: 60 }
 );
 
@@ -183,9 +183,7 @@ export async function searchListings(
   platformFeePercent: number
 ): Promise<SearchResult[]> {
   const key = `${JSON.stringify(params)}:${platformFeePercent}`;
-  const list = await memo(`search:${key}`, 60_000, () =>
-    cachedSearch(key, params, platformFeePercent)
-  );
+  const list = await cachedSearch(key, params, platformFeePercent);
   // Cards only show the cover photo.
   return list.map((l) => ({ ...l, images: l.images.slice(0, 1) }));
 }

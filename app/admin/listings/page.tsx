@@ -83,6 +83,7 @@ export default async function AdminListingsPage({
                       {l.title}
                     </Link>
                     <Badge variant={STATUS_VARIANT[l.status]}>{l.status}</Badge>
+                    {l.status === "PUBLISHED" && !l.isVisible && <Badge variant="secondary">Hidden from guests</Badge>}
                     {l.featured && <Badge>Featured</Badge>}
                     {l.guestFavorite && <Badge variant="secondary">Guest Favorite</Badge>}
                     {strikePrice(l) && (

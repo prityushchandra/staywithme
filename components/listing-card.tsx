@@ -7,6 +7,7 @@ import { SmartImage } from "@/components/smart-image";
 import { WishlistButton } from "@/components/wishlist-button";
 import { useSearchDates } from "@/components/search-dates-context";
 import type { ListingCardData } from "@/lib/data-access";
+import { HomepageListingToggle } from "@/components/admin/homepage-listing-controls";
 
 // Listing card. Shows only the cover photo (swiping through all photos happens
 // on the listing detail page). Price is the guest-facing TOTAL per night.
@@ -14,10 +15,12 @@ export function ListingCard({
   listing,
   platformFeePercent,
   rating,
+  showVisibilityToggle = false,
 }: {
   listing: ListingCardData;
   platformFeePercent: number;
   rating?: { average: number; count: number };
+  showVisibilityToggle?: boolean;
 }) {
   const { total } = computePricing(nightlyPrice(listing), { platformFeePercent });
   const strike = strikePrice(listing);
@@ -97,6 +100,7 @@ export function ListingCard({
           <span className="text-muted-foreground"> for 1 night</span>
         </p>
       </Link>
+      {showVisibilityToggle && <HomepageListingToggle listingId={listing.id} />}
     </div>
   );
 }

@@ -1,22 +1,29 @@
 import { NextResponse } from "next/server";
-import { revalidateTag } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
+import { Prisma } from "@prisma/client";
 import { clearMemo } from "@/lib/memo";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
-const schema = z.object({
-  action: z.enum([
-    "approve",
-    "reject",
-    "unpublish",
-    "feature",
-    "unfeature",
-    "setHostName",
-  ]),
-  reason: z.string().max(500).optional(),
-  hostDisplayName: z.string().trim().max(50).optional(),
-});
+const schema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.enum([
+      "approve",
+      "reject",
+      "unpublish",
+      "feature",
+      "unfeature",
+      "setHostName",
+    ]),
+    reason: z.string().max(500).optional(),
+    hostDisplayName: z.string().trim().max(50).optional(),
+  }),
+  z.object({
+    action: z.literal("setVisibility"),
+    visible: z.boolean(),
+  }),
+]);
 
 // Admin moderation actions on a listing.
 export async function PATCH(
@@ -35,12 +42,38 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   }
 
-  const listing = await prisma.listing.findUnique({ where: { id } });
+  const listing = await prisma.listing.findUnique({
+    where: { id },
+    select: { id: true, status: true },
+  });
   if (!listing) {
     return NextResponse.json({ error: "Listing not found" }, { status: 404 });
   }
 
+  let isVisible: boolean | undefined;
   switch (parsed.data.action) {
+    case "setVisibility": {
+      if (listing.status !== "PUBLISHED") {
+        return NextResponse.json({ error: "Publish this listing before changing its visibility." }, { status: 409 });
+      }
+      try {
+        const updated = await prisma.listing.update({
+          where: { id, status: "PUBLISHED" },
+          data: { isVisible: parsed.data.visible },
+          select: { isVisible: true },
+        });
+        isVisible = updated.isVisible;
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+          return NextResponse.json({ error: "This listing is no longer published. Refresh and try again." }, { status: 409 });
+        }
+        console.error("[admin-listings] visibility change failed", {
+          code: error instanceof Prisma.PrismaClientKnownRequestError ? error.code : "UNKNOWN",
+        });
+        return NextResponse.json({ error: "Could not update listing visibility. Please retry." }, { status: 500 });
+      }
+      break;
+    }
     case "approve":
       await prisma.listing.update({
         where: { id },
@@ -79,7 +112,11 @@ export async function PATCH(
   // Moderation changes which listings are public / featured.
   revalidateTag("listings");
   clearMemo();
-  return NextResponse.json({ ok: true });
+  if (parsed.data.action === "setVisibility") {
+    revalidatePath("/");
+    revalidatePath("/search");
+  }
+  return NextResponse.json({ ok: true, ...(isVisible !== undefined ? { isVisible } : {}) });
 }
 
 // Permanently delete a listing (admin only). Cascades to its images, amenities,
