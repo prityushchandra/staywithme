@@ -129,7 +129,7 @@ export function CalendarSyncCard({
           )}
           {syncedAt && !ok && (
             <p className="text-xs text-muted-foreground">
-              Last synced {new Date(syncedAt).toLocaleString()}.
+              Last synced {new Date(syncedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST.
             </p>
           )}
 
