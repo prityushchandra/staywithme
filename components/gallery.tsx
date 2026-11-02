@@ -51,14 +51,14 @@ export function Gallery({ images, title }: { images: Img[]; title: string }) {
       key={images[idx].id}
       type="button"
       onClick={() => show(idx)}
-      className={`relative overflow-hidden bg-muted transition hover:brightness-95 ${className}`}
+      className={`group relative overflow-hidden bg-muted outline-none focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-ring ${className}`}
     >
       <SmartImage
         src={images[idx].url}
         alt={`${title} photo ${idx + 1}`}
         fill
         sizes={sizes}
-        className="object-cover"
+        className="object-cover transition-transform duration-700 motion-safe:group-hover:scale-[1.025]"
         priority={idx === 0}
       />
     </button>
@@ -66,7 +66,7 @@ export function Gallery({ images, title }: { images: Img[]; title: string }) {
 
   if (count === 0) {
     return (
-      <div className="mt-4 flex aspect-[16/9] items-center justify-center rounded-2xl bg-muted text-muted-foreground">
+      <div className="flex aspect-[16/9] items-center justify-center rounded-3xl bg-muted text-muted-foreground">
         No photos yet
       </div>
     );
@@ -74,15 +74,14 @@ export function Gallery({ images, title }: { images: Img[]; title: string }) {
 
   return (
     <>
-      <div className="relative mt-4 duration-500 animate-in fade-in">
+      <div className="relative">
         {/* Mobile: smooth swipeable hero. Tap opens the fullscreen viewer. */}
         <div className="sm:hidden">
           <SwipeCarousel
             images={images}
             title={title}
-            className="aspect-[4/3] w-full rounded-2xl bg-muted"
+            className="aspect-[4/3] w-full rounded-3xl bg-muted"
             onTap={(i) => show(i)}
-            showDots
             showCounter
           />
         </div>
@@ -90,35 +89,21 @@ export function Gallery({ images, title }: { images: Img[]; title: string }) {
         {/* Desktop: mosaic adapts to the photo count so there are never empty cells. */}
         <div className="hidden sm:block">
           {count === 1 && (
-            <div className="aspect-[16/9] overflow-hidden rounded-2xl">
+            <div className="aspect-[2/1] overflow-hidden rounded-[2rem]">
               {renderImg(0, "h-full w-full", "100vw")}
             </div>
           )}
           {count === 2 && (
-            <div className="grid aspect-[2/1] grid-cols-2 gap-2 overflow-hidden rounded-2xl">
-              {renderImg(0, "")}
-              {renderImg(1, "")}
+            <div className="grid aspect-[2.15/1] grid-cols-[1.75fr_1fr] gap-3 overflow-hidden rounded-[2rem]">
+              {renderImg(0, "", "(min-width: 1280px) 780px, 65vw")}
+              {renderImg(1, "", "(min-width: 1280px) 440px, 35vw")}
             </div>
           )}
-          {count === 3 && (
-            <div className="grid aspect-[2/1] grid-cols-3 grid-rows-2 gap-2 overflow-hidden rounded-2xl">
-              {renderImg(0, "col-span-2 row-span-2")}
-              {renderImg(1, "")}
-              {renderImg(2, "")}
-            </div>
-          )}
-          {count === 4 && (
-            <div className="grid aspect-[3/2] grid-cols-2 grid-rows-2 gap-2 overflow-hidden rounded-2xl">
-              {[0, 1, 2, 3].map((i) => renderImg(i, ""))}
-            </div>
-          )}
-          {count >= 5 && (
-            <div className="grid aspect-[2/1] grid-cols-4 grid-rows-2 gap-2 overflow-hidden rounded-2xl">
-              {renderImg(0, "col-span-2 row-span-2")}
-              {renderImg(1, "")}
-              {renderImg(2, "")}
-              {renderImg(3, "")}
-              {renderImg(4, "")}
+          {count >= 3 && (
+            <div className="grid aspect-[2.15/1] grid-cols-[1.75fr_1fr] grid-rows-2 gap-3 overflow-hidden rounded-[2rem]">
+              {renderImg(0, "row-span-2", "(min-width: 1280px) 780px, 65vw")}
+              {renderImg(1, "", "(min-width: 1280px) 440px, 35vw")}
+              {renderImg(2, "", "(min-width: 1280px) 440px, 35vw")}
             </div>
           )}
         </div>
@@ -127,7 +112,7 @@ export function Gallery({ images, title }: { images: Img[]; title: string }) {
           <button
             type="button"
             onClick={() => show(index)}
-            className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-lg border border-black/10 bg-white px-3 py-1.5 text-sm font-medium shadow-sm hover:bg-neutral-50"
+            className="absolute bottom-4 right-4 flex min-h-11 items-center gap-2 rounded-full border border-white/60 bg-white/95 px-4 py-2 text-xs font-medium text-neutral-900 shadow-sm backdrop-blur-sm transition hover:bg-white sm:bottom-5 sm:right-5 sm:text-sm"
           >
             <Grip className="h-4 w-4" /> Show all {count} photos
           </button>

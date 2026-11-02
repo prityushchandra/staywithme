@@ -25,11 +25,26 @@ function request(body: unknown) {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-11-15T12:00:00Z"));
   mocks.auth.mockResolvedValue({ user: { isAdmin: true } });
-  mocks.listing.findUnique.mockResolvedValue({ id, status: "PUBLISHED" });
+  mocks.listing.findUnique.mockResolvedValue({ id, status: "PUBLISHED", isVisible: true });
   mocks.listing.update.mockImplementation(async ({ data }: { data: { isVisible?: boolean } }) => data);
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+function monthWrite(month: string, isVisible: boolean) {
+  return {
+    upsert: {
+      where: { listingId_month: { listingId: id, month } },
+      create: { month, isVisible },
+      update: { isVisible },
+    },
+  };
+}
 
 describe("homepage listing visibility", () => {
   it.each([null, { user: { isAdmin: false } }])("denies non-admin reads and changes before querying listings", async (session) => {
@@ -66,7 +81,9 @@ describe("homepage listing visibility", () => {
     }
     expect(mocks.listing.update).toHaveBeenCalledTimes(2);
     expect(mocks.listing.update).toHaveBeenLastCalledWith({
-      where: { id, status: "PUBLISHED" }, data: { isVisible: visible }, select: { isVisible: true },
+      where: { id, status: "PUBLISHED" },
+      data: { isVisible: visible, visibilityMonths: monthWrite("2026-11", visible) },
+      select: { isVisible: true },
     });
     expect(mocks.revalidateTag).toHaveBeenCalledWith("listings");
     expect(mocks.clearMemo).toHaveBeenCalledTimes(2);
@@ -114,9 +131,75 @@ describe("homepage listing visibility", () => {
     expect(mocks.revalidateTag).not.toHaveBeenCalled();
   });
 
+  it("stores the month's final state atomically across repeated toggles without replacing an earlier month", async () => {
+    const history = new Map([["2026-10", true]]);
+    mocks.listing.update.mockImplementation(async ({ data }) => {
+      const { upsert } = data.visibilityMonths;
+      const { month, listingId } = upsert.where.listingId_month;
+      expect(listingId).toBe(id);
+      history.set(month, history.has(month) ? upsert.update.isVisible : upsert.create.isVisible);
+      return { isVisible: data.isVisible };
+    });
+    for (const visible of [false, true, false]) {
+      expect((await PATCH(request({ action: "setVisibility", visible }), params())).status).toBe(200);
+    }
+    expect([...history]).toEqual([["2026-10", true], ["2026-11", false]]);
+    vi.setSystemTime(new Date("2027-01-15T12:00:00Z"));
+    expect((await PATCH(request({ action: "setVisibility", visible: true }), params())).status).toBe(200);
+    expect([...history]).toEqual([["2026-10", true], ["2026-11", false], ["2027-01", true]]);
+  });
+
+  it("changes the tracked month exactly at India midnight", async () => {
+    vi.setSystemTime(new Date("2026-10-31T18:29:59.999Z"));
+    await PATCH(request({ action: "setVisibility", visible: false }), params());
+    vi.setSystemTime(new Date("2026-10-31T18:30:00Z"));
+    await PATCH(request({ action: "setVisibility", visible: true }), params());
+    expect(mocks.listing.update).toHaveBeenNthCalledWith(1, {
+      where: { id, status: "PUBLISHED" },
+      data: { isVisible: false, visibilityMonths: monthWrite("2026-10", false) },
+      select: { isVisible: true },
+    });
+    expect(mocks.listing.update).toHaveBeenNthCalledWith(2, {
+      where: { id, status: "PUBLISHED" },
+      data: { isVisible: true, visibilityMonths: monthWrite("2026-11", true) },
+      select: { isVisible: true },
+    });
+  });
+
+  it.each([false, true])("approves with effective visibility=%s without auto-showing a hidden listing", async (isVisible) => {
+    mocks.listing.findUnique.mockResolvedValue({ id, status: "PENDING", isVisible });
+    expect((await PATCH(request({ action: "approve" }), params())).status).toBe(200);
+    expect(mocks.listing.update).toHaveBeenCalledWith({
+      where: { id, isVisible },
+      data: {
+        status: "PUBLISHED", rejectionReason: null,
+        visibilityMonths: monthWrite("2026-11", isVisible),
+      },
+    });
+  });
+
+  it("rejects approval's stale visibility snapshot rather than recording the wrong monthly state", async () => {
+    mocks.listing.update.mockRejectedValue(new Prisma.PrismaClientKnownRequestError("Visibility changed", {
+      code: "P2025", clientVersion: "test",
+    }));
+    const response = await PATCH(request({ action: "approve" }), params());
+    expect(response.status).toBe(409);
+    expect(mocks.revalidateTag).not.toHaveBeenCalled();
+  });
+
   it.each([
-    { input: { action: "approve" }, data: { status: "PUBLISHED", rejectionReason: null } },
     { input: { action: "unpublish" }, data: { status: "PENDING", featured: false } },
+    { input: { action: "reject", reason: " Not ready " }, data: { status: "REJECTED", rejectionReason: "Not ready" } },
+  ])("tracks $input.action as unlisted without changing the independent visibility toggle", async ({ input, data }) => {
+    expect((await PATCH(request(input), params())).status).toBe(200);
+    expect(mocks.listing.update).toHaveBeenCalledWith({
+      where: { id }, data: { ...data, visibilityMonths: monthWrite("2026-11", false) },
+    });
+  });
+
+  it.each([
+    { input: { action: "feature" }, data: { featured: true } },
+    { input: { action: "unfeature" }, data: { featured: false } },
     { input: { action: "setHostName", hostDisplayName: " Host " }, data: { hostDisplayName: "Host" } },
   ])("preserves the existing $input.action action", async ({ input, data }) => {
     const response = await PATCH(request(input), params());

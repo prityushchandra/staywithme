@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
+import { OVERLAY_POP_EVENT } from "./overlay-history-events";
 
 /**
  * Makes a fullscreen overlay (photo viewer, mobile filter sheet, mobile date
@@ -21,8 +22,9 @@ import { useEffect, useRef } from "react";
  * The pushed entry clones the current `history.state`. Next's App Router keeps
  * its routing tree in there, so an entry with a bare state object would look
  * like a foreign history record and make the router hard-navigate on pop.
- * Cloning keeps the URL and the router tree identical to the entry underneath,
- * which is what makes popping back a no-op for Next and a pure close for us.
+ * Overlay-only pops are consumed without asking Next to restore a route: that
+ * unnecessary restore can discard a pending router update. Real page Back and
+ * Forward still receive the routing metadata and follow Next's normal path.
  */
 /**
  * Overlays that are currently holding a history entry, oldest first. A date
@@ -30,7 +32,11 @@ import { useEffect, useRef } from "react";
  * and only the top one may answer a Back gesture — otherwise one Back closes
  * the whole pile at once.
  */
-const overlayStack: symbol[] = [];
+type HistoryDestination = { parentId: unknown; href: string };
+const overlayStack: (HistoryDestination & {
+  id: symbol;
+  close: () => void;
+})[] = [];
 
 /**
  * `history.back()` calls we made ourselves, in the order we made them. Closing
@@ -38,31 +44,32 @@ const overlayStack: symbol[] = [];
  * Back gesture at the `popstate` listener — so without this queue the overlay
  * *underneath* hears its neighbour tidying up and closes itself too.
  *
- * Each ticket self-expires: if `back()` somehow never produces a pop, a stale
- * ticket would silently swallow the guest's next real Back.
+ * Match the destination entry as well as the URL: an unrelated Back must not
+ * be swallowed, and a slow traversal must still be recognised when it arrives.
  */
-const expectedPops: { matched: boolean }[] = [];
-const programmaticPops = new WeakSet<PopStateEvent>();
+const expectedPops: (HistoryDestination & { finish: () => void })[] = [];
+const pendingPops = new Set<Promise<void>>();
 
-function expectOwnPop() {
-  const ticket = { matched: false };
-  expectedPops.push(ticket);
-  setTimeout(() => {
-    if (ticket.matched) return;
-    const i = expectedPops.indexOf(ticket);
-    if (i >= 0) expectedPops.splice(i, 1);
-  }, 1000);
-}
-
-// Registered at module scope so it always runs before the per-overlay listeners
-// added later in effects, and has therefore already classified the event by the
-// time they look at it.
+// The beforeInteractive bridge forwards this synchronously before Next's
+// popstate handler. A real route traversal is never suppressed.
 if (typeof window !== "undefined") {
-  window.addEventListener("popstate", (event) => {
-    const ticket = expectedPops.shift();
-    if (!ticket) return;
-    ticket.matched = true;
-    programmaticPops.add(event);
+  window.addEventListener(OVERLAY_POP_EVENT, (notification) => {
+    const event = (notification as CustomEvent<PopStateEvent>).detail;
+    const matches = (entry: HistoryDestination) =>
+      entry.parentId === event.state?.overlay &&
+      entry.href === window.location.href;
+    const i = expectedPops.findIndex(matches);
+    if (i >= 0) {
+      event.stopImmediatePropagation();
+      const [ticket] = expectedPops.splice(i, 1);
+      ticket.finish();
+      return;
+    }
+
+    const top = overlayStack.at(-1);
+    if (!top) return;
+    if (matches(top)) event.stopImmediatePropagation();
+    top.close();
   });
 }
 
@@ -73,6 +80,8 @@ export function useOverlayHistory(
 ) {
   const onCloseRef = useRef(onClose);
   const poppedByBrowser = useRef(false);
+  const replacedByNavigation = useRef(false);
+  const activeEntry = useRef<symbol | null>(null);
   // Cleanups run in declaration order, so this sentinel is set before the
   // effect below tears down. It lets us tell "the overlay closed" apart from
   // "the whole component went away", which matters because calling
@@ -106,23 +115,21 @@ export function useOverlayHistory(
     };
     setRestoration("manual");
 
-    history.pushState({ ...history.state, overlay: true }, "");
+    const parentId: unknown = history.state?.overlay;
+    const href = window.location.href;
+    const overlayId = `${Date.now()}-${Math.random()}`;
+    history.pushState({ ...history.state, overlay: overlayId }, "");
     poppedByBrowser.current = false;
+    replacedByNavigation.current = false;
     const id = Symbol("overlay");
-    overlayStack.push(id);
+    activeEntry.current = id;
 
     const forget = () => {
-      const i = overlayStack.lastIndexOf(id);
+      const i = overlayStack.findIndex((entry) => entry.id === id);
       if (i >= 0) overlayStack.splice(i, 1);
     };
 
-    const onPop = (event: PopStateEvent) => {
-      // Another overlay popping its own entry as it closes. Not a Back gesture
-      // aimed at us — reacting to it would close this overlay too.
-      if (programmaticPops.has(event)) return;
-      // A real Back dismisses only the overlay on top of the pile; the ones
-      // underneath keep their history entries for the Backs that follow.
-      if (overlayStack[overlayStack.length - 1] !== id) return;
+    const onPop = () => {
       // The browser has already removed our entry by the time this fires, so
       // there is nothing left for us to pop in the cleanup below.
       poppedByBrowser.current = true;
@@ -130,29 +137,60 @@ export function useOverlayHistory(
       setRestoration(previousRestoration);
       onCloseRef.current();
     };
-    window.addEventListener("popstate", onPop);
+    overlayStack.push({ id, parentId, href, close: onPop });
 
     return () => {
-      window.removeEventListener("popstate", onPop);
+      activeEntry.current = null;
       forget();
-      if (poppedByBrowser.current || unmounting.current) {
+      if (poppedByBrowser.current || replacedByNavigation.current || unmounting.current) {
         setRestoration(previousRestoration);
         return;
       }
 
       // `back()` is asynchronous — the pop, and the scroll restoration being
       // suppressed with it, land in a later task. Hand the setting back only
-      // once that has happened, with a timeout in case the pop never comes.
+      // once that has happened. Only the scroll setting has a timeout; a route
+      // replacement must wait for the actual traversal, however long it takes.
+      let finish!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      pendingPops.add(pending);
       let timer: ReturnType<typeof setTimeout>;
-      const release = () => {
-        window.removeEventListener("popstate", release);
-        clearTimeout(timer);
-        setRestoration(previousRestoration);
-      };
-      window.addEventListener("popstate", release);
-      timer = setTimeout(release, 1000);
-      expectOwnPop();
+      expectedPops.push({
+        parentId,
+        href,
+        finish: () => {
+          clearTimeout(timer);
+          setRestoration(previousRestoration);
+          pendingPops.delete(pending);
+          finish();
+        },
+      });
+      timer = setTimeout(() => setRestoration(previousRestoration), 1000);
       history.back();
     };
   }, [open, enabled]);
+
+  // Replace the overlay's throwaway entry with the destination. Popping it
+  // while that navigation is pending would cancel the new route. A nested
+  // calendar may still be popping its entry even though it is already hidden.
+  return useCallback((replace: () => void) => {
+    const entry = activeEntry.current;
+    const navigate = () => {
+      if (
+        unmounting.current ||
+        activeEntry.current !== entry ||
+        replacedByNavigation.current
+      ) return;
+      replacedByNavigation.current = true;
+      replace();
+      onCloseRef.current();
+    };
+    if (pendingPops.size) {
+      void Promise.all([...pendingPops]).then(navigate);
+    } else {
+      navigate();
+    }
+  }, []);
 }

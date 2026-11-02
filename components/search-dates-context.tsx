@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 
 // Holds the dates/guests chosen in the homepage (or search) search bar, so the
 // listing cards can carry them into the listing URL — clicking a stay then
@@ -24,9 +24,20 @@ export function SearchDatesProvider({
   children: React.ReactNode;
   initial?: { checkIn?: string; checkOut?: string; guests?: number };
 }) {
-  const [checkIn, setCheckIn] = useState(initial?.checkIn ?? "");
-  const [checkOut, setCheckOut] = useState(initial?.checkOut ?? "");
-  const [guests, setGuests] = useState(initial?.guests ?? 1);
+  const initialCheckIn = initial?.checkIn ?? "";
+  const initialCheckOut = initial?.checkOut ?? "";
+  const initialGuests = initial?.guests ?? 1;
+  const [checkIn, setCheckIn] = useState(initialCheckIn);
+  const [checkOut, setCheckOut] = useState(initialCheckOut);
+  const [guests, setGuests] = useState(initialGuests);
+
+  // Client-side searches reuse this provider; listing links must carry the
+  // newly applied dates rather than the first search's dates.
+  useEffect(() => {
+    setCheckIn(initialCheckIn);
+    setCheckOut(initialCheckOut);
+    setGuests(initialGuests);
+  }, [initialCheckIn, initialCheckOut, initialGuests]);
 
   const params = new URLSearchParams();
   if (checkIn) params.set("checkIn", checkIn);

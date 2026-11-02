@@ -5,38 +5,31 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { BookingAttachments } from "@/components/admin/booking-attachments";
-import { ALLOWED_DOC_MIMES, MAX_DOC_BYTES } from "@/lib/booking-documents";
+import { ALLOWED_DOC_MIMES, guestDocumentFileError, guestDocuments, type GuestDocumentMetadata, type GuestDocumentRecord } from "@/lib/booking-documents";
+import { uploadGuestFiles, type GuestUpload, type GuestUploadFailure, type SavedGuestUpload } from "@/lib/guest-uploads";
 
-export type OfflineGuestRecord = {
-  id: string;
-  position: number;
-  name: string;
-  docName: string | null;
-  docSize: number;
-};
+export type OfflineGuestRecord = GuestDocumentRecord & { position: number };
+export type { GuestUpload, GuestUploadFailure } from "@/lib/guest-uploads";
 
 export type OfflineGuestDraft = {
   position: number;
   name: string;
-  file: File | null;
-  document: OfflineGuestRecord | null;
-  removeDocument: boolean;
+  files: { file: File; uploadId: string }[];
+  documents: GuestDocumentMetadata[];
+  removeDocumentIds: string[];
 };
-
-export type GuestUpload = { position: number; name: string; file: File };
-export type GuestUploadFailure = { upload: GuestUpload; error: string };
 
 export function offlineGuestDrafts(records: readonly OfflineGuestRecord[] = []): OfflineGuestDraft[] {
   return records.map((record) => ({
-    position: record.position, name: record.name, file: null, document: record, removeDocument: false,
+    position: record.position, name: record.name, files: [], documents: guestDocuments(record), removeDocumentIds: [],
   }));
 }
 
-function activeGuests(drafts: readonly OfflineGuestDraft[], count: number, primaryName: string) {
+function activeGuests(drafts: readonly OfflineGuestDraft[], count: number, primaryName: string): OfflineGuestDraft[] {
   return Array.from({ length: Math.min(50, Math.max(0, count)) }, (_, position) => {
     const existing = drafts.find((guest) => guest.position === position);
     return {
-      position, file: null, document: null, removeDocument: false,
+      position, files: [], documents: [], removeDocumentIds: [],
       ...existing,
       name: position === 0 ? primaryName : existing?.name ?? "",
     };
@@ -53,90 +46,51 @@ export function offlineGuestPayload(
   }
   const guests = activeGuests(drafts, count, primaryName);
   for (const guest of guests) {
-    if ((guest.position === 0 || guest.file || (guest.document?.docName && !guest.removeDocument)) && !guest.name.trim()) {
+    if ((guest.position === 0 || guest.files.length > 0 ||
+        guest.documents.some((doc) => !guest.removeDocumentIds.includes(doc.id))) && !guest.name.trim()) {
       throw new Error(`Enter Guest ${guest.position + 1}'s full name.`);
     }
-    if (guest.file && !ALLOWED_DOC_MIMES.some((mime) => mime === guest.file?.type)) {
-      throw new Error(`Guest ${guest.position + 1}: upload a JPG, PNG or PDF.`);
-    }
-    if (guest.file?.size === 0) {
-      throw new Error(`Guest ${guest.position + 1}'s ID file is empty.`);
-    }
-    if (guest.file && guest.file.size > MAX_DOC_BYTES) {
-      throw new Error(`Guest ${guest.position + 1}'s ID is larger than 4 MB.`);
+    for (const { file } of guest.files) {
+      const error = guestDocumentFileError(file);
+      if (error) throw new Error(`Guest ${guest.position + 1} (${file.name}): ${error}`);
     }
   }
-  if (drafts.some((guest) => guest.position >= count && guest.document?.docName && !guest.removeDocument)) {
+  if (drafts.some((guest) => guest.position >= count &&
+      guest.documents.some((doc) => !guest.removeDocumentIds.includes(doc.id)))) {
     throw new Error("Remove IDs for guests no longer included before reducing the guest count.");
   }
   return {
     guestDetails: guests.filter((guest) => guest.name.trim()).map((guest) => ({
       position: guest.position, name: guest.name.trim(),
     })),
-    removeDocumentIds: drafts.filter((guest) => guest.removeDocument && guest.document?.docName)
-      .flatMap((guest) => guest.document ? [guest.document.id] : []),
-    uploads: guests.flatMap((guest) => guest.file
-      ? [{ position: guest.position, name: guest.name.trim(), file: guest.file }] : []),
+    removeDocumentIds: drafts.flatMap((guest) => guest.removeDocumentIds),
+    uploads: guests.flatMap((guest) => guest.files.map((file) => ({
+      ...file, position: guest.position, name: guest.name.trim(),
+    }))),
   };
 }
 
-function isGuestRecord(value: unknown): value is OfflineGuestRecord {
-  if (!value || typeof value !== "object") return false;
-  return "id" in value && typeof value.id === "string" &&
-    "position" in value && typeof value.position === "number" &&
-    "name" in value && typeof value.name === "string" &&
-    "docName" in value && typeof value.docName === "string" &&
-    "docSize" in value && typeof value.docSize === "number";
-}
-
-export async function uploadOfflineGuestFiles(
+export function uploadOfflineGuestFiles(
   bookingId: string,
   uploads: readonly GuestUpload[],
   onProgress: (guest: number, current: number, total: number) => void
 ) {
-  const failed: GuestUploadFailure[] = [];
-  const saved: OfflineGuestRecord[] = [];
-  for (const [index, upload] of uploads.entries()) {
-    onProgress(upload.position + 1, index + 1, uploads.length);
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 60_000);
-    try {
-      const form = new FormData();
-      form.set("position", String(upload.position));
-      form.set("name", upload.name);
-      form.set("file", upload.file);
-      const response = await fetch(`/api/admin/offline-bookings/${encodeURIComponent(bookingId)}/guests`, {
-        method: "POST", body: form, signal: controller.signal,
-      });
-      const body: unknown = await response.json();
-      if (!response.ok) {
-        const message = body && typeof body === "object" && "error" in body && typeof body.error === "string"
-          ? body.error : "The ID upload failed. Please retry.";
-        throw new Error(message);
-      }
-      if (!body || typeof body !== "object" || !("doc" in body) || !isGuestRecord(body.doc)) {
-        throw new Error("The server did not confirm the ID upload. Please retry.");
-      }
-      saved.push(body.doc);
-    } catch (error) {
-      failed.push({
-        upload,
-        error: controller.signal.aborted
-          ? "The upload timed out. Please retry."
-          : error instanceof Error ? error.message : "The ID upload failed. Please retry.",
-      });
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  return { failed, saved };
+  return uploadGuestFiles(`/api/admin/offline-bookings/${encodeURIComponent(bookingId)}/guests`, uploads, onProgress);
 }
 
-export function applyUploadedGuests(drafts: readonly OfflineGuestDraft[], saved: readonly OfflineGuestRecord[]) {
+export function applyUploadedGuests(drafts: readonly OfflineGuestDraft[], saved: readonly SavedGuestUpload[]) {
   const result = [...drafts];
   for (const record of saved) {
     const index = result.findIndex((guest) => guest.position === record.position);
-    const guest = { position: record.position, name: record.name, file: null, document: record, removeDocument: false };
+    const current = result[index];
+    const document = { id: record.id, docName: record.docName, docSize: record.docSize };
+    const guest: OfflineGuestDraft = {
+      position: record.position,
+      name: record.name,
+      files: current?.files.filter((file) => file.uploadId !== record.uploadId) ?? [],
+      documents: [...(current?.documents.filter((doc) => doc.id !== record.id) ?? []), document],
+      removeDocumentIds: current?.removeDocumentIds ?? [],
+    };
     if (index < 0) result.push(guest);
     else result[index] = guest;
   }
@@ -164,7 +118,7 @@ export function OfflineGuestFields({
       <legend className="px-1 text-sm font-semibold">Guest details &amp; Aadhaar</legend>
       <p className="text-xs text-muted-foreground">
         Optional: add every guest&apos;s name and Aadhaar / government ID.
-        JPG, PNG or PDF, up to 4 MB per guest. Documents are private and only admins can view them.
+        Add multiple JPG, PNG or PDF files, up to 4 MB per file. Documents are private and only admins can view them.
       </p>
       <div className="grid gap-3 sm:grid-cols-2">
         {guests.map((guest) => (
@@ -185,63 +139,73 @@ export function OfflineGuestFields({
                 />
               </div>
             )}
-            {guest.document?.docName && !guest.removeDocument && (
-              <div className="space-y-2">
-                <BookingAttachments docs={[{
-                  id: guest.document.id, name: guest.name || guest.document.name,
-                  docName: guest.document.docName, source: "manual",
-                }]} />
-                <Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={() => change(guest, { file: null, removeDocument: true })}>
-                  Remove saved ID
-                </Button>
+            {guest.documents.map((doc) => (
+              <div key={doc.id} className="space-y-1">
+                {guest.removeDocumentIds.includes(doc.id) ? (
+                  <p className="break-words text-xs text-amber-700">
+                    {doc.docName} will be removed when you save.{" "}
+                    <button type="button" disabled={disabled} className="underline" onClick={() => change(guest, {
+                      removeDocumentIds: guest.removeDocumentIds.filter((id) => id !== doc.id),
+                    })}>Undo</button>
+                  </p>
+                ) : (
+                  <>
+                    <BookingAttachments docs={[{ ...doc, name: guest.name, source: "manual" }]} />
+                    <button type="button" disabled={disabled} className="text-xs underline"
+                      aria-label={`Remove saved attachment ${doc.docName} for Guest ${guest.position + 1}`}
+                      onClick={() => change(guest, { removeDocumentIds: [...guest.removeDocumentIds, doc.id] })}>
+                      Remove saved attachment
+                    </button>
+                  </>
+                )}
               </div>
-            )}
-            {guest.removeDocument && (
-              <div className="text-xs text-amber-700">
-                ID will be removed when you save.{" "}
-                <button type="button" disabled={disabled} className="underline" onClick={() => change(guest, { removeDocument: false })}>Undo</button>
-              </div>
-            )}
+            ))}
             <div className="space-y-1">
               <Label htmlFor={`${prefix}-file-${guest.position}`}>Aadhaar / ID {guest.position + 1}</Label>
               <input
                 id={`${prefix}-file-${guest.position}`}
                 type="file"
+                multiple
                 disabled={disabled}
                 accept={ALLOWED_DOC_MIMES.join(",")}
                 aria-label={`Guest ${guest.position + 1} Aadhaar or ID`}
                 className="block w-full min-w-0 text-xs file:mr-2 file:rounded-lg file:border file:bg-background file:px-2 file:py-2 file:text-xs"
                 onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) change(guest, { file, removeDocument: false });
+                  const files = Array.from(event.target.files ?? []).map((file) => ({ file, uploadId: crypto.randomUUID() }));
+                  if (files.length) change(guest, { files: [...guest.files, ...files] });
                   event.target.value = "";
                 }}
               />
             </div>
-            {guest.file ? (
-              <div className="flex items-start justify-between gap-2 text-xs">
-                <span className="min-w-0 break-words">Ready to upload: {guest.file.name}</span>
-                <button type="button" disabled={disabled} className="shrink-0 underline" onClick={() => change(guest, { file: null })}>Clear</button>
+            {guest.files.map(({ file, uploadId }) => (
+              <div key={uploadId} className="flex items-start justify-between gap-2 text-xs">
+                <span className="min-w-0 break-words">Ready to upload: {file.name}</span>
+                <button type="button" disabled={disabled} className="shrink-0 underline"
+                  aria-label={`Remove selected attachment ${file.name} for Guest ${guest.position + 1}`}
+                  onClick={() => change(guest, { files: guest.files.filter((entry) => entry.uploadId !== uploadId) })}>Clear</button>
               </div>
-            ) : !guest.document?.docName && (
+            ))}
+            {guest.files.length === 0 && !guest.documents.some((doc) => !guest.removeDocumentIds.includes(doc.id)) && (
               <p className="text-xs text-muted-foreground">No Aadhaar / ID uploaded.</p>
             )}
           </div>
         ))}
       </div>
-      {drafts.filter((guest) => guest.position >= count && guest.document?.docName).map((guest) => (
+      {drafts.filter((guest) => guest.position >= count && guest.documents.length > 0).map((guest) => (
         <div key={guest.position} className="space-y-2 rounded-lg border border-amber-300 p-3 text-xs">
           <p>Guest {guest.position + 1} ({guest.name}) is no longer included in the guest count.</p>
-          {guest.removeDocument ? (
+          {guest.documents.every((doc) => guest.removeDocumentIds.includes(doc.id)) ? (
             <p>
-              Their ID will be removed when you save.{" "}
-              <button type="button" disabled={disabled} className="underline" onClick={() => change(guest, { removeDocument: false })}>Undo</button>
+              Their attachments will be removed when you save.{" "}
+              <button type="button" disabled={disabled} className="underline" onClick={() => change(guest, { removeDocumentIds: [] })}>Undo</button>
             </p>
           ) : (
             <>
-              <p>Explicitly remove their saved ID before reducing the guest count.</p>
-              <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => change(guest, { file: null, removeDocument: true })}>
-                Remove saved ID for Guest {guest.position + 1}
+              <p>Explicitly remove their saved attachments before reducing the guest count.</p>
+              <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => change(guest, {
+                files: [], removeDocumentIds: guest.documents.map((doc) => doc.id),
+              })}>
+                Remove saved attachments for Guest {guest.position + 1}
               </Button>
             </>
           )}
@@ -265,7 +229,7 @@ export function GuestUploadErrors({
       <p className="font-semibold">Booking saved, but some IDs could not be uploaded.</p>
       <p>Do not record the booking again. Retry only the missing uploads, or add these IDs later using Edit.</p>
       {failed.map(({ upload, error }) => (
-        <p key={upload.position}>Guest {upload.position + 1} ({upload.name}): {error}</p>
+        <p key={upload.uploadId} className="break-words">Guest {upload.position + 1} ({upload.name}), {upload.file.name}: {error}</p>
       ))}
       <div className="flex flex-wrap gap-2">
         <Button type="button" size="sm" disabled={busy} onClick={onRetry}>Retry missing uploads</Button>

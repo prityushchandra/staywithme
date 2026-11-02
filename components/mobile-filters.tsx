@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { useRouter } from "next/navigation";
 import { SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -13,10 +14,20 @@ export function MobileFilters({
 }: {
   amenities: { key: string; label: string }[];
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const close = useCallback(() => setOpen(false), []);
   // Back should close the sheet, not throw away the search results behind it.
-  useOverlayHistory(open, close);
+  const closeAndReplace = useOverlayHistory(open, close);
+
+  function navigate(href: string) {
+    if (href === window.location.pathname + window.location.search) {
+      close();
+      return;
+    }
+    closeAndReplace(() => router.replace(href));
+  }
+
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
@@ -26,7 +37,7 @@ export function MobileFilters({
       </SheetTrigger>
       <SheetContent side="bottom">
         <SheetTitle>Filters</SheetTitle>
-        <SearchFilters amenities={amenities} onApplied={() => setOpen(false)} />
+        <SearchFilters amenities={amenities} onNavigate={navigate} />
       </SheetContent>
     </Sheet>
   );

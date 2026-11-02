@@ -15,6 +15,7 @@ import { getPlatformSettings } from "@/lib/settings";
 import { bookingReceiptFileName } from "@/lib/receipts";
 import { guestWhatsAppHref as waLink } from "@/lib/guest-messages";
 import { OFFLINE_GUEST_SELECT } from "@/lib/offline-booking-guests";
+import { GUEST_DOCUMENT_SELECT, guestDocumentGroups, type GuestDocumentRecord } from "@/lib/booking-documents";
 
 export type AdminBookingSearchParams = {
   status?: string;
@@ -45,7 +46,7 @@ const CONTACT_LISTING_SELECT = {
 const GUEST_BOOKING_INCLUDE = {
   listing: { select: CONTACT_LISTING_SELECT },
   guest: { select: { name: true, firstName: true, phone: true } },
-  idDocs: { select: { id: true, name: true, docName: true }, orderBy: { createdAt: "asc" } },
+  idDocs: { select: GUEST_DOCUMENT_SELECT, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
 } satisfies Prisma.BookingInclude;
 
 const MANUAL_BOOKING_INCLUDE = {
@@ -108,11 +109,12 @@ function GuestDetails({
 }: {
   count: number;
   primaryName: string | null;
-  details: readonly { id: string; name: string; docName: string | null; position?: number }[];
+  details: readonly GuestDocumentRecord[];
   manual?: boolean;
 }) {
+  const groups = guestDocumentGroups(details);
   const guests = Array.from({ length: count }, (_, position) => {
-    const detail = manual ? details.find((guest) => guest.position === position) : details[position];
+    const detail = groups.find((guest) => guest.position === position);
     return { detail, name: detail?.name || (position === 0 ? primaryName : null) || "Name not added" };
   });
   return (
@@ -120,17 +122,17 @@ function GuestDetails({
       <p className="flex flex-wrap items-baseline justify-between gap-2 text-sm font-medium">
         Guests &amp; Aadhaar
         <span className="text-xs font-normal text-muted-foreground">
-          {details.filter((guest) => guest.docName).length} / {count} IDs uploaded
+          {guests.filter(({ detail }) => detail && detail.documents.length > 0).length} / {count} guests with IDs
         </span>
       </p>
       <div className="grid gap-2 sm:grid-cols-2">
         {guests.map(({ detail, name }, position) => (
           <div key={position} className="min-w-0 space-y-1 rounded-lg border bg-background p-2.5">
             <p className="break-words text-sm">Guest {position + 1}: {name}</p>
-            {detail?.docName ? (
-              <BookingAttachments docs={[{
-                id: detail.id, name, docName: detail.docName, source: manual ? "manual" : "guest",
-              }]} />
+            {detail && detail.documents.length > 0 ? (
+              <BookingAttachments docs={detail.documents.map((doc) => ({
+                ...doc, name, source: manual ? "manual" : "guest",
+              }))} />
             ) : (
               <p className="text-xs text-muted-foreground">No Aadhaar / ID uploaded.</p>
             )}
@@ -157,10 +159,8 @@ function ManualBookingCard({
   const coTime = b.listing.checkOutTime?.trim();
   const checkinStr = `${fmt(b.checkIn)}${ciTime ? `, ${ciTime}` : ""}`;
   const checkoutStr = `${fmt(b.checkOut)}${coTime ? `, ${coTime}` : ""}`;
-  const receiptFallback = waLink(
-    b.guestPhone,
-    `Please find the booking confirmation receipt for your reference: ${receiptUrl}`
-  );
+  const receiptMessage = "Please find the booking confirmation receipt for your reference.";
+  const receiptChat = waLink(b.guestPhone, receiptMessage);
   const paymentMessage =
     `checkin: ${checkinStr}\n\n` +
     `checkout: ${checkoutStr}\n\n` +
@@ -198,9 +198,10 @@ function ManualBookingCard({
           {b.guestPhone ? (
             <div className="flex flex-wrap items-center gap-2">
               <SendReceiptButton
+                key={b.updatedAt.toISOString()}
                 receiptUrl={receiptUrl}
-                fallbackLink={receiptFallback}
-                message="Please find the booking confirmation receipt for your reference."
+                chatLink={receiptChat}
+                message={receiptMessage}
                 fileName={bookingReceiptFileName(b.guestName, b.checkIn)}
               />
               {paymentLink && (
@@ -342,7 +343,7 @@ export async function AdminBookingsPage({
       include: {
         listing: { select: { title: true, flatNumber: true, checkInTime: true, checkOutTime: true } },
         guest: { select: { name: true, phone: true } },
-        idDocs: { select: { id: true, name: true, docName: true }, orderBy: { createdAt: "asc" } },
+        idDocs: { select: GUEST_DOCUMENT_SELECT, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
       },
       orderBy: { paidAt: "asc" },
       take: 50,
@@ -447,7 +448,9 @@ export async function AdminBookingsPage({
                   adminNote: b.adminNote,
                   paidAt: b.paidAt?.toISOString() ?? null,
                   razorpayPaymentId: b.razorpayPaymentId,
-                  docs: b.idDocs,
+                  docs: guestDocumentGroups(b.idDocs).flatMap((guest) =>
+                    guest.documents.map((doc) => ({ ...doc, name: guest.name }))
+                  ),
                 }}
               />
             ))}

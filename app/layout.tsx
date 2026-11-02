@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
@@ -9,6 +10,7 @@ import { TrackVisit } from "@/components/track-visit";
 import { AppIntro } from "@/components/app-intro";
 import { appleSplashLinks } from "@/lib/apple-splash";
 import { getPlatformSettings } from "@/lib/settings";
+import { OVERLAY_HISTORY_BOOTSTRAP } from "@/lib/overlay-history-events";
 
 export const metadata: Metadata = {
   title: {
@@ -58,6 +60,11 @@ export default async function RootLayout({
   return (
     <html lang="en" className="scroll-smooth">
       <body>
+        <Script
+          id="overlay-history"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{ __html: OVERLAY_HISTORY_BOOTSTRAP }}
+        />
         <script dangerouslySetInnerHTML={{ __html: INTRO_BOOT }} />
         <AppIntro />
         <Providers>

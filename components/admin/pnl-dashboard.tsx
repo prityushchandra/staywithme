@@ -177,6 +177,9 @@ export function PnlDashboard({
             {SOURCE_LABEL[source]} revenue minus running expenses &amp; staff costs — {scopeLabel}.
             One-off setup spend is tracked separately and left out of profit.
           </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Listing changes apply to the whole current month and later months. Earlier months keep their recorded listing scope.
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ToggleSelect value={source} onValueChange={(v) => setSource(v as PnlSource)} triggerClassName="h-9 w-[170px]" ariaLabel="Revenue channel">

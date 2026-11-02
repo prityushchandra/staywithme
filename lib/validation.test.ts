@@ -4,6 +4,8 @@ import {
   isAirbnbUrl,
   isDuplicateRefCodeError,
   listingInputSchema,
+  listingFaqsSchema,
+  listingFaqDraftsSchema,
   MAPS_URL_MAX,
 } from "./validation";
 
@@ -30,6 +32,42 @@ describe("isHttpUrl", () => {
   it("accepts http(s) links with a real host", () => {
     expect(isHttpUrl("https://maps.app.goo.gl/abc123")).toBe(true);
     expect(isHttpUrl("http://maps.google.com/?q=12.9,77.6")).toBe(true);
+  });
+
+  describe("listing FAQs", () => {
+    it("trims published questions and answers while preserving order and paragraphs", () => {
+      expect(listingFaqsSchema.parse([
+        { question: "  Can I arrive early?  ", answer: "  Please ask first.\nAvailability varies.  " },
+        { question: "Is parking available?", answer: "Ask about spaces before arrival." },
+      ])).toEqual([
+        { question: "Can I arrive early?", answer: "Please ask first.\nAvailability varies." },
+        { question: "Is parking available?", answer: "Ask about spaces before arrival." },
+      ]);
+    });
+
+    it("distinguishes omitted FAQs from an explicit request to clear them", () => {
+      expect(listingInputSchema.parse(baseListing).faqs).toBeUndefined();
+      expect(listingInputSchema.parse({ ...baseListing, faqs: [] }).faqs).toEqual([]);
+    });
+
+    it.each([
+      [{ question: " ", answer: "An answer" }],
+      [{ question: "A question?", answer: "\n " }],
+      [{ question: "Missing answer?" }],
+      [{ question: "Q".repeat(201), answer: "An answer" }],
+      [{ question: "A question?", answer: "A".repeat(2001) }],
+      Array.from({ length: 21 }, () => ({ question: "A question?", answer: "An answer" })),
+      "not an array",
+    ].map((faqs) => ({ faqs })))("rejects incomplete or oversized FAQ input (%#)", ({ faqs }) => {
+      expect(listingFaqsSchema.safeParse(faqs).success).toBe(false);
+    });
+
+    it("restores unfinished drafts without accepting them for publication", () => {
+      const draft = [{ question: "Is parking available?", answer: "" }];
+      expect(listingFaqDraftsSchema.parse(draft)).toEqual(draft);
+      expect(listingFaqsSchema.safeParse(draft).success).toBe(false);
+      expect(listingFaqDraftsSchema.safeParse([{ question: 5, answer: "" }]).success).toBe(false);
+    });
   });
 
   it("rejects other schemes, bare hosts and junk", () => {

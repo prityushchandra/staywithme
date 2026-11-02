@@ -80,16 +80,18 @@ export function AmenitiesList({
 
   return (
     <div>
-      <div className="grid grid-cols-1 gap-x-8 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-x-8 gap-y-1 sm:grid-cols-2">
         {visible.map((a) => {
           const Icon = (a.icon && ICONS[a.icon]) || Check;
           return (
             <div
               key={a.id}
-              className="flex items-center gap-4 border-b py-3.5 text-sm last:border-0 sm:[&:nth-last-child(2)]:border-0"
+              className="flex min-w-0 items-center gap-4 py-3 text-sm"
             >
-              <Icon className="h-6 w-6 shrink-0 text-foreground" />
-              <span>{a.label}</span>
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-card/80">
+                <Icon aria-hidden="true" className="h-5 w-5 text-foreground" strokeWidth={1.5} />
+              </span>
+              <span className="break-words">{a.label}</span>
             </div>
           );
         })}
@@ -100,7 +102,7 @@ export function AmenitiesList({
           variant="outline"
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
-          className="mt-5 w-full sm:w-auto"
+          className="mt-5 w-full rounded-full border-foreground/20 bg-transparent px-6 sm:w-auto"
         >
           {expanded
             ? "Show less"

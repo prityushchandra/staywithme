@@ -8,6 +8,7 @@ import { getAmenityIdByKey } from "@/lib/search";
 import { createUniqueRefCode } from "@/lib/refcode";
 import { expandMapsShortLink } from "@/lib/maps";
 import { notifyAdminNewListing } from "@/lib/bookings";
+import { currentPnlMonth } from "@/lib/listing-visibility";
 
 // Create a listing. Admin-only: listing a property is an internal workflow, so
 // an ordinary signed-in user must not be able to POST one. New listings still
@@ -49,6 +50,9 @@ export async function POST(req: Request) {
         refCode,
         title: d.title,
         description: d.description,
+        faqs: {
+          create: (d.faqs ?? []).map((faq, position) => ({ ...faq, position })),
+        },
         hostDisplayName: d.hostDisplayName || null,
         propertyType: d.propertyType,
         roomType: d.roomType,
@@ -77,6 +81,7 @@ export async function POST(req: Request) {
         wifiName: d.wifiName || null,
         wifiPassword: d.wifiPassword || null,
         status: "PENDING", // submitted for admin approval
+        visibilityMonths: { create: { month: currentPnlMonth(), isVisible: false } },
         images: {
           create: d.imageUrls.map((url, idx) => ({
             url,

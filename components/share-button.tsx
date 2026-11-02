@@ -24,12 +24,11 @@ export function ShareButton({ title }: { title: string }) {
 
   async function onClick() {
     const url = window.location.href;
-    const shareText = `${title} — on StayWithMe`;
 
     const nav = typeof navigator !== "undefined" ? navigator : undefined;
     if (nav?.share) {
       try {
-        await nav.share({ title, text: shareText, url });
+        await nav.share({ url });
         return;
       } catch (err) {
         // Dismissing the sheet is a decision, not a failure — don't then copy
@@ -57,14 +56,14 @@ export function ShareButton({ title }: { title: string }) {
       type="button"
       onClick={onClick}
       aria-label={`Share ${title}`}
-      className="flex items-center gap-1.5 rounded-full px-2 py-1.5 transition hover:bg-muted active:scale-95 sm:px-3"
+      className="flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-full px-3 outline-none transition hover:bg-foreground/5 active:scale-95 focus-visible:ring-2 focus-visible:ring-ring"
     >
       {copied ? (
-        <Check className="h-5 w-5 text-emerald-600" />
+        <Check className="h-4 w-4 text-emerald-600" />
       ) : (
-        <Share className="h-5 w-5" />
+        <Share className="h-4 w-4" />
       )}
-      <span className="hidden text-sm font-medium underline sm:inline">{copied ? "Copied" : "Share"}</span>
+      <span className="hidden text-sm font-medium sm:inline">{copied ? "Copied" : "Share"}</span>
     </button>
   );
 }

@@ -21,20 +21,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { formatINR } from "@/lib/pricing";
 import { openRazorpayCheckout, RazorpayCheckoutError } from "@/lib/razorpay-checkout";
 import { normalizeWhatsAppNumber } from "@/lib/whatsapp";
+import { ALLOWED_DOC_MIMES } from "@/lib/booking-documents";
+import { isUploadedGuestDocument, uploadGuestFiles, type GuestUpload, type GuestUploadFailure, type UploadedGuestDocument } from "@/lib/guest-uploads";
 
 // "Book with us": the direct-payment path. Everything the admin needs to accept
 // a stranger into a flat is collected here — a government ID per guest, why they
 // are coming, and a number that actually rings — and the pay button stays locked
 // until all of it is present.
 //
-// The uploads go up one at a time as they are chosen rather than in a single
-// giant submit: a 4-guest booking is 4 small requests instead of one 16 MB one,
-// and the guest sees each ID land instead of staring at a spinner.
-
-const ACCEPT = "image/jpeg,image/png,application/pdf";
-const MAX_DOC_BYTES = 4 * 1024 * 1024;
-
-type UploadedDoc = { id: string; name: string; docName: string; docSize: number };
+// Each selected file gets its own request, even when several belong to one guest.
 /**
  * "paying" spans order creation and the gateway window; "verifying" is the few
  * seconds after Razorpay hands back a signature, which must not be interrupted.
@@ -76,6 +71,7 @@ export function BookDirectSheet({
 }) {
   const [bookingId, setBookingId] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  const [startFailed, setStartFailed] = useState(false);
   const [stage, setStage] = useState<Stage>("form");
   const [error, setError] = useState<string | null>(null);
 
@@ -84,10 +80,15 @@ export function BookDirectSheet({
   const [names, setNames] = useState<string[]>(() =>
     Array.from({ length: guests }, (_, i) => (i === 0 ? guestName ?? "" : ""))
   );
-  const [docs, setDocs] = useState<(UploadedDoc | null)[]>(() =>
-    Array.from({ length: guests }, () => null)
+  const [docs, setDocs] = useState<UploadedGuestDocument[][]>(() =>
+    Array.from({ length: guests }, () => [])
   );
   const [uploading, setUploading] = useState<number | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [uploadFailures, setUploadFailures] = useState<GuestUploadFailure[]>([]);
+  const requestVersion = useRef(0);
+  const draftRequest = useRef<AbortController | null>(null);
+  const documentRequest = useRef<AbortController | null>(null);
   const fileInputs = useRef<(HTMLInputElement | null)[]>([]);
   // Set while Razorpay's window is up, so we can tear it down if the guest
   // backs out of the booking from our side instead of theirs.
@@ -99,31 +100,79 @@ export function BookDirectSheet({
     setNames((prev) =>
       Array.from({ length: guests }, (_, i) => prev[i] ?? (i === 0 ? guestName ?? "" : ""))
     );
-    setDocs((prev) => Array.from({ length: guests }, (_, i) => prev[i] ?? null));
+    setDocs((prev) => Array.from({ length: guests }, (_, i) => prev[i] ?? []));
   }, [guests, guestName]);
 
+  const resetDraft = useCallback(() => {
+    requestVersion.current++;
+    draftRequest.current?.abort();
+    documentRequest.current?.abort();
+    draftRequest.current = null;
+    documentRequest.current = null;
+    setStarting(false);
+    setStartFailed(false);
+    setUploading(null);
+    setRemoving(null);
+    setUploadFailures([]);
+    setBookingId(null);
+    setDocs(Array.from({ length: guests }, () => []));
+    setError(null);
+  }, [guests]);
+
+  useEffect(() => () => {
+    requestVersion.current++;
+    draftRequest.current?.abort();
+    documentRequest.current?.abort();
+    draftRequest.current = null;
+    documentRequest.current = null;
+  }, []);
+
+  const tripKey = `${propertyId}|${checkIn}|${checkOut}|${guests}`;
+  const lastTrip = useRef(tripKey);
+  useEffect(() => {
+    if (!open || lastTrip.current !== tripKey) resetDraft();
+    lastTrip.current = tripKey;
+  }, [open, tripKey, resetDraft]);
+
   const startDraft = useCallback(async () => {
+    if (draftRequest.current) return;
+    const version = requestVersion.current;
+    const controller = new AbortController();
+    draftRequest.current = controller;
+    const timer = setTimeout(() => controller.abort(), 60_000);
     setStarting(true);
+    setStartFailed(false);
     setError(null);
     try {
       const res = await fetch("/api/bookings/online", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ listingId: propertyId, checkIn, checkOut, guests }),
+        signal: controller.signal,
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not start your booking.");
-      setBookingId(data.bookingId as string);
-      // A reused draft may already carry IDs from an abandoned attempt.
-      const existing = (data.docs ?? []) as UploadedDoc[];
-      if (existing.length) {
-        setDocs((prev) => prev.map((d, i) => existing[i] ?? d));
-        setNames((prev) => prev.map((n, i) => existing[i]?.name ?? n));
+      if (typeof data.bookingId !== "string" || !Array.isArray(data.docs) ||
+          !data.docs.every(isUploadedGuestDocument)) {
+        throw new Error("Could not load your guest attachments. Please retry.");
       }
+      if (version !== requestVersion.current || controller.signal.aborted) return;
+      setBookingId(data.bookingId);
+      // A reused draft may already carry IDs from an abandoned attempt.
+      const existing: UploadedGuestDocument[] = data.docs;
+      setDocs(Array.from({ length: guests }, (_, position) => existing.filter((doc) => doc.position === position)));
+      setNames((prev) => prev.map((name, position) => existing.find((doc) => doc.position === position)?.name ?? name));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not start your booking.");
+      if (version !== requestVersion.current) return;
+      setStartFailed(true);
+      setError(controller.signal.aborted ? "Starting the booking timed out. Please retry."
+        : err instanceof Error ? err.message : "Could not start your booking.");
     } finally {
-      setStarting(false);
+      clearTimeout(timer);
+      if (version === requestVersion.current) {
+        draftRequest.current = null;
+        setStarting(false);
+      }
     }
   }, [propertyId, checkIn, checkOut, guests]);
 
@@ -131,75 +180,90 @@ export function BookDirectSheet({
   // to go. Re-opening after a reset starts a fresh one. Only ever while the
   // form is up: a draft created mid-payment would race the attempt in flight.
   useEffect(() => {
-    if (open && !bookingId && !starting && stage === "form") void startDraft();
-  }, [open, bookingId, starting, stage, startDraft]);
+    if (open && !bookingId && !starting && !startFailed && stage === "form") void startDraft();
+  }, [open, bookingId, starting, startFailed, stage, startDraft]);
 
-  // A draft belongs to the dates and headcount it was created with, and the
-  // booking card behind this sheet stays live — the gateway stage deliberately
-  // stands down to non-modal so a stuck payment window can't trap anyone. If
-  // the trip moves, the draft on hand is for a stay the guest has left, so drop
-  // it; the effect above then opens one for the trip actually on screen.
-  const tripKey = `${propertyId}|${checkIn}|${checkOut}|${guests}`;
-  const lastTrip = useRef(tripKey);
-  useEffect(() => {
-    if (lastTrip.current === tripKey) return;
-    lastTrip.current = tripKey;
-    setBookingId(null);
-    setDocs(Array.from({ length: guests }, () => null));
+  async function uploadFiles(uploads: readonly GuestUpload[]) {
+    if (!bookingId || documentRequest.current || stage !== "form" || uploads.length === 0) return;
+    const version = requestVersion.current;
+    const controller = new AbortController();
+    documentRequest.current = controller;
+    setUploading(uploads[0].position);
     setError(null);
-  }, [tripKey, guests]);
+    try {
+      const result = await uploadGuestFiles(`/api/bookings/online/${encodeURIComponent(bookingId)}/docs`, uploads,
+        (guest) => {
+          if (version === requestVersion.current) setUploading(guest - 1);
+        }, controller.signal);
+      if (version !== requestVersion.current) return;
+      setDocs((prev) => prev.map((documents, position) => {
+        const saved = result.saved.filter((doc) => doc.position === position);
+        return [...documents.filter((doc) => !saved.some((item) => item.id === doc.id)), ...saved];
+      }));
+      const attempted = new Set(uploads.map((upload) => upload.uploadId));
+      setUploadFailures((prev) => [...prev.filter(({ upload }) => !attempted.has(upload.uploadId)), ...result.failed]);
+    } finally {
+      if (version === requestVersion.current) {
+        documentRequest.current = null;
+        setUploading(null);
+      }
+    }
+  }
 
-  async function uploadDoc(index: number, file: File) {
+  function selectFiles(index: number, files: File[]) {
     const name = names[index]?.trim();
     if (!name) {
       setError(`Enter guest ${index + 1}'s name before uploading their ID.`);
       return;
     }
-    if (file.size > MAX_DOC_BYTES) {
-      setError(`${file.name} is larger than 4 MB. Please upload a smaller scan.`);
-      return;
-    }
-    if (!bookingId) return;
+    void uploadFiles(files.map((file) => ({ position: index, name, file, uploadId: crypto.randomUUID() })));
+  }
 
-    setUploading(index);
+  async function removeDoc(doc: UploadedGuestDocument) {
+    if (!bookingId || documentRequest.current || stage !== "form") return;
+    const version = requestVersion.current;
+    const controller = new AbortController();
+    documentRequest.current = controller;
+    const timer = setTimeout(() => controller.abort(), 60_000);
+    setRemoving(doc.id);
     setError(null);
     try {
-      const body = new FormData();
-      body.append("file", file);
-      body.append("name", name);
-      const res = await fetch(`/api/bookings/online/${bookingId}/docs`, { method: "POST", body });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Upload failed.");
-      setDocs((prev) => prev.map((d, i) => (i === index ? (data.doc as UploadedDoc) : d)));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed.");
+      const response = await fetch(`/api/bookings/online/${encodeURIComponent(bookingId)}/docs?docId=${encodeURIComponent(doc.id)}`, {
+        method: "DELETE", signal: controller.signal,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.ok !== true) throw new Error(data.error || "Could not remove the attachment. Please retry.");
+      if (version === requestVersion.current) {
+        setDocs((prev) => prev.map((documents) => documents.filter((item) => item.id !== doc.id)));
+      }
+    } catch (error) {
+      if (version === requestVersion.current) {
+        setError(controller.signal.aborted ? "Removing the attachment timed out. Please reopen the booking to check it."
+          : error instanceof Error ? error.message : "Could not remove the attachment. Please retry.");
+      }
     } finally {
-      setUploading(null);
-      const input = fileInputs.current[index];
-      if (input) input.value = "";
+      clearTimeout(timer);
+      if (version === requestVersion.current) {
+        documentRequest.current = null;
+        setRemoving(null);
+      }
     }
   }
 
-  async function removeDoc(index: number) {
-    const doc = docs[index];
-    if (!doc || !bookingId) return;
-    setDocs((prev) => prev.map((d, i) => (i === index ? null : d)));
-    await fetch(`/api/bookings/online/${bookingId}/docs?docId=${encodeURIComponent(doc.id)}`, {
-      method: "DELETE",
-    }).catch(() => {});
-  }
-
-  const allDocsIn = docs.every((d) => d !== null);
+  const changingDocuments = uploading !== null || removing !== null;
+  const allDocsIn = docs.length === guests && docs.every((documents) => documents.length > 0);
   const allNamesIn = names.every((n) => n.trim().length > 1);
   const ready =
     Boolean(bookingId) &&
+    !changingDocuments &&
+    uploadFailures.length === 0 &&
     allDocsIn &&
     allNamesIn &&
     reason.trim().length >= 3 &&
     phone.trim().length >= 6;
 
   async function pay() {
-    if (!bookingId || !ready) return;
+    if (!bookingId || !ready || documentRequest.current) return;
     setStage("paying");
     setError(null);
     try {
@@ -278,9 +342,7 @@ export function BookDirectSheet({
       // they just moved away from. Reopening on unchanged dates costs nothing
       // — the server hands the same draft and its uploads straight back.
       setStage("form");
-      setBookingId(null);
-      setDocs(Array.from({ length: guests }, () => null));
-      setError(null);
+      resetDraft();
     }
     onOpenChange(next);
   }
@@ -379,25 +441,28 @@ export function BookDirectSheet({
               <div>
                 <Label>Government ID for each guest</Label>
                 <p className="text-xs text-muted-foreground">
-                  Aadhaar, passport or driving licence — JPG, PNG or PDF, up to 4 MB.
+                  Aadhaar, passport or driving licence — add multiple JPG, PNG or PDF files, up to 4 MB per file.
+                  At least one ID is required for every guest.
                   Stored privately and only ever seen by your host.
                 </p>
               </div>
 
               {names.map((name, i) => {
-                const doc = docs[i];
+                const documents = docs[i] ?? [];
                 return (
                   <div key={i} className="rounded-xl border p-3">
                     <Input
                       value={name}
                       placeholder={`Guest ${i + 1} full name`}
+                      aria-label={`Guest ${i + 1} full name`}
+                      disabled={changingDocuments || stage !== "form"}
                       maxLength={120}
                       onChange={(e) =>
                         setNames((prev) => prev.map((n, j) => (j === i ? e.target.value : n)))
                       }
                     />
-                    {doc ? (
-                      <div className="mt-2 flex items-center gap-2 rounded-lg bg-brand/5 px-3 py-2 text-sm">
+                    {documents.map((doc) => (
+                      <div key={doc.id} className="mt-2 flex items-center gap-2 rounded-lg bg-brand/5 px-3 py-2 text-sm">
                         <FileText className="h-4 w-4 shrink-0 text-brand" />
                         <span className="min-w-0 flex-1 truncate">{doc.docName}</span>
                         <span className="shrink-0 text-xs text-muted-foreground">
@@ -405,32 +470,36 @@ export function BookDirectSheet({
                         </span>
                         <button
                           type="button"
-                          onClick={() => removeDoc(i)}
-                          aria-label={`Remove guest ${i + 1}'s ID`}
-                          className="shrink-0 rounded p-1 text-muted-foreground transition hover:text-destructive"
+                          onClick={() => void removeDoc(doc)}
+                          disabled={changingDocuments || stage !== "form"}
+                          aria-label={`Remove guest ${i + 1}'s attachment: ${doc.docName}`}
+                          className="shrink-0 rounded p-1 text-muted-foreground transition hover:text-destructive disabled:opacity-50"
                         >
-                          <Trash2 className="h-4 w-4" />
+                          {removing === doc.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                         </button>
                       </div>
-                    ) : (
-                      <>
+                    ))}
                         <input
                           ref={(el) => {
                             fileInputs.current[i] = el;
                           }}
                           type="file"
-                          accept={ACCEPT}
+                          multiple
+                          accept={ALLOWED_DOC_MIMES.join(",")}
+                          disabled={changingDocuments || !bookingId || stage !== "form"}
+                          aria-label={`Guest ${i + 1} Aadhaar or ID`}
                           className="sr-only"
                           onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) void uploadDoc(i, file);
+                            const files = Array.from(e.target.files ?? []);
+                            e.target.value = "";
+                            if (files.length) selectFiles(i, files);
                           }}
                         />
                         <Button
                           type="button"
                           variant="outline"
                           className="mt-2 w-full"
-                          disabled={uploading !== null || !bookingId}
+                          disabled={changingDocuments || !bookingId || stage !== "form"}
                           onClick={() => fileInputs.current[i]?.click()}
                         >
                           {uploading === i ? (
@@ -438,20 +507,41 @@ export function BookDirectSheet({
                           ) : (
                             <Upload className="mr-2 h-4 w-4" />
                           )}
-                          {uploading === i ? "Uploading…" : "Upload ID"}
+                          {uploading === i ? "Uploading…" : documents.length > 0 ? "Add more attachments" : "Upload ID files"}
                         </Button>
-                      </>
-                    )}
                   </div>
                 );
               })}
             </div>
 
+            {uploadFailures.length > 0 && (
+              <div role="alert" className="space-y-2 rounded-xl border border-amber-300 p-3 text-sm">
+                <p className="font-medium">Some attachments could not be uploaded. Saved files are kept.</p>
+                {uploadFailures.map(({ upload, error }) => (
+                  <div key={upload.uploadId} className="space-y-1">
+                    <p className="break-words">Guest {upload.position + 1}, {upload.file.name}: {error}</p>
+                    <button type="button" className="text-xs underline" disabled={changingDocuments}
+                      aria-label={`Discard failed attachment ${upload.file.name} for Guest ${upload.position + 1}`}
+                      onClick={() => setUploadFailures((prev) => prev.filter((item) => item.upload.uploadId !== upload.uploadId))}>
+                      Remove failed attachment
+                    </button>
+                  </div>
+                ))}
+                <Button type="button" variant="outline" size="sm" disabled={changingDocuments}
+                  onClick={() => void uploadFiles(uploadFailures.map(({ upload }) => upload))}>
+                  Retry failed attachments
+                </Button>
+              </div>
+            )}
+
             {error && (
-              <p className="flex items-start gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <p role="alert" className="flex items-start gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                 {error}
               </p>
+            )}
+            {startFailed && !bookingId && (
+              <Button type="button" variant="outline" disabled={starting} onClick={() => void startDraft()}>Retry booking setup</Button>
             )}
 
             <div className="sticky bottom-0 -mx-6 border-t bg-background px-6 pb-1 pt-3">
@@ -493,7 +583,9 @@ export function BookDirectSheet({
               )}
               {stage === "form" && !ready && (
                 <p className="mt-2 text-center text-xs text-muted-foreground">
-                  {!allNamesIn || !allDocsIn
+                  {changingDocuments ? "Wait for attachment changes to finish"
+                    : uploadFailures.length > 0 ? "Retry or remove the failed attachments to continue"
+                    : !allNamesIn || !allDocsIn
                     ? "Add every guest's name and ID to continue"
                     : "Add your reason for visit and a contact number"}
                 </p>

@@ -7,6 +7,7 @@ import { listingInputSchema, isDuplicateRefCodeError } from "@/lib/validation";
 import { getAmenityIdByKey } from "@/lib/search";
 import { expandMapsShortLink } from "@/lib/maps";
 import { notifyAdminListingUpdated } from "@/lib/bookings";
+import { visibilityMonthUpsert } from "@/lib/listing-visibility";
 
 async function loadOwned(id: string) {
   const session = await auth();
@@ -55,6 +56,12 @@ export async function PATCH(
       data: {
         title: d.title,
         description: d.description,
+        ...(d.faqs !== undefined ? {
+          faqs: {
+            deleteMany: {},
+            create: d.faqs.map((faq, position) => ({ ...faq, position })),
+          },
+        } : {}),
         hostDisplayName: d.hostDisplayName || null,
         propertyType: d.propertyType,
         roomType: d.roomType,
@@ -87,8 +94,13 @@ export async function PATCH(
         houseRules: d.houseRules || null,
         wifiName: d.wifiName || null,
         wifiPassword: d.wifiPassword || null,
-        status: newStatus,
-        rejectionReason: ctx.session.user.isAdmin ? ctx.listing.rejectionReason : null,
+        // Admin edits leave the live status untouched, even if moderation ran
+        // after loadOwned. Host edits atomically record their return to PENDING.
+        ...(!ctx.session.user.isAdmin ? {
+          status: newStatus,
+          rejectionReason: null,
+          visibilityMonths: visibilityMonthUpsert(id, false),
+        } : {}),
         images: {
           create: d.imageUrls.map((url, idx) => ({
             url,
@@ -116,7 +128,7 @@ export async function PATCH(
   // Tell the admin a host edited their listing (so it gets re-reviewed). Skip
   // when the admin is the one editing — no point notifying yourself.
   if (!ctx.session.user.isAdmin) notifyAdminListingUpdated(id);
-  return NextResponse.json({ id, status: newStatus });
+  return NextResponse.json({ id, status: result[2].status });
 }
 
 export async function DELETE(

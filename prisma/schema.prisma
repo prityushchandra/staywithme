@@ -173,6 +173,7 @@ model Listing {
 
   title       String
   description String @db.Text
+  faqs        ListingFaq[]
 
   // Name guests see as "Hosted by …". Falls back to the host's account name.
   hostDisplayName String?
@@ -254,11 +255,23 @@ model Listing {
   staffPayroll    StaffPayroll[]
   dotMonths       ListingDotMonth[]
   expenses        Expense[]
+  visibilityMonths ListingVisibilityMonth[]
 
   @@index([status])
   @@index([city])
   @@index([hostId])
   @@index([featured])
+}
+
+// Effective public visibility (PUBLISHED && isVisible) for the whole month.
+// The latest saved month carries forward; months before tracking keep legacy P&L.
+model ListingVisibilityMonth {
+  listingId String
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  month     String // "YYYY-MM", using the reporting month in India
+  isVisible Boolean
+
+  @@id([listingId, month])
 }
 
 // Blocked / booked date ranges. Manual entry (e.g. a confirmed WhatsApp booking)
@@ -277,6 +290,16 @@ model AvailabilityBlock {
   createdAt   DateTime @default(now())
 
   @@index([listingId])
+}
+
+model ListingFaq {
+  listingId String
+  position  Int
+  question  String @db.Text
+  answer    String @db.Text
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@id([listingId, position])
 }
 
 model ListingImage {
@@ -479,15 +502,33 @@ model BookingGuest {
   bookingId String
   booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
+  position Int?
   name    String
-  docData Bytes
-  docMime String // image/jpeg | image/png | application/pdf
-  docName String
+  docData Bytes?
+  docMime String? // legacy attachment; new files use documents
+  docName String?
   docSize Int    @default(0) // bytes, for display
 
   createdAt DateTime @default(now())
 
+  documents BookingGuestDocument[]
+
+  @@unique([bookingId, position])
   @@index([bookingId])
+}
+
+model BookingGuestDocument {
+  id        String       @id @default(cuid())
+  guestId   String
+  guest     BookingGuest @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  uploadId  String
+  docData   Bytes
+  docMime   String
+  docName   String
+  docSize   Int
+  createdAt DateTime     @default(now())
+
+  @@unique([guestId, uploadId])
 }
 
 model AnalyticsEvent {
@@ -585,7 +626,23 @@ model OfflineBookingGuest {
 
   createdAt DateTime @default(now())
 
+  documents OfflineBookingGuestDocument[]
+
   @@unique([bookingId, position])
+}
+
+model OfflineBookingGuestDocument {
+  id        String              @id @default(cuid())
+  guestId   String
+  guest     OfflineBookingGuest @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  uploadId  String
+  docData   Bytes
+  docMime   String
+  docName   String
+  docSize   Int
+  createdAt DateTime            @default(now())
+
+  @@unique([guestId, uploadId])
 }
 
 // Manually-entered ONLINE channel earnings (Airbnb, Booking.com, etc.) for a

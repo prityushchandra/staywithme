@@ -14,9 +14,12 @@ export async function GET(
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
   const { docId } = await params;
-  const doc = await prisma.offlineBookingGuest.findUnique({
+  const select = { docData: true, docMime: true, docName: true } as const;
+  const doc = await prisma.offlineBookingGuestDocument.findUnique({
+    where: { id: docId }, select,
+  }) ?? await prisma.offlineBookingGuest.findUnique({
     where: { id: docId },
-    select: { docData: true, docMime: true, docName: true },
+    select,
   });
   return privateGuestDocumentResponse(doc);
 }

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
+import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,7 +11,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { PriceInsight } from "@/components/price-insight";
 import { ImageUploader } from "@/components/image-uploader";
-import { listingInputSchema, AIRBNB_URL_MAX, MAPS_URL_MAX, PROPERTY_ID_MAX } from "@/lib/validation";
+import {
+  listingInputSchema, listingFaqDraftsSchema, AIRBNB_URL_MAX, MAPS_URL_MAX, PROPERTY_ID_MAX,
+  MAX_LISTING_FAQS, FAQ_QUESTION_MAX, FAQ_ANSWER_MAX, type ListingFaq,
+} from "@/lib/validation";
 import { cn } from "@/lib/utils";
 
 const ROOM_TYPES = [
@@ -39,6 +43,7 @@ type Policy = { policy: string; title: string; description: string };
 export interface ListingFormInitial {
   title: string;
   description: string;
+  faqs?: ListingFaq[];
   hostDisplayName: string;
   propertyType: string;
   roomType: string;
@@ -128,6 +133,7 @@ export function ListingForm({
   const [form, setForm] = useState(makeInitialForm);
   const [amenityKeys, setAmenityKeys] = useState<string[]>(initial?.amenityKeys ?? []);
   const [imageUrls, setImageUrls] = useState<string[]>(initial?.imageUrls ?? []);
+  const [faqs, setFaqs] = useState<ListingFaq[]>(initial?.faqs ?? []);
 
   // --- Draft auto-save (new listings only) -----------------------------------
   // Persist the in-progress "create listing" form to localStorage so a reload,
@@ -147,9 +153,13 @@ export function ListingForm({
         if (d?.form) setForm((f) => ({ ...f, ...d.form }));
         if (Array.isArray(d?.amenityKeys)) setAmenityKeys(d.amenityKeys);
         if (Array.isArray(d?.imageUrls)) setImageUrls(d.imageUrls);
+        const faqDraft = listingFaqDraftsSchema.safeParse(d?.faqs ?? []);
+        if (faqDraft.success) setFaqs(faqDraft.data);
+        else setError("The saved FAQ draft could not be restored. Please add those questions again.");
         const meaningful =
           (d?.form && (d.form.title || d.form.description || d.form.flatNumber)) ||
-          (Array.isArray(d?.imageUrls) && d.imageUrls.length > 0);
+          (Array.isArray(d?.imageUrls) && d.imageUrls.length > 0) ||
+          (faqDraft.success && faqDraft.data.some((faq) => faq.question || faq.answer));
         if (meaningful) setDraftRestored(true);
       }
     } catch {
@@ -166,12 +176,12 @@ export function ListingForm({
     try {
       localStorage.setItem(
         DRAFT_KEY,
-        JSON.stringify({ form, amenityKeys, imageUrls, savedAt: Date.now() })
+        JSON.stringify({ form, amenityKeys, imageUrls, faqs, savedAt: Date.now() })
       );
     } catch {
       // ignore storage quota / private-mode errors
     }
-  }, [isEdit, form, amenityKeys, imageUrls]);
+  }, [isEdit, form, amenityKeys, imageUrls, faqs]);
 
   function clearDraft() {
     try {
@@ -186,6 +196,7 @@ export function ListingForm({
     setForm(makeInitialForm());
     setAmenityKeys([]);
     setImageUrls([]);
+    setFaqs([]);
     setDraftRestored(false);
   }
 
@@ -220,7 +231,7 @@ export function ListingForm({
     e.preventDefault();
     setError("");
 
-    const payload = { ...form, amenityKeys, imageUrls };
+    const payload = { ...form, amenityKeys, imageUrls, faqs };
     const parsed = listingInputSchema.safeParse(payload);
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? "Please check the form.");
@@ -594,6 +605,69 @@ export function ListingForm({
             </label>
           ))}
         </div>
+      </section>
+
+      <section aria-labelledby="faq-editor-heading" className="space-y-4 rounded-2xl border border-foreground/10 bg-card/60 p-4 sm:p-6">
+        <div>
+          <h2 id="faq-editor-heading" className="text-lg font-semibold">Frequently asked questions</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Help guests feel ready to book. Your answers appear in a separate, expandable FAQs section.
+          </p>
+        </div>
+        {faqs.map((faq, index) => (
+          <fieldset key={index} className="space-y-3 rounded-xl border border-foreground/10 bg-background/60 p-4">
+            <legend className="px-1 text-sm font-medium">FAQ {index + 1}</legend>
+            <div className="space-y-1.5">
+              <Label htmlFor={`faq-question-${index}`}>Question</Label>
+              <Input
+                id={`faq-question-${index}`}
+                value={faq.question}
+                onChange={(e) => setFaqs((current) => current.map((item, i) =>
+                  i === index ? { ...item, question: e.target.value } : item
+                ))}
+                placeholder="e.g. Is early check-in available?"
+                maxLength={FAQ_QUESTION_MAX}
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={`faq-answer-${index}`}>Answer</Label>
+              <Textarea
+                id={`faq-answer-${index}`}
+                value={faq.answer}
+                onChange={(e) => setFaqs((current) => current.map((item, i) =>
+                  i === index ? { ...item, answer: e.target.value } : item
+                ))}
+                placeholder="Add the details guests should know before booking."
+                maxLength={FAQ_ANSWER_MAX}
+                rows={3}
+                required
+              />
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-label={`Remove FAQ ${index + 1}`}
+              onClick={() => setFaqs((current) => current.filter((_, i) => i !== index))}
+              className="gap-1.5 text-muted-foreground hover:text-destructive"
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Remove
+            </Button>
+          </fieldset>
+        ))}
+        <Button
+          type="button"
+          variant="outline"
+          className="gap-2 rounded-xl"
+          disabled={faqs.length >= MAX_LISTING_FAQS}
+          onClick={() => setFaqs((current) => [...current, { question: "", answer: "" }])}
+        >
+          <Plus className="h-4 w-4" /> Add a question
+        </Button>
+        <p className="text-xs text-muted-foreground">
+          Optional, up to {MAX_LISTING_FAQS} questions. Leave empty to hide the FAQs section.
+        </p>
       </section>
 
       {/* Photos */}

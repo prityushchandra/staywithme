@@ -3,8 +3,8 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { parseGuestDocument } from "@/lib/booking-documents";
-import { OFFLINE_GUEST_SELECT, OfflineGuestDetailsError } from "@/lib/offline-booking-guests";
+import { DOCUMENT_METADATA_SELECT, parseGuestUpload } from "@/lib/booking-documents";
+import { OfflineGuestDetailsError } from "@/lib/offline-booking-guests";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -19,18 +19,11 @@ export async function POST(
   }
   const { id } = await params;
   const form = await req.formData().catch(() => null);
-  const positionValue = form?.get("position");
-  const nameValue = form?.get("name");
-  const position = typeof positionValue === "string" && /^\d{1,2}$/.test(positionValue)
-    ? Number(positionValue) : -1;
-  const name = typeof nameValue === "string" ? nameValue.trim() : "";
-  if (position < 0 || position >= 50 || !name || name.length > 120) {
-    return NextResponse.json({ error: "Choose a valid guest and enter their full name." }, { status: 400 });
-  }
-  const parsed = await parseGuestDocument(form?.get("file") ?? null);
+  const parsed = await parseGuestUpload(form);
   if (!parsed.ok) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
+  const { position, name, uploadId } = parsed;
 
   try {
     const doc = await prisma.$transaction(async (tx) => {
@@ -43,12 +36,19 @@ export async function POST(
         throw new OfflineGuestDetailsError("This guest is outside the booking's guest count.");
       }
       const guestName = position === 0 ? booking.guestName : name;
-      return tx.offlineBookingGuest.upsert({
+      const guest = await tx.offlineBookingGuest.upsert({
         where: { bookingId_position: { bookingId: id, position } },
-        create: { bookingId: id, position, name: guestName, ...parsed.data },
-        update: { name: guestName, ...parsed.data },
-        select: OFFLINE_GUEST_SELECT,
+        create: { bookingId: id, position, name: guestName },
+        update: { name: guestName },
+        select: { id: true },
       });
+      const document = await tx.offlineBookingGuestDocument.upsert({
+        where: { guestId_uploadId: { guestId: guest.id, uploadId } },
+        create: { guestId: guest.id, uploadId, ...parsed.data },
+        update: {},
+        select: DOCUMENT_METADATA_SELECT,
+      });
+      return { ...document, position, name: guestName };
     });
     revalidatePath("/admin/bookings");
     return NextResponse.json({ doc });

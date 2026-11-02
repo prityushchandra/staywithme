@@ -22,7 +22,7 @@ import {
   type MissingTripField,
 } from "@/lib/reserve-prompt";
 import { isRangeAvailable, toUtcDate } from "@/lib/dates";
-import { cn, scrollBehavior } from "@/lib/utils";
+import { scrollBehavior } from "@/lib/utils";
 
 // Sticky booking card. Dates & guests come from the shared booking context, so
 // it stays in sync with the on-page availability calendar. It also resolves the
@@ -263,28 +263,24 @@ export function InquiryPanel({
   }, [pickerOpen, isCompactLayout]);
 
   return (
-    <Card className="sticky top-24">
-      <CardContent className="space-y-4 p-5">
-        <div className="flex items-baseline gap-1">
-          {strike ? (
-            <span className="text-base text-muted-foreground line-through">
-              {formatINR(strike)}
-            </span>
-          ) : null}
-          <span
-            className={cn(
-              "text-xl font-semibold",
-              strike && "discount-price text-rose-600"
-            )}
-          >
-            {formatINR(basePrice)}
-          </span>
-          <span className="text-muted-foreground">/ night</span>
-          {strike ? (
-            <span className="discount-badge ml-1 inline-flex items-center rounded-full bg-rose-600 px-2 py-0.5 text-[11px] font-semibold text-white shadow-md shadow-rose-600/30">
-              {Math.round(((strike - basePrice) / strike) * 100)}% off
-            </span>
-          ) : null}
+    <Card className="sticky top-24 rounded-[1.75rem] border-foreground/10 bg-card/95 shadow-[0_12px_48px_-20px_rgba(46,35,25,0.28)]">
+      <CardContent className="space-y-5 p-5 sm:p-6">
+        <div className="border-b border-foreground/10 pb-5">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">Your stay</p>
+            {strike ? (
+              <span className="rounded-full bg-brand/10 px-2.5 py-1 text-[11px] font-medium text-brand-dark">
+                {Math.round(((strike - basePrice) / strike) * 100)}% off
+              </span>
+            ) : null}
+          </div>
+          <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <span className="text-3xl font-semibold tracking-tight">{formatINR(basePrice)}</span>
+            <span className="text-sm text-muted-foreground">/ night</span>
+            {strike ? (
+              <span className="text-sm text-muted-foreground line-through">{formatINR(strike)}</span>
+            ) : null}
+          </div>
         </div>
         {monthlyPrice ? (
           <p className="-mt-2 text-xs text-muted-foreground">
@@ -304,7 +300,7 @@ export function InquiryPanel({
         />
 
         <div ref={summaryRef} className="space-y-4">
-          <div className="space-y-3 rounded-xl border px-4 py-3">
+          <div className="space-y-3 rounded-2xl border border-foreground/15 bg-background/40 px-4 py-3">
             <GuestStepper
               label="Adults"
               value={guests}
@@ -348,7 +344,7 @@ export function InquiryPanel({
             so the card hides its copy to keep exactly one Reserve on screen. */}
         {!isCompactLayout && <ReserveButton cta={cta} className="w-full" />}
 
-        <p className="text-center text-xs text-muted-foreground">
+        <p className="text-center text-xs leading-relaxed text-muted-foreground">
           {hasDates && !datesUnavailable
             ? "You won't be charged here — reserving opens WhatsApp to confirm with the platform."
             : "Inquiries are handled by the platform on WhatsApp. You won't be charged here."}
@@ -381,7 +377,7 @@ function GuestStepper({
           aria-label={`Fewer ${label.toLowerCase()}`}
           onClick={() => onChange(value - 1)}
           disabled={value <= min}
-          className="grid h-8 w-8 place-items-center rounded-full border text-lg disabled:opacity-40"
+          className="grid h-10 w-10 place-items-center rounded-full border border-foreground/20 text-lg transition-colors hover:bg-background disabled:opacity-40"
         >
           −
         </button>
@@ -391,7 +387,7 @@ function GuestStepper({
           aria-label={`More ${label.toLowerCase()}`}
           onClick={() => onChange(value + 1)}
           disabled={value >= max}
-          className="grid h-8 w-8 place-items-center rounded-full border text-lg disabled:opacity-40"
+          className="grid h-10 w-10 place-items-center rounded-full border border-foreground/20 text-lg transition-colors hover:bg-background disabled:opacity-40"
         >
           +
         </button>

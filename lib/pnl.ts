@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { memo } from "@/lib/memo";
+import { currentPnlMonth, isListedForPnlMonth } from "@/lib/listing-visibility";
 import {
   allocateStaffPay,
   availableDaysOf,
@@ -30,8 +30,8 @@ import { ICAL_RESERVED_NOTE } from "@/lib/ical";
 //                         Only RUNNING costs; one-off SETUP spend is reported
 //                         separately and never charged against profit.
 //   - Staff             : StaffMonth.pay — a staff member's net pay for the
-//                         month, spread evenly across the flats that existed in
-//                         it. Pay is recorded per staff per month (not per
+//                         month, spread evenly across the listed flats that
+//                         existed in it. Pay is recorded per staff per month (not per
 //                         flat), so it has to be allocated to reach this grid.
 
 export interface PnlListingMonth {
@@ -104,253 +104,274 @@ function flatLabel(l: { title: string; flatNumber: string | null; block: string 
 }
 
 export async function getPnlData(): Promise<PnlData> {
-  return memo("admin-pnl", 30_000, async () => {
-    const [
-      listings,
-      directBookings,
-      offlineBookings,
-      onlineEarnings,
-      staffMonths,
-      allBlocks,
-      dotMonths,
-      expenses,
-    ] = await Promise.all([
-        prisma.listing.findMany({
-          select: { id: true, title: true, flatNumber: true, block: true, createdAt: true },
-        }),
-        prisma.booking.findMany({
-          where: { status: "CONFIRMED" },
-          select: { listingId: true, checkIn: true, checkOut: true, totalAmount: true },
-        }),
-        prisma.offlineBooking.findMany({
-          where: { status: "CONFIRMED" },
-          select: { listingId: true, checkIn: true, checkOut: true, totalPrice: true, source: true },
-        }),
-        prisma.onlineEarning.findMany({ select: { listingId: true, month: true, amount: true } }),
-        // Staff pay lives on StaffMonth (per staff, per month). The older
-        // per-flat StaffPayroll table is no longer written by anything, so
-        // reading it here reported stale pay and understated every month that
-        // had been recorded since the payroll model changed.
-        prisma.staffMonth.findMany({ select: { month: true, pay: true } }),
-        prisma.availabilityBlock.findMany({ select: { listingId: true, startDate: true, endDate: true, kind: true, note: true } }),
-        prisma.listingDotMonth.findMany({ select: { listingId: true, month: true, days: true } }),
-        prisma.expense.findMany({ select: { listingId: true, month: true, type: true, nature: true, amount: true } }),
-      ]);
+  // A process-local memo can outlive a visibility change on another server.
+  // Read the listing state and its monthly history afresh for every report.
+  const now = new Date();
+  const currentMonth = currentPnlMonth(now);
+  const [
+    listings,
+    directBookings,
+    offlineBookings,
+    onlineEarnings,
+    staffMonths,
+    allBlocks,
+    dotMonths,
+    expenses,
+  ] = await Promise.all([
+    prisma.listing.findMany({
+      select: {
+        id: true, title: true, flatNumber: true, block: true, createdAt: true,
+        status: true, isVisible: true,
+        visibilityMonths: { select: { month: true, isVisible: true } },
+      },
+    }),
+    prisma.booking.findMany({
+      where: { status: "CONFIRMED" },
+      select: { listingId: true, checkIn: true, checkOut: true, totalAmount: true },
+    }),
+    prisma.offlineBooking.findMany({
+      where: { status: "CONFIRMED" },
+      select: { listingId: true, checkIn: true, checkOut: true, totalPrice: true, source: true },
+    }),
+    prisma.onlineEarning.findMany({ select: { listingId: true, month: true, amount: true } }),
+    // Staff pay lives on StaffMonth (per staff, per month). The older
+    // per-flat StaffPayroll table is no longer written by anything, so
+    // reading it here reported stale pay and understated every month that
+    // had been recorded since the payroll model changed.
+    prisma.staffMonth.findMany({ select: { month: true, pay: true } }),
+    prisma.availabilityBlock.findMany({ select: { listingId: true, startDate: true, endDate: true, kind: true, note: true } }),
+    prisma.listingDotMonth.findMany({ select: { listingId: true, month: true, days: true } }),
+    prisma.expense.findMany({ select: { listingId: true, month: true, type: true, nature: true, amount: true } }),
+  ]);
 
-    const listingMeta = new Map(
-      listings.map((l) => [l.id, { label: flatLabel(l), createdAt: l.createdAt }])
-    );
+  const listingMeta = new Map(
+    listings.map((l) => [l.id, { label: flatLabel(l), listing: l }])
+  );
+  function isListed(listingId: string, month: string): boolean {
+    const meta = listingMeta.get(listingId);
+    return !!meta && isListedForPnlMonth(meta.listing, month, currentMonth);
+  }
 
-    // Group availability blocks by flat for the unbooked-day and dot scans.
-    const blocksByListing = new Map<string, { startDate: Date; endDate: Date; kind: string }[]>();
-    for (const b of allBlocks) {
-      const list = blocksByListing.get(b.listingId);
-      if (list) list.push(b);
-      else blocksByListing.set(b.listingId, [b]);
+  // Group availability blocks by flat for the unbooked-day and dot scans.
+  const blocksByListing = new Map<string, { startDate: Date; endDate: Date; kind: string }[]>();
+  for (const b of allBlocks) {
+    const list = blocksByListing.get(b.listingId);
+    if (list) list.push(b);
+    else blocksByListing.set(b.listingId, [b]);
+  }
+
+  // Split every stay across the months it spans before sizing the grid, so a
+  // booking that runs past the end of the window still gets a month to land in.
+  const directStays = directBookings.map((b) => ({
+    booking: b,
+    parts: splitStayByMonth(b.checkIn, b.checkOut, Math.max(0, b.totalAmount)),
+  }));
+  const offlineStays = offlineBookings.map((b) => ({
+    booking: b,
+    parts: splitStayByMonth(b.checkIn, b.checkOut, Math.max(0, b.totalPrice)),
+  }));
+
+  // Hidden future activity must not push historical rows out of the window.
+  const keys = [currentMonth];
+  for (const s of [...directStays, ...offlineStays]) {
+    for (const month of s.parts.keys()) {
+      if (isListed(s.booking.listingId, month)) keys.push(month);
     }
+  }
+  for (const e of onlineEarnings) {
+    if (isListed(e.listingId, e.month)) keys.push(e.month);
+  }
+  for (const s of staffMonths) keys.push(s.month);
+  for (const l of listings) keys.push(monthKey(l.createdAt));
 
-    const now = new Date();
-    const currentMonth = monthKey(now);
+  let minIdx = Math.min(...keys.map(ymToIndex));
+  // Extend the window through the END of the current financial year (March), so
+  // upcoming months in this FY exist in the grid and their still-available days
+  // show up in the "unbooked" (available) metric.
+  const [cy, cm] = currentMonth.split("-").map(Number);
+  const currentFyStart = cm >= 4 ? cy : cy - 1;
+  const fyEndIdx = ymToIndex(`${currentFyStart + 1}-03`);
+  const maxIdx = Math.max(...keys.map(ymToIndex), fyEndIdx);
+  if (maxIdx - minIdx + 1 > MAX_MONTHS) minIdx = maxIdx - MAX_MONTHS + 1;
 
-    // Split every stay across the months it spans before sizing the grid, so a
-    // booking that runs past the end of the window still gets a month to land in.
-    const directStays = directBookings.map((b) => ({
-      booking: b,
-      parts: splitStayByMonth(b.checkIn, b.checkOut, Math.max(0, b.totalAmount)),
-    }));
-    const offlineStays = offlineBookings.map((b) => ({
-      booking: b,
-      parts: splitStayByMonth(b.checkIn, b.checkOut, Math.max(0, b.totalPrice)),
-    }));
+  const months: string[] = [];
+  for (let i = minIdx; i <= maxIdx; i++) months.push(indexToYm(i));
+  const monthSet = new Set(months);
+  const currentIdx = ymToIndex(currentMonth);
 
-    // Determine the [min..max] month window from all activity.
-    const keys = [currentMonth];
-    for (const s of directStays) keys.push(...s.parts.keys());
-    for (const s of offlineStays) keys.push(...s.parts.keys());
-    for (const e of onlineEarnings) keys.push(e.month);
-    for (const s of staffMonths) keys.push(s.month);
-    for (const l of listings) keys.push(monthKey(l.createdAt));
-
-    let minIdx = Math.min(...keys.map(ymToIndex));
-    // Extend the window through the END of the current financial year (March), so
-    // upcoming months in this FY exist in the grid and their still-available days
-    // show up in the "unbooked" (available) metric.
-    const [cy, cm] = currentMonth.split("-").map(Number);
-    const currentFyStart = cm >= 4 ? cy : cy - 1;
-    const fyEndIdx = ymToIndex(`${currentFyStart + 1}-03`);
-    const maxIdx = Math.max(...keys.map(ymToIndex), fyEndIdx);
-    if (maxIdx - minIdx + 1 > MAX_MONTHS) minIdx = maxIdx - MAX_MONTHS + 1;
-
-    const months: string[] = [];
-    for (let i = minIdx; i <= maxIdx; i++) months.push(indexToYm(i));
-    const monthSet = new Set(months);
-    const currentIdx = ymToIndex(currentMonth);
-
-    const grid = new Map<string, PnlListingMonth>();
-    function cell(listingId: string, month: string): PnlListingMonth {
-      const k = `${listingId}|${month}`;
-      let c = grid.get(k);
-      if (!c) {
-        const { year, monthIndex } = splitYm(month);
-        c = {
-          listingId,
-          label: listingMeta.get(listingId)?.label ?? "—",
-          month,
-          year,
-          monthIndex,
-          revenueDirect: 0,
-          revenueOffline: 0,
-          revenueOnline: 0,
-          nightsDirect: 0,
-          nightsOffline: 0,
-          nightsOnline: 0,
-          expenseByType: emptyExpenseByType(),
-          setup: 0,
-          staff: 0,
-          unbookedDays: 0,
-          dots: 0,
-        };
-        grid.set(k, c);
-      }
-      return c;
+  const grid = new Map<string, PnlListingMonth>();
+  function cell(listingId: string, month: string): PnlListingMonth | undefined {
+    if (!monthSet.has(month) || !isListed(listingId, month)) return;
+    const k = `${listingId}|${month}`;
+    let c = grid.get(k);
+    if (!c) {
+      const { year, monthIndex } = splitYm(month);
+      c = {
+        listingId,
+        label: listingMeta.get(listingId)?.label ?? "—",
+        month,
+        year,
+        monthIndex,
+        revenueDirect: 0,
+        revenueOffline: 0,
+        revenueOnline: 0,
+        nightsDirect: 0,
+        nightsOffline: 0,
+        nightsOnline: 0,
+        expenseByType: emptyExpenseByType(),
+        setup: 0,
+        staff: 0,
+        unbookedDays: 0,
+        dots: 0,
+      };
+      grid.set(k, c);
     }
+    return c;
+  }
 
-    // Every night covered by a booking we hold a record for, so an Airbnb stay
-    // that was ALSO entered by hand isn't counted twice against the iCal feed.
-    const recordedNights = new Map<string, Set<number>>();
-    function markRecorded(listingId: string, checkIn: Date, checkOut: Date) {
-      let set = recordedNights.get(listingId);
-      if (!set) {
-        set = new Set<number>();
-        recordedNights.set(listingId, set);
-      }
-      for (const t of eachNight(checkIn, checkOut)) set.add(t);
+  // Every night covered by a booking we hold a record for, so an Airbnb stay
+  // that was ALSO entered by hand isn't counted twice against the iCal feed.
+  const recordedNights = new Map<string, Set<number>>();
+  function markRecorded(listingId: string, checkIn: Date, checkOut: Date) {
+    let set = recordedNights.get(listingId);
+    if (!set) {
+      set = new Set<number>();
+      recordedNights.set(listingId, set);
     }
+    for (const t of eachNight(checkIn, checkOut)) set.add(t);
+  }
 
-    for (const { booking: b, parts } of directStays) {
-      if (!listingMeta.has(b.listingId)) continue;
-      for (const [m, part] of parts) {
-        if (!monthSet.has(m)) continue;
-        const c = cell(b.listingId, m);
-        c.revenueDirect += part.amount;
-        c.nightsDirect += part.nights;
-      }
-      markRecorded(b.listingId, b.checkIn, b.checkOut);
+  for (const { booking: b, parts } of directStays) {
+    if (!listingMeta.has(b.listingId)) continue;
+    for (const [m, part] of parts) {
+      const c = cell(b.listingId, m);
+      if (!c) continue;
+      c.revenueDirect += part.amount;
+      c.nightsDirect += part.nights;
     }
-    for (const { booking: b, parts } of offlineStays) {
-      if (!listingMeta.has(b.listingId)) continue;
-      for (const [m, part] of parts) {
-        if (!monthSet.has(m)) continue;
-        const c = cell(b.listingId, m);
-        if (b.source === "AIRBNB") {
-          c.revenueOnline += part.amount;
-          c.nightsOnline += part.nights;
-        } else {
-          c.revenueOffline += part.amount;
-          c.nightsOffline += part.nights;
-        }
-      }
-      markRecorded(b.listingId, b.checkIn, b.checkOut);
-    }
-    for (const e of onlineEarnings) {
-      if (monthSet.has(e.month) && listingMeta.has(e.listingId)) cell(e.listingId, e.month).revenueOnline += Math.max(0, e.amount);
-    }
-    // Staff pay is recorded per staff per month, so spread each month's pay
-    // across the flats that existed by then — charging a flat for cleaning that
-    // happened before it was onboarded would backdate a cost it never incurred.
-    // If a month somehow predates every flat, fall back to all of them so the
-    // pay still reaches the P&L instead of vanishing.
-    const payByMonth = new Map<string, number>();
-    for (const s of staffMonths) {
-      if (monthSet.has(s.month)) payByMonth.set(s.month, (payByMonth.get(s.month) ?? 0) + Math.max(0, s.pay));
-    }
-    for (const [month, pay] of payByMonth) {
-      if (pay <= 0) continue;
-      const endMs = monthStartMs(indexToYm(ymToIndex(month) + 1));
-      let eligible = listings.filter((l) => l.createdAt.getTime() < endMs).map((l) => l.id);
-      if (eligible.length === 0) eligible = listings.map((l) => l.id);
-      for (const [listingId, share] of allocateStaffPay(pay, eligible)) {
-        cell(listingId, month).staff += share;
+    markRecorded(b.listingId, b.checkIn, b.checkOut);
+  }
+  for (const { booking: b, parts } of offlineStays) {
+    if (!listingMeta.has(b.listingId)) continue;
+    for (const [m, part] of parts) {
+      const c = cell(b.listingId, m);
+      if (!c) continue;
+      if (b.source === "AIRBNB") {
+        c.revenueOnline += part.amount;
+        c.nightsOnline += part.nights;
+      } else {
+        c.revenueOffline += part.amount;
+        c.nightsOffline += part.nights;
       }
     }
-
-    // Airbnb reservations imported from the iCal feed carry no money of their own
-    // — that arrives as the monthly OnlineEarning figure — but they are the only
-    // record of how many nights that money covered, so they supply the denominator
-    // for the online average daily rate. Dates the host merely BLOCKED on Airbnb
-    // are imported too and must be excluded: they earned nothing, and counting
-    // them would silently drag the average rate down.
-    const windowStartMs = monthStartMs(months[0]);
-    const windowEndMs = monthStartMs(indexToYm(maxIdx + 1));
-    const icalByListing = new Map<string, { startDate: Date; endDate: Date }[]>();
-    for (const b of allBlocks) {
-      if (b.kind !== "ICAL" || b.note !== ICAL_RESERVED_NOTE || !listingMeta.has(b.listingId)) continue;
-      const list = icalByListing.get(b.listingId);
-      if (list) list.push(b);
-      else icalByListing.set(b.listingId, [b]);
+    markRecorded(b.listingId, b.checkIn, b.checkOut);
+  }
+  for (const e of onlineEarnings) {
+    const c = cell(e.listingId, e.month);
+    if (c) c.revenueOnline += Math.max(0, e.amount);
+  }
+  // Allocate the entire salary to the month's included flats BEFORE building
+  // rows. Filtering afterwards would silently lose the hidden flats' shares.
+  // Retain the legacy onboarding fallback, but never resurrect an excluded flat.
+  const payByMonth = new Map<string, number>();
+  for (const s of staffMonths) {
+    if (monthSet.has(s.month)) payByMonth.set(s.month, (payByMonth.get(s.month) ?? 0) + Math.max(0, s.pay));
+  }
+  for (const [month, pay] of payByMonth) {
+    if (pay <= 0) continue;
+    const endMs = monthStartMs(indexToYm(ymToIndex(month) + 1));
+    const included = listings.filter((l) => isListed(l.id, month));
+    let eligible = included.filter((l) => l.createdAt.getTime() < endMs).map((l) => l.id);
+    if (eligible.length === 0) eligible = included.map((l) => l.id);
+    for (const [listingId, share] of allocateStaffPay(pay, eligible)) {
+      const c = cell(listingId, month);
+      if (c) c.staff += share;
     }
-    for (const [listingId, blocks] of icalByListing) {
-      const recorded = recordedNights.get(listingId) ?? new Set<number>();
-      const byMonth = icalNightsByMonth(blocks, recorded, windowStartMs, windowEndMs);
-      for (const [m, nights] of byMonth) cell(listingId, m).nightsOnline += nights;
-      // These nights earned money as well, so record them too — otherwise the dot
-      // scan below would read an Airbnb-sold day as a day that went unsold.
-      for (const b of blocks) markRecorded(listingId, b.startDate, b.endDate);
+  }
+
+  // Airbnb reservations imported from the iCal feed carry no money of their own
+  // — that arrives as the monthly OnlineEarning figure — but they are the only
+  // record of how many nights that money covered, so they supply the denominator
+  // for the online average daily rate. Dates the host merely BLOCKED on Airbnb
+  // are imported too and must be excluded: they earned nothing, and counting
+  // them would silently drag the average rate down.
+  const windowStartMs = monthStartMs(months[0]);
+  const windowEndMs = monthStartMs(indexToYm(maxIdx + 1));
+  const icalByListing = new Map<string, { startDate: Date; endDate: Date }[]>();
+  for (const b of allBlocks) {
+    if (b.kind !== "ICAL" || b.note !== ICAL_RESERVED_NOTE || !listingMeta.has(b.listingId)) continue;
+    const list = icalByListing.get(b.listingId);
+    if (list) list.push(b);
+    else icalByListing.set(b.listingId, [b]);
+  }
+  for (const [listingId, blocks] of icalByListing) {
+    const recorded = recordedNights.get(listingId) ?? new Set<number>();
+    const byMonth = icalNightsByMonth(blocks, recorded, windowStartMs, windowEndMs);
+    for (const [m, nights] of byMonth) {
+      const c = cell(listingId, m);
+      if (c) c.nightsOnline += nights;
     }
+    // These nights earned money as well, so record them too — otherwise the dot
+    // scan below would read an Airbnb-sold day as a day that went unsold.
+    for (const b of blocks) markRecorded(listingId, b.startDate, b.endDate);
+  }
 
-    // Recorded expenses land in the month they were dated to. Unlike the old
-    // rent field, nothing is projected — a month reports what it actually cost.
-    //
-    // Only RUNNING costs are charged against the month. Setup spend is kept in
-    // its own bucket: it buys something that earns across every month that
-    // follows, so billing it to the one month it was paid in would show a loss
-    // the business never made.
-    for (const e of expenses) {
-      if (!monthSet.has(e.month) || !listingMeta.has(e.listingId)) continue;
-      if (!isExpenseType(e.type)) continue;
-      const c = cell(e.listingId, e.month);
-      if (e.nature === PNL_EXPENSE_NATURE) c.expenseByType[e.type] += e.amount;
-      else c.setup += e.amount;
+  // Recorded expenses land in the month they were dated to. Unlike the old
+  // rent field, nothing is projected — a month reports what it actually cost.
+  //
+  // Only RUNNING costs are charged against the month. Setup spend is kept in
+  // its own bucket: it buys something that earns across every month that
+  // follows, so billing it to the one month it was paid in would show a loss
+  // the business never made.
+  for (const e of expenses) {
+    if (!isExpenseType(e.type)) continue;
+    const c = cell(e.listingId, e.month);
+    if (!c) continue;
+    if (e.nature === PNL_EXPENSE_NATURE) c.expenseByType[e.type] += e.amount;
+    else c.setup += e.amount;
+  }
+
+  // Available (still-bookable) days per flat per month — from the current month
+  // through the end of the window (future months in this FY). Past months are
+  // left at 0 (nothing is "available" to book in the past).
+  const todayMs = todayInIndia(now);
+  const availableDays = new Map<string, number[]>();
+  for (const l of listings) {
+    const flatBlocks = blocksByListing.get(l.id) ?? [];
+    for (let i = Math.max(minIdx, currentIdx); i <= maxIdx; i++) {
+      const m = indexToYm(i);
+      const c = cell(l.id, m);
+      if (!c) continue;
+      const days = availableDaysOf(m, flatBlocks, todayMs);
+      c.unbookedDays = days.length;
+      availableDays.set(`${l.id}|${m}`, days);
     }
+  }
 
-    // Available (still-bookable) days per flat per month — from the current month
-    // through the end of the window (future months in this FY). Past months are
-    // left at 0 (nothing is "available" to book in the past).
-    const todayMs = todayInIndia(now);
-    const availableDays = new Map<string, number[]>();
-    for (const l of listings) {
-      const flatBlocks = blocksByListing.get(l.id) ?? [];
-      for (let i = Math.max(minIdx, currentIdx); i <= maxIdx; i++) {
-        const m = indexToYm(i);
-        const days = availableDaysOf(m, flatBlocks, todayMs);
-        cell(l.id, m).unbookedDays = days.length;
-        availableDays.set(`${l.id}|${m}`, days);
-      }
-    }
+  // Dots — days each flat lost, marked by hand in the dot marker. Not derived:
+  // Airbnb shuts a date off once it can no longer be sold, so after the fact
+  // the calendar can't tell "went unsold" from "was never offered".
+  //
+  // A dot is an unbooked day too, so it joins the available days to make
+  // "unbooked" mean every day that earned nothing, past and future. Taking the
+  // union rather than the sum matters: today can be BOTH still-bookable and
+  // already written off by hand, and it must only count once.
+  for (const d of dotMonths) {
+    const c = cell(d.listingId, d.month);
+    if (!c) continue;
+    c.dots = d.days.length;
+    c.unbookedDays = new Set([...(availableDays.get(`${d.listingId}|${d.month}`) ?? []), ...d.days]).size;
+  }
 
-    // Dots — days each flat lost, marked by hand in the dot marker. Not derived:
-    // Airbnb shuts a date off once it can no longer be sold, so after the fact
-    // the calendar can't tell "went unsold" from "was never offered".
-    //
-    // A dot is an unbooked day too, so it joins the available days to make
-    // "unbooked" mean every day that earned nothing, past and future. Taking the
-    // union rather than the sum matters: today can be BOTH still-bookable and
-    // already written off by hand, and it must only count once.
-    for (const d of dotMonths) {
-      if (!monthSet.has(d.month) || !listingMeta.has(d.listingId)) continue;
-      const c = cell(d.listingId, d.month);
-      c.dots = d.days.length;
-      c.unbookedDays = new Set([...(availableDays.get(`${d.listingId}|${d.month}`) ?? []), ...d.days]).size;
-    }
+  const rows = [...grid.values()].sort(
+    (a, b) => a.month.localeCompare(b.month) || a.label.localeCompare(b.label)
+  );
+  const years = [...new Set(months.map((m) => splitYm(m).year))].sort((a, b) => a - b);
+  const includedIds = new Set(rows.map((r) => r.listingId));
+  const flats = listings
+    .filter((l) => includedIds.has(l.id))
+    .map((l) => ({ id: l.id, label: flatLabel(l) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 
-    const rows = [...grid.values()].sort(
-      (a, b) => a.month.localeCompare(b.month) || a.label.localeCompare(b.label)
-    );
-    const years = [...new Set(months.map((m) => splitYm(m).year))].sort((a, b) => a - b);
-    const flats = listings
-      .map((l) => ({ id: l.id, label: flatLabel(l) }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-
-    return { rows, flats, years, months, currentMonth };
-  });
+  return { rows, flats, years, months, currentMonth };
 }

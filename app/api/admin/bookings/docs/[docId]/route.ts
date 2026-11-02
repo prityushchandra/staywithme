@@ -23,9 +23,12 @@ export async function GET(
   }
 
   const { docId } = await params;
-  const doc = await prisma.bookingGuest.findUnique({
+  const select = { docData: true, docMime: true, docName: true } as const;
+  const doc = await prisma.bookingGuestDocument.findUnique({
+    where: { id: docId }, select,
+  }) ?? await prisma.bookingGuest.findUnique({
     where: { id: docId },
-    select: { docData: true, docMime: true, docName: true },
+    select,
   });
   return privateGuestDocumentResponse(doc);
 }

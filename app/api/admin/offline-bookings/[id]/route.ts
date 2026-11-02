@@ -30,7 +30,7 @@ const patchSchema = z.object({
   // Book on top of already-blocked dates when moving the stay.
   override: z.boolean().optional(),
   guestDetails: offlineGuestDetailsSchema.optional(),
-  removeDocumentIds: z.array(z.string().min(1)).max(50).optional(),
+  removeDocumentIds: z.array(z.string().min(1).max(100)).optional(),
 });
 
 function toPaise(rupees: number) {

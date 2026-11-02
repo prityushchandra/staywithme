@@ -18,10 +18,10 @@ type Amenity = { key: string; label: string };
 
 export function SearchFilters({
   amenities,
-  onApplied,
+  onNavigate,
 }: {
   amenities: Amenity[];
-  onApplied?: () => void;
+  onNavigate?: (href: string) => void;
 }) {
   const router = useRouter();
   const params = useSearchParams();
@@ -58,6 +58,13 @@ export function SearchFilters({
     set(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
   }
 
+  function navigate(next: URLSearchParams) {
+    const qs = next.toString();
+    const href = qs ? `/search?${qs}` : "/search";
+    if (onNavigate) onNavigate(href);
+    else router.push(href);
+  }
+
   function apply() {
     const next = new URLSearchParams();
     // Preserve the top search context.
@@ -75,9 +82,7 @@ export function SearchFilters({
     if (bathrooms > 0) next.set("bathrooms", String(bathrooms));
     roomType.forEach((r) => next.append("roomType", r));
     amenityKeys.forEach((a) => next.append("amenities", a));
-    const qs = next.toString();
-    router.push(qs ? `/search?${qs}` : "/search");
-    onApplied?.();
+    navigate(next);
   }
 
   function clearAll() {
@@ -94,8 +99,7 @@ export function SearchFilters({
       const v = params.get(key);
       if (v) next.set(key, v);
     }
-    router.push(`/search?${next.toString()}`);
-    onApplied?.();
+    navigate(next);
   }
 
   const Stepper = ({

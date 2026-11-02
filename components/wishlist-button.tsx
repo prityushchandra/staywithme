@@ -12,10 +12,12 @@ export function WishlistButton({
   listingId,
   className,
   size = "md",
+  showLabel = false,
 }: {
   listingId: string;
   className?: string;
   size?: "md" | "lg";
+  showLabel?: boolean;
 }) {
   const router = useRouter();
   const { status } = useSession();
@@ -51,19 +53,22 @@ export function WishlistButton({
       aria-label={saved ? "Remove from wishlist" : "Save to wishlist"}
       aria-pressed={saved}
       className={cn(
-        "grid place-items-center rounded-full transition-transform active:scale-90",
+        "grid place-items-center rounded-full outline-none transition-transform active:scale-90 focus-visible:ring-2 focus-visible:ring-ring",
+        showLabel && "inline-flex justify-center",
         className
       )}
     >
       <Heart
         className={cn(
-          dim,
-          "drop-shadow-[0_1px_2px_rgba(0,0,0,0.45)] transition-colors",
+          showLabel ? "h-4 w-4" : dim,
+          "transition-colors",
+          !showLabel && "drop-shadow-[0_1px_2px_rgba(0,0,0,0.45)]",
           saved
             ? "fill-brand stroke-brand"
-            : "fill-black/30 stroke-white"
+            : showLabel ? "fill-none stroke-current" : "fill-black/30 stroke-white"
         )}
       />
+      {showLabel && <span className="hidden sm:inline">{saved ? "Saved" : "Save"}</span>}
     </button>
   );
 }

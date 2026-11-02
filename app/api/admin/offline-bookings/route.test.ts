@@ -13,7 +13,9 @@ const mocks = vi.hoisted(() => ({
     listing: { findUnique: vi.fn() },
     offlineBooking: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
     offlineBookingGuest: { findUnique: vi.fn(), findMany: vi.fn(), upsert: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() },
+    offlineBookingGuestDocument: { upsert: vi.fn(), findUnique: vi.fn(), deleteMany: vi.fn() },
     bookingGuest: { findUnique: vi.fn() },
+    bookingGuestDocument: { findUnique: vi.fn() },
     availabilityBlock: { findMany: vi.fn(), update: vi.fn(), deleteMany: vi.fn(), delete: vi.fn() },
     receipt: { create: vi.fn(), update: vi.fn() },
   },
@@ -46,7 +48,8 @@ const booking = {
   listing: { id: "synthetic-flat", title: "Example flat", flatNumber: "908", block: "B", checkInTime: null, checkOutTime: null },
   receipts: [{ id: "synthetic-receipt" }],
 };
-const document = { id: "synthetic-doc", position: 1, name: "Companion Guest", docName: "sample.pdf", docSize: 21 };
+const document = { id: "synthetic-guest", position: 1, name: "Companion Guest", docName: "sample.pdf", docSize: 21, documents: [] };
+const attachment = { id: "synthetic-doc", docName: "sample.pdf", docSize: 21 };
 const params = () => ({ params: Promise.resolve({ id: booking.id }) });
 const docParams = () => ({ params: Promise.resolve({ docId: document.id }) });
 const pdf = () => new File(["%PDF-1.4\nSynthetic ID"], "sample.pdf", { type: "application/pdf" });
@@ -57,11 +60,12 @@ function jsonRequest(body: unknown) {
   });
 }
 
-function uploadRequest(position = 1, file = pdf()) {
+function uploadRequest(position = 1, file = pdf(), uploadId = crypto.randomUUID()) {
   const form = new FormData();
   form.set("position", String(position));
   form.set("name", "Companion Guest");
   form.set("file", file);
+  form.set("uploadId", uploadId);
   return new Request("http://localhost/api/admin/offline-bookings/synthetic-booking/guests", { method: "POST", body: form });
 }
 
@@ -83,7 +87,10 @@ beforeEach(() => {
   db.offlineBookingGuest.findMany.mockResolvedValue([]);
   db.offlineBookingGuest.findUnique.mockResolvedValue(null);
   db.offlineBookingGuest.upsert.mockResolvedValue(document);
+  db.offlineBookingGuestDocument.upsert.mockResolvedValue(attachment);
+  db.offlineBookingGuestDocument.findUnique.mockResolvedValue(null);
   db.bookingGuest.findUnique.mockResolvedValue(null);
+  db.bookingGuestDocument.findUnique.mockResolvedValue(null);
   db.availabilityBlock.findMany.mockResolvedValue([]);
 });
 
@@ -100,6 +107,8 @@ describe("manual guest documents are admin-only", () => {
       expect(mocks.db.$transaction).not.toHaveBeenCalled();
       expect(mocks.db.offlineBookingGuest.findUnique).not.toHaveBeenCalled();
       expect(mocks.db.bookingGuest.findUnique).not.toHaveBeenCalled();
+      expect(mocks.db.offlineBookingGuestDocument.findUnique).not.toHaveBeenCalled();
+      expect(mocks.db.bookingGuestDocument.findUnique).not.toHaveBeenCalled();
     }
   );
 });
@@ -164,6 +173,17 @@ describe("manual booking guest metadata", () => {
       .toBeLessThan(mocks.db.offlineBookingGuest.deleteMany.mock.invocationCallOrder[0]);
   });
 
+  it("requires every attachment to be removed before removing a guest", async () => {
+    mocks.db.offlineBookingGuest.findMany.mockResolvedValue([{ ...document, documents: [attachment] }]);
+    const request = { guests: 1, guestDetails: [{ position: 0, name: "Primary Guest" }] };
+    expect((await PATCH(jsonRequest({ ...request, removeDocumentIds: [document.id] }), params())).status).toBe(400);
+    expect(mocks.db.offlineBookingGuestDocument.deleteMany).not.toHaveBeenCalled();
+    expect((await PATCH(jsonRequest({ ...request, removeDocumentIds: [document.id, attachment.id] }), params())).status).toBe(200);
+    expect(mocks.db.offlineBookingGuestDocument.deleteMany).toHaveBeenCalledWith({
+      where: { guest: { bookingId: booking.id }, id: { in: [document.id, attachment.id] } },
+    });
+  });
+
   it("rejects removing another booking's ID without clearing any documents", async () => {
     mocks.db.offlineBookingGuest.findMany.mockResolvedValue([document]);
     const response = await PATCH(jsonRequest({ removeDocumentIds: ["another-booking-doc"] }), params());
@@ -188,21 +208,25 @@ describe("manual booking guest metadata", () => {
 });
 
 describe("manual per-guest uploads", () => {
-  it("stores one file per guest and returns metadata without exposing document bytes", async () => {
+  it("appends an attachment without replacing the guest's legacy file and returns metadata only", async () => {
     const response = await uploadId(uploadRequest(), params());
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ doc: document });
+    expect(await response.json()).toEqual({ doc: { ...attachment, position: 1, name: "Companion Guest" } });
     const query = mocks.db.offlineBookingGuest.upsert.mock.calls[0][0];
     expect(query.where).toEqual({ bookingId_position: { bookingId: booking.id, position: 1 } });
-    expect(query.create.docData).toBeInstanceOf(Uint8Array);
-    expect(query.create.docMime).toBe("application/pdf");
-    expect(query.update.docData).toEqual(query.create.docData);
+    expect(query.create.docData).toBeUndefined();
+    expect(query.update.docData).toBeUndefined();
     expect(query.select.docData).toBeUndefined();
+    const fileQuery = mocks.db.offlineBookingGuestDocument.upsert.mock.calls[0][0];
+    expect(fileQuery.create.docData).toBeInstanceOf(Uint8Array);
+    expect(fileQuery.create.docMime).toBe("application/pdf");
+    expect(fileQuery.update).toEqual({});
+    expect(fileQuery.select.docData).toBeUndefined();
     expect(mocks.db.offlineBooking.update.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.db.offlineBookingGuest.upsert.mock.invocationCallOrder[0]);
   });
 
-  it("uses the current primary name and the same upsert key when replacing an ID", async () => {
+  it("uses the current primary name while creating distinct attachments for the same guest", async () => {
     await uploadId(uploadRequest(0), params());
     await uploadId(uploadRequest(0), params());
     expect(mocks.db.offlineBookingGuest.upsert).toHaveBeenCalledTimes(2);
@@ -211,6 +235,17 @@ describe("manual per-guest uploads", () => {
       expect(query.create.name).toBe("Primary Guest");
       expect(query.update.name).toBe("Primary Guest");
     }
+    const [first, second] = mocks.db.offlineBookingGuestDocument.upsert.mock.calls;
+    expect(first[0].where.guestId_uploadId.guestId).toBe(second[0].where.guestId_uploadId.guestId);
+    expect(first[0].where.guestId_uploadId.uploadId).not.toBe(second[0].where.guestId_uploadId.uploadId);
+  });
+
+  it("uses the same document key when a lost response is retried", async () => {
+    const key = crypto.randomUUID();
+    expect((await uploadId(uploadRequest(1, pdf(), key), params())).status).toBe(200);
+    expect((await uploadId(uploadRequest(1, pdf(), key), params())).status).toBe(200);
+    const [first, second] = mocks.db.offlineBookingGuestDocument.upsert.mock.calls;
+    expect(first[0].where).toEqual(second[0].where);
   });
 
   it("rejects a forged file before opening a write transaction", async () => {
@@ -235,6 +270,19 @@ describe("manual per-guest uploads", () => {
 });
 
 describe("private ID reading", () => {
+  it("streams new child attachments without reading the legacy guest row", async () => {
+    const content = { docData: new Uint8Array([37, 80, 68, 70, 45]), docMime: "application/pdf", docName: "back.pdf" };
+    mocks.db.offlineBookingGuestDocument.findUnique.mockResolvedValue(content);
+    mocks.db.bookingGuestDocument.findUnique.mockResolvedValue(content);
+    for (const read of [readManualId, readGuestId]) {
+      const response = await read(new Request("http://localhost"), docParams());
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("no-store, private");
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(content.docData);
+    }
+    expect(mocks.db.offlineBookingGuest.findUnique).not.toHaveBeenCalled();
+    expect(mocks.db.bookingGuest.findUnique).not.toHaveBeenCalled();
+  });
   it("streams only through the authenticated private endpoint, including existing online IDs", async () => {
     const content = { docData: new Uint8Array([37, 80, 68, 70, 45]), docMime: "application/pdf", docName: "sample.pdf" };
     mocks.db.offlineBookingGuest.findUnique.mockResolvedValue(content);

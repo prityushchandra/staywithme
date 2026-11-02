@@ -78,7 +78,7 @@ export default async function SearchPage({
       <div className="flex gap-8">
         {/* Desktop sidebar */}
         <aside className="hidden w-72 shrink-0 lg:block">
-          <div className="sticky top-24 rounded-xl border p-5">
+          <div className="sticky top-24 z-20 rounded-xl border p-5">
             <SearchFilters amenities={amenityOptions} />
           </div>
         </aside>

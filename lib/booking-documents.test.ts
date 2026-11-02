@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_DOC_BYTES, parseGuestDocument, privateGuestDocumentResponse } from "./booking-documents";
+import { guestDocumentGroups, MAX_DOC_BYTES, parseGuestDocument, parseGuestUpload, privateGuestDocumentResponse } from "./booking-documents";
 
 describe("guest ID validation", () => {
   it.each([
@@ -11,6 +11,36 @@ describe("guest ID validation", () => {
     expect(result).toEqual({
       ok: true,
       data: { docData: new Uint8Array(bytes), docMime: type, docName: name, docSize: bytes.length },
+    });
+  });
+
+  describe("guest attachment grouping", () => {
+    it("keeps legacy files alongside new files and assigns unpositioned guests to unused positions", () => {
+      const groups = guestDocumentGroups([
+        {
+          id: "legacy-one", position: null, name: "First", docName: "front.pdf", docSize: 10,
+          documents: [{ id: "extra", docName: "back.pdf", docSize: 12 }],
+        },
+        { id: "new-guest", position: 1, name: "Second", docName: null, docSize: 0, documents: [] },
+        { id: "legacy-two", position: null, name: "Third", docName: "scan.pdf", docSize: 10, documents: [] },
+      ]);
+      expect(groups.map((guest) => guest.position)).toEqual([0, 1, 2]);
+      expect(groups[0].documents.map((doc) => doc.id)).toEqual(["legacy-one", "extra"]);
+      expect(groups[1].documents).toEqual([]);
+    });
+
+    it("validates upload identities and guest positions before accepting bytes", async () => {
+      const form = new FormData();
+      form.set("position", "0");
+      form.set("name", "Primary");
+      form.set("file", new File(["%PDF-1.4"], "id.pdf", { type: "application/pdf" }));
+      form.set("uploadId", "not-an-upload-id");
+      expect((await parseGuestUpload(form)).ok).toBe(false);
+      const uploadId = crypto.randomUUID();
+      form.set("uploadId", uploadId);
+      expect(await parseGuestUpload(form)).toMatchObject({ ok: true, position: 0, uploadId });
+      form.set("position", "50");
+      expect((await parseGuestUpload(form)).ok).toBe(false);
     });
   });
 

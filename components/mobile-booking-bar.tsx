@@ -89,7 +89,7 @@ export function MobileBookingBar({
                     {formatINR(strikeTotal)}
                   </span>
                 ) : null}
-                <span className={saleTotal ? "discount-price text-rose-600" : undefined}>
+                <span>
                   {formatINR(total)}
                 </span>{" "}
                 <span className="font-normal text-muted-foreground">total</span>
@@ -109,7 +109,7 @@ export function MobileBookingBar({
                     {formatINR(strike)}
                   </span>
                 ) : null}
-                <span className={strike ? "discount-price text-rose-600" : undefined}>
+                <span>
                   {formatINR(basePrice)}
                 </span>{" "}
                 <span className="font-normal text-muted-foreground">/ night</span>

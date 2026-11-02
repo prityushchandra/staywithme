@@ -18,6 +18,23 @@ export const MAPS_URL_MAX = 2000;
 /** Cap for a stored Airbnb listing link. Airbnb room URLs carry long query blobs. */
 export const AIRBNB_URL_MAX = 500;
 
+export const MAX_LISTING_FAQS = 20;
+export const FAQ_QUESTION_MAX = 200;
+export const FAQ_ANSWER_MAX = 2000;
+
+const listingFaqDraftSchema = z.object({
+  question: z.string().max(FAQ_QUESTION_MAX, "Keep FAQ questions under 200 characters"),
+  answer: z.string().max(FAQ_ANSWER_MAX, "Keep FAQ answers under 2,000 characters"),
+});
+
+export const listingFaqDraftsSchema = z.array(listingFaqDraftSchema).max(MAX_LISTING_FAQS);
+export const listingFaqsSchema = z.array(listingFaqDraftSchema.extend({
+  question: listingFaqDraftSchema.shape.question.trim().min(1, "Add a question for each FAQ"),
+  answer: listingFaqDraftSchema.shape.answer.trim().min(1, "Add an answer for each FAQ"),
+})).max(MAX_LISTING_FAQS, "You can add up to 20 FAQs");
+
+export type ListingFaq = z.infer<typeof listingFaqsSchema>[number];
+
 /** True when `value` is a plausible http(s) URL (used for the Maps link). */
 export function isHttpUrl(value: string): boolean {
   let url: URL;
@@ -84,6 +101,7 @@ export const listingInputSchema = z
   .object({
   title: z.string().min(5, "Give your listing a descriptive title").max(100),
   description: z.string().min(20, "Add at least a couple of sentences").max(4000),
+  faqs: listingFaqsSchema.optional(),
   // Optional public host name shown as "Hosted by …".
   hostDisplayName: z.string().trim().max(50).optional(),
   // Optional Property ID. Blank means "generate one" on create, or "keep the

@@ -1,13 +1,8 @@
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
+import { GUEST_DOCUMENT_SELECT, guestDocuments } from "./booking-documents";
 
-export const OFFLINE_GUEST_SELECT = {
-  id: true,
-  position: true,
-  name: true,
-  docName: true,
-  docSize: true,
-} as const satisfies Prisma.OfflineBookingGuestSelect;
+export const OFFLINE_GUEST_SELECT = GUEST_DOCUMENT_SELECT satisfies Prisma.OfflineBookingGuestSelect;
 
 export const offlineGuestDetailsSchema = z.array(z.object({
   position: z.number().int().min(0).max(49),
@@ -50,19 +45,23 @@ export async function saveOfflineGuestDetails(
     select: OFFLINE_GUEST_SELECT,
   });
   const removed = new Set(removeDocumentIds);
-  if (removeDocumentIds.some((id) => !existing.some((guest) => guest.id === id))) {
+  const documentIds = new Set(existing.flatMap(guestDocuments).map((doc) => doc.id));
+  if (removeDocumentIds.some((id) => !documentIds.has(id))) {
     throw new OfflineGuestDetailsError("A document does not belong to this booking.");
   }
   const normalized = details === undefined ? undefined : normalizeOfflineGuests(primaryName, details, count);
   const positions = normalized && new Set(normalized.map((guest) => guest.position));
   if (existing.some((guest) =>
-    guest.docName && !removed.has(guest.id) &&
+    guestDocuments(guest).some((doc) => !removed.has(doc.id)) &&
     (guest.position >= count || (positions && !positions.has(guest.position)))
   )) {
     throw new OfflineGuestDetailsError("Remove a guest's ID before removing that guest or reducing the guest count.");
   }
 
   if (removed.size > 0) {
+    await tx.offlineBookingGuestDocument.deleteMany({
+      where: { guest: { bookingId }, id: { in: [...removed] } },
+    });
     await tx.offlineBookingGuest.updateMany({
       where: { bookingId, id: { in: [...removed] } },
       data: { docData: null, docMime: null, docName: null, docSize: 0 },

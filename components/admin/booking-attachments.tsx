@@ -375,10 +375,10 @@ export function BookingAttachments({ docs }: { docs: readonly BookingDocument[] 
           <Dialog.Trigger asChild>
             <button
               type="button"
-              className="inline-flex min-h-9 items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-xs font-medium transition hover:border-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              title={doc.docName} aria-label={`View ${doc.name}'s attachment`}
+              className="inline-flex min-h-9 max-w-full items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-xs font-medium transition hover:border-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              title={`${doc.name}: ${doc.docName}`} aria-label={`View ${doc.name}'s attachment: ${doc.docName}`}
             >
-              <FileText className="h-3.5 w-3.5" /> {doc.name}
+              <FileText className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">{doc.docName}</span>
             </button>
           </Dialog.Trigger>
           <Dialog.Portal>

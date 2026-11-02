@@ -5,6 +5,7 @@ import { clearMemo } from "@/lib/memo";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { visibilityMonthUpsert } from "@/lib/listing-visibility";
 
 const schema = z.discriminatedUnion("action", [
   z.object({
@@ -44,7 +45,7 @@ export async function PATCH(
 
   const listing = await prisma.listing.findUnique({
     where: { id },
-    select: { id: true, status: true },
+    select: { id: true, status: true, isVisible: true },
   });
   if (!listing) {
     return NextResponse.json({ error: "Listing not found" }, { status: 404 });
@@ -59,7 +60,10 @@ export async function PATCH(
       try {
         const updated = await prisma.listing.update({
           where: { id, status: "PUBLISHED" },
-          data: { isVisible: parsed.data.visible },
+          data: {
+            isVisible: parsed.data.visible,
+            visibilityMonths: visibilityMonthUpsert(id, parsed.data.visible),
+          },
           select: { isVisible: true },
         });
         isVisible = updated.isVisible;
@@ -74,25 +78,43 @@ export async function PATCH(
       }
       break;
     }
-    case "approve":
-      await prisma.listing.update({
-        where: { id },
-        data: { status: "PUBLISHED", rejectionReason: null },
-      });
+    case "approve": {
+      try {
+        await prisma.listing.update({
+          // Do not record a stale visible state if a concurrent toggle hid it.
+          where: { id, isVisible: listing.isVisible },
+          data: {
+            status: "PUBLISHED",
+            rejectionReason: null,
+            visibilityMonths: visibilityMonthUpsert(id, listing.isVisible),
+          },
+        });
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+          return NextResponse.json({ error: "This listing changed. Refresh and try again." }, { status: 409 });
+        }
+        throw error;
+      }
       break;
+    }
     case "reject":
       await prisma.listing.update({
         where: { id },
         data: {
           status: "REJECTED",
           rejectionReason: parsed.data.reason?.trim() || "Did not meet guidelines.",
+          visibilityMonths: visibilityMonthUpsert(id, false),
         },
       });
       break;
     case "unpublish":
       await prisma.listing.update({
         where: { id },
-        data: { status: "PENDING", featured: false },
+        data: {
+          status: "PENDING",
+          featured: false,
+          visibilityMonths: visibilityMonthUpsert(id, false),
+        },
       });
       break;
     case "feature":

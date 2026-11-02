@@ -20,6 +20,7 @@ const LISTINGS_CACHE = { tags: ["listings"], revalidate: 60 };
 const publicListingArgs = {
   include: {
     images: { orderBy: { order: "asc" } },
+    faqs: { orderBy: { position: "asc" } },
     amenities: { include: { amenity: true } },
     host: { select: { id: true, name: true, image: true, createdAt: true } },
   },

@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminBookingsPage } from "./bookings-page";
+import { GUEST_DOCUMENT_SELECT } from "@/lib/booking-documents";
 
 const db = vi.hoisted(() => ({
   booking: { findMany: vi.fn() },
@@ -40,16 +41,18 @@ const booking = {
   contactPhone: "+447700900123", publicToken: "example-token",
   guest: { name: "Account Full Name", firstName: "Maya", phone: "+919876543210" },
   listing,
-  idDocs: [{ id: "example-doc", name: "Maya", docName: "example-id.png" }],
+  idDocs: [{
+    id: "example-doc", position: null, name: "Maya", docName: "example-id.png", docSize: 100, documents: [],
+  }],
 };
 const manualBooking = {
   id: "manual-booking", listingId: listing.id, guestName: "Manual Primary", guestPhone: "+919876543210",
   guests: 2, checkIn: new Date("2025-10-02T00:00:00Z"), checkOut: new Date("2025-10-05T00:00:00Z"),
   totalPrice: 900000, amountPaid: 900000, due: 0, source: "AIRBNB", status: "CONFIRMED", note: "Synthetic stay",
-  publicToken: "manual-token", listing,
+  publicToken: "manual-token", listing, updatedAt: new Date("2025-10-01T00:00:00Z"),
   guestDetails: [
-    { id: "manual-doc", position: 0, name: "Manual Primary", docName: "manual-id.pdf", docSize: 100 },
-    { id: "manual-name", position: 1, name: "Manual Companion", docName: null, docSize: 0 },
+    { id: "manual-doc", position: 0, name: "Manual Primary", docName: "manual-id.pdf", docSize: 100, documents: [] },
+    { id: "manual-name", position: 1, name: "Manual Companion", docName: null, docSize: 0, documents: [] },
   ],
 };
 
@@ -85,6 +88,28 @@ describe("combined past booking history", () => {
     const manualQuery = db.offlineBooking.findMany.mock.calls[0][0];
     expect(manualQuery.include.guestDetails.select.docData).toBeUndefined();
     expect(manualQuery.include.guestDetails.select.docName).toBe(true);
+    expect(manualQuery.include.guestDetails.select.documents.select.docData).toBeUndefined();
+  });
+
+  it("groups every attachment by guest without counting two files as two guests", async () => {
+    const child = { id: "extra-doc", docName: "back-of-id.pdf", docSize: 100 };
+    db.offlineBooking.findMany.mockResolvedValue([{
+      ...manualBooking, guestDetails: [
+        { ...manualBooking.guestDetails[0], documents: [child] },
+        manualBooking.guestDetails[1],
+      ],
+    }]);
+    db.booking.findMany.mockResolvedValue([{
+      ...booking, idDocs: [{ ...booking.idDocs[0], documents: [{ ...child, id: "online-extra" }] }],
+    }]);
+    const html = renderToStaticMarkup(await AdminBookingsPage({
+      kind: "offline", searchParams: Promise.resolve({ view: "past" }),
+    }));
+    expect(html).toContain("View Manual Primary&#x27;s attachment: back-of-id.pdf");
+    expect(html).toContain("View Maya&#x27;s attachment: back-of-id.pdf");
+    expect(html.match(/1 \/ 2 guests with IDs/g)).toHaveLength(2);
+    expect(html).toContain("example-id.png");
+    expect(html).toContain("manual-id.pdf");
   });
 
   it("applies the same flat, overlap and status filters to both booking sources", async () => {
@@ -161,7 +186,7 @@ describe("separate admin booking tabs", () => {
         NOT: { source: "ONLINE", status: "PENDING" },
       },
       include: expect.objectContaining({
-        idDocs: { select: { id: true, name: true, docName: true }, orderBy: { createdAt: "asc" } },
+        idDocs: { select: GUEST_DOCUMENT_SELECT, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
       }),
     }));
     expect(db.booking.findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({

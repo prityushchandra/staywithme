@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { after } from "next/server";
 import type { Metadata } from "next";
-import { Star } from "lucide-react";
+import { Bath, BedDouble, BedSingle, MapPin, Sparkles, Star, UsersRound } from "lucide-react";
 import { getPublishedListingById, getListingByIdAnyStatus } from "@/lib/data-access";
 import { getPlatformSettings } from "@/lib/settings";
 import { prisma } from "@/lib/db";
@@ -22,8 +22,9 @@ import { BookingProvider } from "@/components/booking-context";
 import { AmenitiesList } from "@/components/amenities-list";
 import { CollapsibleText } from "@/components/collapsible-text";
 import { MapPreview } from "@/components/map-preview";
-import { GuestFavoriteBanner } from "@/components/guest-favorite-banner";
 import { MobileBookingBar } from "@/components/mobile-booking-bar";
+import { ListingFaqs } from "@/components/listing-faqs";
+import { listingFaqsSchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 
@@ -150,6 +151,14 @@ export default async function ListingPage({
     ratingSummary.count > 0
       ? `${ratingSummary.average} · ${plural(ratingSummary.count, "review")}`
       : "New";
+  const faqs = listingFaqsSchema.parse(listing.faqs);
+  const [headline, ...titleDetails] = listing.title.split("|").map((part) => part.trim()).filter(Boolean);
+  const stayDetails = [
+    { icon: UsersRound, value: listing.maxGuests, label: listing.maxGuests === 1 ? "Guest" : "Guests" },
+    { icon: BedDouble, value: listing.bedrooms, label: listing.bedrooms === 1 ? "Bedroom" : "Bedrooms" },
+    { icon: BedSingle, value: listing.beds, label: listing.beds === 1 ? "Bed" : "Beds" },
+    { icon: Bath, value: listing.bathrooms, label: listing.bathrooms === 1 ? "Bathroom" : "Bathrooms" },
+  ];
 
   // Relative timestamps are resolved here rather than in the client component:
   // the page is force-dynamic, so a value fixed at request time stays stable for
@@ -164,7 +173,7 @@ export default async function ListingPage({
   }));
 
   return (
-    <div className="container pb-28 pt-6 lg:pb-6">
+    <div className="container pb-28 pt-5 sm:pt-8 lg:pb-12">
       {!isPreview && <TrackView listingId={listing.id} />}
       {isPreview && (
         <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-800">
@@ -174,23 +183,64 @@ export default async function ListingPage({
         </div>
       )}
 
-      {/* Title + meta. The rating lives in the banner below, not here. */}
-      <div className="flex items-start justify-between gap-4">
-        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-          {listing.title}
-        </h1>
-        <div className="flex shrink-0 items-center gap-1">
-          <ShareButton title={listing.title} />
-          {/* Labels are dropped on phones: two labelled pills would squeeze a
-              long title into a column barely wide enough to read. */}
-          <div className="flex items-center gap-1 rounded-full px-2 py-1.5 hover:bg-muted sm:px-3">
-            <WishlistButton listingId={listing.id} size="lg" />
-            <span className="hidden text-sm font-medium underline sm:inline">Save</span>
+      <header className="mb-6 sm:mb-8">
+        <div className="mb-4 flex items-center justify-between gap-4">
+          <p className="flex min-w-0 items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground sm:text-xs">
+            <MapPin aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+            <span>{listing.city}, {listing.country}</span>
+          </p>
+          <div className="flex shrink-0 items-center gap-1 rounded-full border border-foreground/10 bg-card/70 p-1">
+            <ShareButton title={listing.title} />
+            <WishlistButton
+              listingId={listing.id}
+              showLabel
+              className="min-h-11 min-w-11 gap-2 px-3 text-sm font-medium hover:bg-foreground/5"
+            />
           </div>
         </div>
-      </div>
+        <h1 className="max-w-4xl break-words font-serif text-[2rem] leading-[1.15] tracking-tight [text-wrap:balance] sm:text-5xl">
+          {headline || listing.title}
+        </h1>
+        {titleDetails.length > 0 && (
+          <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted-foreground sm:text-base">
+            {titleDetails.join(" · ")}
+          </p>
+        )}
+        <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs sm:text-sm">
+          {ratingSummary.count > 0 ? (
+            <a href="#reviews" className="inline-flex min-h-8 items-center gap-1.5 rounded-sm outline-none hover:underline hover:underline-offset-4 focus-visible:ring-2 focus-visible:ring-ring">
+              <Star aria-hidden="true" className="h-3.5 w-3.5 fill-current text-foreground" />
+              <span className="font-semibold">{ratingSummary.average}</span>
+              <span className="text-muted-foreground">({plural(ratingSummary.count, "review")})</span>
+            </a>
+          ) : (
+            <span className="text-muted-foreground">New stay</span>
+          )}
+          {listing.guestFavorite && (
+            <span className="inline-flex items-center gap-1.5 text-brand-dark">
+              <Sparkles aria-hidden="true" className="h-3.5 w-3.5" />
+              Guest favourite
+            </span>
+          )}
+          <span className="text-muted-foreground">{ROOM_TYPE_LABEL[listing.roomType]}</span>
+        </div>
+      </header>
 
       <Gallery images={galleryImages} title={listing.title} />
+
+      <nav aria-label="Explore this stay" className="mt-4 flex gap-6 overflow-x-auto border-b border-foreground/10 text-sm text-muted-foreground sm:mt-6 sm:gap-8">
+        {[
+          { href: "#about", label: "About" },
+          { href: "#amenities", label: "Amenities" },
+          ...(listing.mapsUrl ? [{ href: "#location", label: "Location" }] : []),
+          { href: "#reviews", label: "Reviews" },
+          ...(faqs.length > 0 ? [{ href: "#faqs", label: "FAQs" }] : []),
+        ].map((section) => (
+          <a key={section.href} href={section.href} className="shrink-0 border-b-2 border-transparent py-4 font-medium outline-none transition-colors hover:border-brand hover:text-foreground focus-visible:border-brand focus-visible:text-foreground">
+            {section.label}
+          </a>
+        ))}
+      </nav>
 
       <BookingProvider
         initialCheckIn={sp.checkIn ?? ""}
@@ -198,49 +248,44 @@ export default async function ListingPage({
         initialGuests={initialGuests}
         blockedRanges={serializedBlocks}
       >
-        <div className="mt-8 grid grid-cols-1 gap-x-12 gap-y-10 lg:grid-cols-3">
+        <div className="mt-8 grid grid-cols-1 gap-x-14 gap-y-10 sm:mt-10 lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)] xl:gap-x-20">
           {/* Left: details */}
-          <div className="lg:col-span-2">
-            {(listing.guestFavorite || ratingSummary.count > 0) && (
-              <GuestFavoriteBanner
-                featured={listing.guestFavorite}
-                average={ratingSummary.average}
-                count={ratingSummary.count}
-              />
-            )}
-
+          <div className="min-w-0">
             {/* Place summary. Host identity is intentionally NOT shown to guests. */}
-            <section className="border-b pb-6">
-              <h2 className="text-xl font-semibold sm:text-2xl">
+            <section className="pb-8 sm:pb-10">
+              <h2 className="font-serif text-2xl tracking-tight sm:text-3xl">
                 {ROOM_TYPE_LABEL[listing.roomType]}
               </h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {plural(listing.maxGuests, "guest")} ·{" "}
-                {plural(listing.bedrooms, "bedroom")} ·{" "}
-                {plural(listing.beds, "bed")} ·{" "}
-                {plural(listing.bathrooms, "bath")}
-              </p>
+              <div className="mt-6 grid grid-cols-4 divide-x divide-foreground/10 rounded-2xl bg-card/70 py-5">
+                {stayDetails.map(({ icon: Icon, value, label }) => (
+                  <div key={label} className="flex min-w-0 flex-col items-center px-1 text-center">
+                    <Icon aria-hidden="true" className="mb-2.5 h-5 w-5 text-muted-foreground" strokeWidth={1.5} />
+                    <span className="text-lg font-medium leading-none">{value}</span>
+                    <span className="mt-1.5 text-[11px] text-muted-foreground sm:text-xs">{label}</span>
+                  </div>
+                ))}
+              </div>
             </section>
 
             {/* About */}
-            <section className="border-b py-6">
-              <h3 className="mb-2 text-lg font-semibold">About this place</h3>
-              <CollapsibleText text={listing.description} />
+            <section id="about" className="scroll-mt-28 border-t border-foreground/10 py-9 sm:py-11">
+              <h2 className="mb-4 font-serif text-2xl tracking-tight sm:text-3xl">About this place</h2>
+              <CollapsibleText text={listing.description} className="leading-7" />
             </section>
 
             {/* Amenities */}
-            <section className="border-b py-6">
-              <h3 className="mb-2 text-lg font-semibold">
+            <section id="amenities" className="scroll-mt-28 border-t border-foreground/10 py-9 sm:py-11">
+              <h2 className="mb-5 font-serif text-2xl tracking-tight sm:text-3xl">
                 What this place offers
-              </h3>
+              </h2>
               <AmenitiesList amenities={amenities} />
             </section>
 
             {/* Where you'll be — renders only when an admin has added a map link */}
             {listing.mapsUrl && (
-              <section className="border-b py-6">
-                <h3 className="text-lg font-semibold">Where you&apos;ll be</h3>
-                <p className="mb-4 mt-1 text-sm text-muted-foreground">
+              <section id="location" className="scroll-mt-28 border-t border-foreground/10 py-9 sm:py-11">
+                <h2 className="font-serif text-2xl tracking-tight sm:text-3xl">Where you&apos;ll be</h2>
+                <p className="mb-5 mt-3 text-sm leading-relaxed text-muted-foreground">
                   Tap the map to open the exact location in Google Maps.
                 </p>
                 <MapPreview
@@ -252,26 +297,41 @@ export default async function ListingPage({
             )}
 
             {/* Reviews */}
-            <section id="reviews" className="scroll-mt-24 border-b py-6">
-              <h3 className="mb-1 flex items-center gap-2 text-lg font-semibold">
-                <Star className="h-5 w-5 fill-current text-amber-500" />
-                {ratingSummary.count > 0 ? ratingLabel : "Reviews"}
-              </h3>
-              <div className="mt-4 space-y-6">
+            <section id="reviews" className="scroll-mt-28 border-t border-foreground/10 py-9 sm:py-11">
+              <h2 className="font-serif text-2xl tracking-tight sm:text-3xl">
+                {ratingSummary.count > 0 ? "Words from our guests" : "Guest reviews"}
+              </h2>
+              {ratingSummary.count > 0 && (
+                <p className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+                  <Star aria-hidden="true" className="h-4 w-4 fill-current text-foreground" />
+                  {ratingLabel}
+                </p>
+              )}
+              <div className="mt-6 space-y-6">
                 <ReviewList reviews={reviewItems} />
                 {canReview && <ReviewForm listingId={listing.id} />}
               </div>
             </section>
 
+            <ListingFaqs faqs={faqs} />
+
             {/* Things to know */}
-            <section className="py-6">
-              <h3 className="mb-5 text-lg font-semibold">Things to know</h3>
+            <section className="border-t border-foreground/10 py-9 sm:py-11">
+              <h2 className="mb-6 font-serif text-2xl tracking-tight sm:text-3xl">Things to know</h2>
+              <div className="mb-7 grid grid-cols-2 gap-4 rounded-2xl bg-card/70 p-5">
+                <div>
+                  <p className="text-xs text-muted-foreground">Check-in</p>
+                  <p className="mt-1 text-sm font-semibold">{listing.checkInTime?.trim() || "Flexible"}</p>
+                </div>
+                <div className="border-l border-foreground/10 pl-5">
+                  <p className="text-xs text-muted-foreground">Checkout</p>
+                  <p className="mt-1 text-sm font-semibold">{listing.checkOutTime?.trim() || "Flexible"}</p>
+                </div>
+              </div>
               <div className="grid grid-cols-1 gap-8 sm:grid-cols-2">
                 <div>
                   <h4 className="mb-3 font-medium">House rules</h4>
                   <ul className="space-y-2 text-sm text-muted-foreground">
-                    <li>Check-in: {listing.checkInTime?.trim() || "Flexible"}</li>
-                    <li>Checkout: {listing.checkOutTime?.trim() || "Flexible"}</li>
                     <li>{plural(listing.maxGuests, "guest")} maximum</li>
                     {houseRules.map((rule) => (
                       <li key={rule}>{rule}</li>
@@ -293,7 +353,7 @@ export default async function ListingPage({
           </div>
 
           {/* Right: booking card */}
-          <div id="book" className="scroll-mt-24 lg:col-span-1">
+          <div id="book" className="min-w-0 scroll-mt-24">
             <InquiryPanel
               propertyId={listing.id}
               refCode={listing.refCode ?? undefined}

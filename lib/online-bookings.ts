@@ -26,6 +26,8 @@ import {
   verifyRazorpayPaymentSignature,
 } from "./razorpay";
 import crypto from "crypto";
+import { GUEST_DOCUMENT_SELECT, guestDocumentGroups } from "./booking-documents";
+import type { UploadedGuestDocument } from "./guest-uploads";
 
 const DAY_MS = 86_400_000;
 /** Longest stay the online path will take money for. */
@@ -124,7 +126,7 @@ export async function startOnlineBooking(input: {
       total: number;
       nights: number;
       /** IDs already attached to a reused draft, so the form can show them again. */
-      docs: { id: string; name: string; docName: string; docSize: number }[];
+      docs: UploadedGuestDocument[];
     }
   | Fail
 > {
@@ -171,12 +173,17 @@ export async function startOnlineBooking(input: {
   const docs = existing
     ? await prisma.bookingGuest.findMany({
         where: { bookingId: booking.id },
-        select: { id: true, name: true, docName: true, docSize: true },
-        orderBy: { createdAt: "asc" },
+        select: GUEST_DOCUMENT_SELECT,
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       })
     : [];
 
-  return { ok: true, bookingId: booking.id, total: quote.total, nights: quote.nights, docs };
+  return {
+    ok: true, bookingId: booking.id, total: quote.total, nights: quote.nights,
+    docs: guestDocumentGroups(docs).flatMap((guest) =>
+      guest.documents.map((doc) => ({ ...doc, position: guest.position, name: guest.name }))
+    ),
+  };
 }
 
 /**
@@ -203,13 +210,15 @@ export async function createBookingOrder(
       status: true,
       reasonForVisit: true,
       razorpayOrderId: true,
-      _count: { select: { idDocs: true } },
+      idDocs: { select: GUEST_DOCUMENT_SELECT, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
     },
   });
   if (!booking || booking.guestId !== guestId) return fail("Booking not found.");
   if (booking.status !== "PENDING") return fail("This booking has already been paid for.");
   if (!booking.reasonForVisit?.trim()) return fail("Please tell us the reason for your visit.");
-  if (booking._count.idDocs < booking.guests) {
+  const covered = new Set(guestDocumentGroups(booking.idDocs)
+    .filter((guest) => guest.documents.length > 0).map((guest) => guest.position));
+  if (Array.from({ length: booking.guests }, (_, position) => position).some((position) => !covered.has(position))) {
     return fail("Please upload an ID for every guest before paying.");
   }
 
@@ -554,16 +563,19 @@ export function notifyAdminNewOnlineBooking(bookingId: string, conflicted: boole
         reasonForVisit: true,
         guest: { select: { name: true, phone: true } },
         listing: { select: { title: true, flatNumber: true, block: true } },
-        _count: { select: { idDocs: true } },
+        idDocs: { select: GUEST_DOCUMENT_SELECT, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
       },
     });
     if (!b) return;
+    const groups = guestDocumentGroups(b.idDocs).filter((guest) => guest.position < b.guests);
+    const covered = groups.filter((guest) => guest.documents.length > 0).length;
+    const attachmentCount = groups.reduce((total, guest) => total + guest.documents.length, 0);
     const warn = conflicted
       ? "\n\n*⚠ DATE CONFLICT — these nights were already blocked. Refund or re-house.*"
       : "";
     await sendWhatsApp(
       adminPhone,
-      `*Online booking paid — approval needed*\n\nFlat: ${unitBlock(b.listing)} — ${b.listing.title}\nGuest: ${b.guest.name ?? "—"} (${b.guest.phone ?? "no number"})\nDates: ${fmt(b.checkIn)} → ${fmt(b.checkOut)}\nGuests: ${b.guests} · IDs uploaded: ${b._count.idDocs}\nReason: ${b.reasonForVisit ?? "—"}\n\nPaid: *${formatINR(b.amountPaid)}*${warn}\n\nReview the IDs and accept it in the admin dashboard.`
+      `*Online booking paid — approval needed*\n\nFlat: ${unitBlock(b.listing)} — ${b.listing.title}\nGuest: ${b.guest.name ?? "—"} (${b.guest.phone ?? "no number"})\nDates: ${fmt(b.checkIn)} → ${fmt(b.checkOut)}\nGuests: ${b.guests} · Guests with IDs: ${covered} · Attachments: ${attachmentCount}\nReason: ${b.reasonForVisit ?? "—"}\n\nPaid: *${formatINR(b.amountPaid)}*${warn}\n\nReview the IDs and accept it in the admin dashboard.`
     );
   });
 }

@@ -27,7 +27,7 @@ function Stars({ rating }: { rating: number }) {
         <Star
           key={n}
           className={`h-3.5 w-3.5 ${
-            n <= rating ? "fill-amber-500 text-amber-500" : "text-muted-foreground"
+            n <= rating ? "fill-brand-dark text-brand-dark" : "text-muted-foreground"
           }`}
         />
       ))}
@@ -52,20 +52,20 @@ export function ReviewList({ reviews }: { reviews: ReviewListItem[] }) {
 
   return (
     <div>
-      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {visible.map((r) => (
-          <div key={r.id} className="space-y-1.5">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-sm font-medium">
+          <div key={r.id} className="min-w-0 space-y-4 rounded-2xl border border-foreground/5 bg-card/70 p-5">
+            <div className="flex items-center gap-3">
+              <div aria-hidden="true" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-background font-serif text-lg">
                 {r.name.charAt(0).toUpperCase()}
               </div>
-              <div className="leading-tight">
-                <p className="text-sm font-medium">{r.name}</p>
-                <p className="text-xs text-muted-foreground">{r.timeAgo}</p>
+              <div className="min-w-0 leading-tight">
+                <p className="break-words text-sm font-medium">{r.name}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{r.timeAgo}</p>
               </div>
             </div>
             <Stars rating={r.rating} />
-            <p className="whitespace-pre-line text-sm leading-relaxed text-muted-foreground">
+            <p className="whitespace-pre-line break-words text-sm leading-7 text-muted-foreground">
               {r.body}
             </p>
           </div>
@@ -77,7 +77,7 @@ export function ReviewList({ reviews }: { reviews: ReviewListItem[] }) {
           variant="outline"
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
-          className="mt-6 w-full sm:w-auto"
+          className="mt-6 w-full rounded-full border-foreground/20 bg-transparent px-6 sm:w-auto"
         >
           {expanded ? "Show less" : `Show all ${reviews.length} reviews`}
         </Button>

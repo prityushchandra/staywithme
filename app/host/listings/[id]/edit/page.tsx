@@ -5,6 +5,7 @@ import { getPlatformSettings } from "@/lib/settings";
 import { getFormAmenities, getFormBlocks, getCancellationPolicies } from "@/lib/data-access";
 import { ListingForm } from "@/components/listing-form";
 import { CalendarSyncCard } from "@/components/calendar-sync-card";
+import { listingFaqsSchema } from "@/lib/validation";
 
 export const metadata = { title: "Edit listing" };
 export const dynamic = "force-dynamic";
@@ -20,7 +21,11 @@ export default async function EditListingPage({
 
   const listing = await prisma.listing.findUnique({
     where: { id },
-    include: { images: { orderBy: { order: "asc" } }, amenities: true },
+    include: {
+      images: { orderBy: { order: "asc" } },
+      amenities: true,
+      faqs: { orderBy: { position: "asc" } },
+    },
   });
   if (!listing) notFound();
   if (listing.hostId !== session.user.id && !session.user.isAdmin) redirect("/host");
@@ -47,7 +52,9 @@ export default async function EditListingPage({
     <div className="container max-w-3xl py-8">
       <h1 className="text-2xl font-bold tracking-tight">Edit listing</h1>
       <p className="mt-1 text-muted-foreground">
-        Saving changes sends the listing back to admin moderation.
+        {session.user.isAdmin
+          ? "Update your listing details, photos and answers to common guest questions."
+          : "Saving changes sends the listing back to admin moderation."}
       </p>
       <div className="mt-8">
         <ListingForm
@@ -64,6 +71,7 @@ export default async function EditListingPage({
           initial={{
             title: listing.title,
             description: listing.description,
+            faqs: listingFaqsSchema.parse(listing.faqs),
             hostDisplayName: listing.hostDisplayName ?? "",
             propertyType: listing.propertyType,
             roomType: listing.roomType,
