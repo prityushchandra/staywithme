@@ -87,7 +87,7 @@ describe("combined past booking history", () => {
       .filter((url) => url.searchParams.get("text")?.startsWith("Flat: "));
     expect(onboarding.map((url) => url.pathname)).toEqual(["/447700900123", "/919876543210"]);
     for (const url of onboarding) {
-      expect(url.searchParams.get("text")).toContain("Flat: 908, B tower\nssid: Airtel_908");
+      expect(url.searchParams.get("text")).toContain("Flat: 908, B tower\n\nssid: Airtel_908");
       expect(url.searchParams.get("text")).toContain("door pin: 1234567");
     }
     expect(db.booking.findMany).toHaveBeenCalledOnce();
@@ -207,7 +207,7 @@ describe("separate admin booking tabs", () => {
       .map((match) => new URL(match[1].replaceAll("&amp;", "&").replaceAll("&#x27;", "'")))
       .find((url) => url.searchParams.get("text")?.startsWith("Flat: "));
     expect(welcomeLink?.pathname).toBe("/447700900123");
-    expect(welcomeLink?.searchParams.get("text")).toContain("Flat: 908, B tower\nssid: Airtel_908");
+    expect(welcomeLink?.searchParams.get("text")).toContain("Flat: 908, B tower\n\nssid: Airtel_908");
   });
 
   it("retains both paid-online history and legacy WhatsApp guest requests", async () => {

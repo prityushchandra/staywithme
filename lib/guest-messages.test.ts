@@ -31,7 +31,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("confirmed guest messages", () => {
-  it("uses the compact onboarding template with the flat's tower and numeric Airtel SSID", () => {
+  it("separates onboarding details with blank lines and uses the flat's tower and numeric Airtel SSID", () => {
     const messages = buildGuestMessages("  Asha Singh  ", listing, testDoorPin);
     expect(messages.onboard).toBe([
       "Flat: B0908, B tower",
@@ -41,7 +41,7 @@ describe("confirmed guest messages", () => {
       "The flat is ready for checkin !",
       "Location: https://maps.app.goo.gl/GU1rU9Da7JbWe2227?g_st=ic",
       "For visitor parking , you can ask guard at B tower , he will guide you",
-    ].join("\n"));
+    ].join("\n\n"));
     expect(messages.checkout).toMatch(/^Hi Asha,/);
     expect(messages.checkout).toContain("checkout time is 11:15 AM");
     expect(messages.checkout).toContain("Please don't switch off WiFi and the fridge.");
@@ -101,6 +101,7 @@ describe("confirmed guest messages", () => {
   it("opens the selected guest's number and preserves the compact text, password symbols and map query", () => {
     const messages = buildGuestMessages("Asha", listing, testDoorPin);
     expect(messages.onboard).not.toBeNull();
+    expect(guestWhatsAppHref("98765 43210", messages.onboard!)).toContain("%0A%0A");
     for (const message of [messages.onboard!, messages.checkout, messages.doorPin]) {
       const href = guestWhatsAppHref("98765 43210", message);
       expect(href).not.toBeNull();

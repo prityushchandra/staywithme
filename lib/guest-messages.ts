@@ -49,7 +49,7 @@ export function buildGuestMessages(
     "The flat is ready for checkin !",
     "Location: https://maps.app.goo.gl/GU1rU9Da7JbWe2227?g_st=ic",
     `For visitor parking , you can ask guard at ${tower} tower , he will guide you`,
-  ].join("\n") : null;
+  ].join("\n\n") : null;
 
   const checkout = [
     `Hi ${firstName},`,
