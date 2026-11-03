@@ -1,4 +1,3 @@
-import { mapsViewHref } from "./maps";
 import { normalizeWhatsAppNumber } from "./whatsapp";
 
 export type GuestMessageListing = {
@@ -29,63 +28,28 @@ export function guestWhatsAppHref(phone: string | null, message: string): string
   return digits ? `https://wa.me/${digits}?text=${encodeURIComponent(message)}` : null;
 }
 
-export function buildGuestMessages(guestName: string | null, listing: GuestMessageListing) {
+export function buildGuestMessages(
+  guestName: string | null,
+  listing: GuestMessageListing,
+  onboardingDoorPin?: string,
+) {
   const firstName = guestName?.trim().split(/\s+/)[0] || "there";
-  const checkInTime = listing.checkInTime?.trim() || "2:00 PM";
   const checkOutTime = listing.checkOutTime?.trim() || "10:00 AM";
-  const address = [listing.addressLine, listing.city, listing.country].filter(Boolean).join(", ");
-  const maps = mapsViewHref({ ...listing, address })
-    ?? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
-  const block = listing.block?.trim();
-  const tower = block
-    ? /^(tower|block)\b/i.test(block) ? block : `Tower ${block}`
-    : "";
-  const flat = listing.flatNumber?.trim() ? `flat ${listing.flatNumber.trim()}` : listing.title;
-  const destination = [tower, flat].filter(Boolean).join(", ");
-  const wifi = [
-    "- WiFi Details",
-    listing.wifiName?.trim() ? `- Network: ${listing.wifiName.trim()}` : "",
-    listing.wifiPassword ? `- Password: ${listing.wifiPassword}` : "",
-  ].filter(Boolean);
-
-  const onboard = [
-    `Hi ${firstName},`,
-    "",
-    "We're super excited to host you!",
-    "",
-    `- Check-in: ${checkInTime}`,
-    `- Check-out: ${checkOutTime}`,
-    "",
-    `- Location: ${maps}`,
-    "",
-    `- Once you reach ${listing.addressLine || listing.title}, come to ${destination} and call me. I will share the door PIN. Give your name and contact to the security guard if asked at the main gate; the request will be auto approved.`,
-    "",
-    "- All Swiggy/Zomato/Blinkit requests are auto approved and will be delivered to your doorstep.",
-    "",
-    ...(wifi.length > 1 ? [...wifi, ""] : []),
-    "- Amenities (8am-8pm)",
-    "- Pool: There are two swimming pools; one is in front of G tower.",
-    "- Gym: Club house 1, 2nd floor.",
-    "",
-    "- Access Information",
-    "- Smart door lock PIN will be shared before check-in.",
-    "- All kitchen utensils and cutlery are kept in the kitchen drawers.",
-    "",
-    "To ensure a comfortable and pleasant stay for everyone, we kindly request you to follow a few house guidelines:",
-    "",
-    "- Smoking inside the apartment is not permitted.",
-    "- Parties or loud music are not allowed.",
-    "- Only registered guests are allowed inside the property.",
-    "- Please switch off lights and gas when stepping out.",
-    "- Kindly dispose of garbage in the designated bins.",
-    "- Towels are not provided, so we request you to carry your own.",
-    "- Personal toiletries (like shampoo, toothbrush, etc.) are not provided, so please bring your essentials.",
-    "- A swimming cap is required for using the pool.",
-    "",
-    "Thank you for your understanding and cooperation.",
-    "",
-    "Wishing you a relaxing and enjoyable stay with us!!",
-  ].join("\n");
+  const flat = listing.flatNumber?.trim().toUpperCase();
+  const flatParts = flat?.match(/^([A-Z]+)?(\d+)$/);
+  // The flat prefix is the tower; the saved block may be a building name.
+  const tower = flatParts?.[1] || listing.block?.trim()
+    .replace(/^(?:tower|block)\s+|\s+(?:tower|block)$/gi, "").trim();
+  const pin = onboardingDoorPin?.trim();
+  const onboard = flatParts && tower && listing.wifiPassword?.trim() && pin ? [
+    `Flat: ${flat}, ${tower} tower`,
+    `ssid: Airtel_${flatParts[2]}`,
+    `pswd: ${listing.wifiPassword}`,
+    `door pin: ${pin}`,
+    "The flat is ready for checkin !",
+    "Location: https://maps.app.goo.gl/GU1rU9Da7JbWe2227?g_st=ic",
+    `For visitor parking , you can ask guard at ${tower} tower , he will guide you`,
+  ].join("\n") : null;
 
   const checkout = [
     `Hi ${firstName},`,

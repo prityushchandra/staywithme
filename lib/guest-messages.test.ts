@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GuestContactActions } from "@/components/admin/guest-contact-actions";
 import {
   buildGuestMessages,
@@ -10,8 +10,8 @@ import {
 
 const listing: GuestMessageListing = {
   title: "Example apartment",
-  flatNumber: "908",
-  block: "B",
+  flatNumber: "B0908",
+  block: "Example building",
   addressLine: "Example Residences",
   city: "Bengaluru",
   country: "India",
@@ -23,26 +23,49 @@ const listing: GuestMessageListing = {
   wifiName: "Example_908",
   wifiPassword: "Example@908+#&",
 };
+const testDoorPin = "1234567";
+
+beforeEach(() => {
+  vi.stubEnv("GUEST_ONBOARDING_DOOR_PIN", testDoorPin);
+});
+afterEach(() => vi.unstubAllEnvs());
 
 describe("confirmed guest messages", () => {
-  it("personalizes all greetings and uses the booked listing's directions, times and WiFi", () => {
-    const messages = buildGuestMessages("  Asha Singh  ", listing);
-    for (const message of Object.values(messages)) expect(message).toMatch(/^Hi Asha,/);
-    expect(messages.onboard).toContain("Tower B, flat 908");
-    expect(messages.onboard).toContain("Once you reach Example Residences");
-    expect(messages.onboard).toContain("https://www.google.com/maps/search/?api=1&query=12.9,77.6");
-    expect(messages.onboard).toContain("Check-in: 3:30 PM");
-    expect(messages.onboard).toContain("Check-out: 11:15 AM");
-    expect(messages.onboard).toContain("Network: Example_908");
-    expect(messages.onboard).toContain("Password: Example@908+#&");
+  it("uses the compact onboarding template with the flat's tower and numeric Airtel SSID", () => {
+    const messages = buildGuestMessages("  Asha Singh  ", listing, testDoorPin);
+    expect(messages.onboard).toBe([
+      "Flat: B0908, B tower",
+      "ssid: Airtel_0908",
+      "pswd: Example@908+#&",
+      `door pin: ${testDoorPin}`,
+      "The flat is ready for checkin !",
+      "Location: https://maps.app.goo.gl/GU1rU9Da7JbWe2227?g_st=ic",
+      "For visitor parking , you can ask guard at B tower , he will guide you",
+    ].join("\n"));
+    expect(messages.checkout).toMatch(/^Hi Asha,/);
     expect(messages.checkout).toContain("checkout time is 11:15 AM");
     expect(messages.checkout).toContain("Please don't switch off WiFi and the fridge.");
+    expect(messages.doorPin).toMatch(/^Hi Asha,/);
     expect(messages.doorPin).toContain('press "#" or the tick symbol');
     expect(messages.doorPin).toMatch(/\nPIN: $/);
   });
 
-  it("never reuses another guest's name or another property's flat and WiFi", () => {
-    buildGuestMessages("Asha Singh", listing);
+  it.each([
+    ["G1407", "G", "1407"],
+    ["G1601", "G", "1601"],
+    ["G1606", "G", "1606"],
+    ["D1203", "D", "1203"],
+  ])("uses %s rather than a building name or another flat's WiFi name", (flatNumber, tower, number) => {
+    const { onboard } = buildGuestMessages("Asha", { ...listing, flatNumber }, testDoorPin);
+    expect(onboard).toContain(`Flat: ${flatNumber}, ${tower} tower`);
+    expect(onboard).toContain(`ssid: Airtel_${number}\n`);
+    expect(onboard).toContain(`guard at ${tower} tower`);
+    expect(onboard).not.toContain("Example building");
+    expect(onboard).not.toContain("Example_908");
+  });
+
+  it("uses the saved tower for numeric-only flats and never reuses another property's credentials", () => {
+    buildGuestMessages("Asha Singh", listing, testDoorPin);
     const messages = buildGuestMessages("Rahul Mehta", {
       ...listing,
       flatNumber: "502",
@@ -50,18 +73,18 @@ describe("confirmed guest messages", () => {
       wifiName: "Example_502",
       wifiPassword: "Different password",
       checkOutTime: "9:45 AM",
-    });
-    for (const message of Object.values(messages)) {
-      expect(message).toMatch(/^Hi Rahul,/);
-      expect(message).not.toContain("Asha");
-    }
-    expect(messages.onboard).toContain("Tower C, flat 502");
-    expect(messages.onboard).not.toContain("Example_908");
-    expect(messages.onboard).toContain("Password: Different password");
+    }, "7654321");
+    expect(messages.onboard).toContain("Flat: 502, C tower");
+    expect(messages.onboard).toContain("ssid: Airtel_502");
+    expect(messages.onboard).toContain("pswd: Different password");
+    expect(messages.onboard).toContain("door pin: 7654321");
+    expect(messages.onboard).not.toContain(testDoorPin);
+    expect(messages.checkout).toMatch(/^Hi Rahul,/);
     expect(messages.checkout).toContain("checkout time is 9:45 AM");
+    expect(messages.doorPin).toMatch(/^Hi Rahul,/);
   });
 
-  it("omits unavailable WiFi details and builds a usable map from the listing's address", () => {
+  it("does not create incomplete onboarding instructions when listing details are missing", () => {
     const messages = buildGuestMessages(null, {
       ...listing,
       flatNumber: null,
@@ -69,19 +92,16 @@ describe("confirmed guest messages", () => {
       mapsUrl: null,
       wifiName: null,
       wifiPassword: null,
-    });
-    expect(messages.onboard).toContain("Hi there,");
-    expect(messages.onboard).toContain("come to Example apartment");
-    expect(messages.onboard).toContain(
-      "https://www.google.com/maps/search/?api=1&query=Example%20Residences%2C%20Bengaluru%2C%20India"
-    );
-    expect(messages.onboard).not.toContain("WiFi Details");
-    expect(messages.onboard).not.toMatch(/null|undefined|short code/i);
+    }, testDoorPin);
+    expect(messages.onboard).toBeNull();
+    expect(messages.checkout).toMatch(/^Hi there,/);
+    expect(messages.doorPin).toMatch(/^Hi there,/);
   });
 
-  it("opens the selected guest's number and preserves newlines, WiFi symbols and the blank PIN", () => {
-    const messages = buildGuestMessages("Asha", listing);
-    for (const message of Object.values(messages)) {
+  it("opens the selected guest's number and preserves the compact text, password symbols and map query", () => {
+    const messages = buildGuestMessages("Asha", listing, testDoorPin);
+    expect(messages.onboard).not.toBeNull();
+    for (const message of [messages.onboard!, messages.checkout, messages.doorPin]) {
       const href = guestWhatsAppHref("98765 43210", message);
       expect(href).not.toBeNull();
       const url = new URL(href!);
@@ -93,7 +113,7 @@ describe("confirmed guest messages", () => {
 });
 
 describe("admin guest contact actions", () => {
-  it("puts personalized onboarding, checkout and PIN links beside Call after confirmation", () => {
+  it("puts the compact onboarding and personalized checkout/PIN links beside Call after confirmation", () => {
     const html = renderToStaticMarkup(createElement(GuestContactActions, {
       phone: "+44 7700 900123",
       guestName: "Maya Patel",
@@ -110,8 +130,22 @@ describe("admin guest contact actions", () => {
     for (const href of hrefs) {
       const url = new URL(href);
       expect(url.pathname).toBe("/447700900123");
-      expect(url.searchParams.get("text")).toMatch(/^Hi Maya,/);
     }
+    expect(hrefs.map((href) => new URL(href).searchParams.get("text"))).toEqual(
+      Object.values(buildGuestMessages("Maya Patel", listing, testDoorPin))
+    );
+  });
+
+  it("explains missing PIN configuration without linking incomplete onboarding or disabling other actions", () => {
+    vi.stubEnv("GUEST_ONBOARDING_DOOR_PIN", " ");
+    const html = renderToStaticMarkup(createElement(GuestContactActions, {
+      phone: "9876543210", guestName: "Asha", status: "CONFIRMED", listing,
+    }));
+    expect(html).toContain('role="status"');
+    expect(html).toContain("Onboard unavailable");
+    expect(html).not.toContain(" Onboard</a>");
+    expect(html).toContain(" Checkout reminder</a>");
+    expect(html).toContain(" Door PIN</a>");
   });
 
   it.each(["PENDING", "AWAITING_APPROVAL", "CANCELLED"])(
@@ -124,6 +158,7 @@ describe("admin guest contact actions", () => {
       expect(html).not.toContain("wa.me");
       expect(html).not.toContain("Onboard");
       expect(html).not.toContain("Door PIN");
+      expect(html).not.toContain(testDoorPin);
     }
   );
 

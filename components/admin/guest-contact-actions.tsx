@@ -26,7 +26,9 @@ export function GuestContactActions({
     );
   }
 
-  const messages = status === "CONFIRMED" ? buildGuestMessages(guestName, listing) : null;
+  const messages = status === "CONFIRMED"
+    ? buildGuestMessages(guestName, listing, process.env.GUEST_ONBOARDING_DOOR_PIN)
+    : null;
   const actionClass =
     "inline-flex min-h-9 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition hover:brightness-110";
 
@@ -37,15 +39,21 @@ export function GuestContactActions({
       </a>
       {messages && (
         <>
-          <a
-            href={guestWhatsAppHref(phone, messages.onboard) ?? undefined}
-            target="_blank"
-            rel="noreferrer"
-            className={`${actionClass} bg-green-600 text-white`}
-            title="Open the guest's welcome message in WhatsApp"
-          >
-            <MessageCircle className="h-3.5 w-3.5" /> Onboard
-          </a>
+          {messages.onboard ? (
+            <a
+              href={guestWhatsAppHref(phone, messages.onboard) ?? undefined}
+              target="_blank"
+              rel="noreferrer"
+              className={`${actionClass} bg-green-600 text-white`}
+              title="Open the guest's flat, Wi-Fi and check-in details in WhatsApp"
+            >
+              <MessageCircle className="h-3.5 w-3.5" /> Onboard
+            </a>
+          ) : (
+            <p role="status" className="text-xs text-muted-foreground">
+              Onboard unavailable: configure the flat, tower, Wi-Fi password and onboarding door PIN.
+            </p>
+          )}
           <a
             href={guestWhatsAppHref(phone, messages.checkout) ?? undefined}
             target="_blank"
