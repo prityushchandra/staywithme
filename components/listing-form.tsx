@@ -16,6 +16,7 @@ import {
   MAX_LISTING_FAQS, FAQ_QUESTION_MAX, FAQ_ANSWER_MAX, type ListingFaq,
 } from "@/lib/validation";
 import { cn } from "@/lib/utils";
+import { computeStayPricing, getMonthlyStayOffer, formatINR } from "@/lib/pricing";
 
 const ROOM_TYPES = [
   { value: "ENTIRE", label: "Entire place", hint: "Guests have the whole place to themselves" },
@@ -82,6 +83,7 @@ export function ListingForm({
   policies,
   suggestedMinPaise,
   suggestedMaxPaise,
+  platformFeePercent,
   initial,
   listingId,
 }: {
@@ -90,6 +92,7 @@ export function ListingForm({
   policies: Policy[];
   suggestedMinPaise: number;
   suggestedMaxPaise: number;
+  platformFeePercent: number;
   initial?: ListingFormInitial;
   listingId?: string;
 }) {
@@ -224,6 +227,22 @@ export function ListingForm({
       error: false,
     };
   })();
+
+  const monthlyPreview = Number.isSafeInteger(form.monthlyPriceRupees) &&
+    form.monthlyPriceRupees > 0 && form.basePriceRupees > 0 && !form.monthlyStayDiscountRupees
+    ? getMonthlyStayOffer(
+        { basePrice: form.basePriceRupees * 100, monthlyPrice: form.monthlyPriceRupees * 100 },
+        { platformFeePercent }
+      )
+    : null;
+  const exampleNights = Math.max(44, form.minimumNights || 0);
+  const longerStayPreview = monthlyPreview
+    ? computeStayPricing(
+        { basePrice: form.basePriceRupees * 100, monthlyPrice: form.monthlyPriceRupees * 100 },
+        exampleNights,
+        { platformFeePercent }
+      )
+    : null;
 
   function toggleAmenity(key: string) {
     setAmenityKeys((keys) =>
@@ -736,29 +755,12 @@ export function ListingForm({
           suggestedMaxPaise={suggestedMaxPaise}
         />
 
-        <div className="space-y-1">
-          <Label htmlFor="monthlyPrice">Monthly price (₹) — optional</Label>
-          <Input
-            id="monthlyPrice"
-            type="number"
-            min={0}
-            value={form.monthlyPriceRupees || ""}
-            onChange={(e) => set("monthlyPriceRupees", Number(e.target.value) || 0)}
-            placeholder="45000"
-          />
-          <p className="text-xs text-muted-foreground">
-            For long stays. When set, bookings of 30 nights or more are charged at
-            this monthly rate (pro-rated per night) instead of the nightly price.
-            Leave blank if you don&apos;t offer monthly stays.
-          </p>
-        </div>
-
         <div className="space-y-4 rounded-2xl border border-brand/20 bg-brand/5 p-4 sm:p-5">
           <div>
-            <h3 className="font-semibold">Minimum stay & monthly stays discount</h3>
+            <h3 className="font-semibold">Minimum stay & monthly pricing</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              Set a minimum stay and an optional fixed discount. Guests see these
-              terms on the listing card and before choosing dates.
+              Enter your price for 30 nights. We calculate the monthly stays
+              discount against your base nightly price and prorate longer stays.
             </p>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -784,30 +786,67 @@ export function ListingForm({
               />
               <p id="minimumNightsHelp" className="text-xs text-muted-foreground">
                 Guests must book at least this many nights. Leave blank for no
-                minimum; clearing it also removes the monthly stays discount.
+                minimum. Monthly pricing applies to stays of 30 nights or more.
               </p>
             </div>
             <div className="space-y-1">
-              <Label htmlFor="monthlyStayDiscount">Monthly stays discount (₹) — optional</Label>
+              <Label htmlFor="monthlyPrice">Amount for 30 nights (₹) — optional</Label>
               <Input
-                id="monthlyStayDiscount"
+                id="monthlyPrice"
                 type="number"
                 min={0}
-                max={10_000_000}
+                max={100_000_000}
                 step={1}
-                value={form.monthlyStayDiscountRupees || ""}
-                onChange={(e) => set("monthlyStayDiscountRupees", Number(e.target.value) || 0)}
-                disabled={!form.minimumNights}
-                placeholder="5000"
-                aria-describedby="monthlyStayDiscountHelp"
+                value={form.monthlyPriceRupees || ""}
+                onChange={(e) => {
+                  const monthlyPriceRupees = Number(e.target.value) || 0;
+                  setForm((current) => ({
+                    ...current,
+                    monthlyPriceRupees,
+                    monthlyStayDiscountRupees: monthlyPriceRupees > 0 ? 0 : current.monthlyStayDiscountRupees,
+                  }));
+                }}
+                placeholder="30000"
+                aria-describedby="monthlyPriceHelp"
               />
-              <p id="monthlyStayDiscountHelp" className="text-xs text-muted-foreground">
-                Deducted once from the total, including fees, after existing sale
-                or monthly pricing. Applies from the minimum nights onward, not
-                once per month. Leave blank for no extra discount.
+              <p id="monthlyPriceHelp" className="text-xs text-muted-foreground">
+                Before Platform Fee. For 44 nights: this amount ÷ 30 × 44.
+                Replaces nightly sale pricing for monthly stays; the calculated
+                savings are not deducted a second time. Leave blank for nightly pricing.
               </p>
             </div>
           </div>
+          {monthlyPreview && longerStayPreview && (
+            <div aria-live="polite" className="space-y-2 rounded-xl border border-brand/15 bg-background/70 p-3 text-sm">
+              <p className="font-semibold">Guest price preview</p>
+              <p>
+                30-night rate:{" "}
+                {monthlyPreview.savings > 0 && <span className="mr-2 text-muted-foreground line-through">{formatINR(monthlyPreview.regularTotal)}</span>}
+                <strong className="text-brand-dark">{formatINR(monthlyPreview.total)}</strong>
+              </p>
+              {monthlyPreview.savings > 0 ? (
+                <p className="text-xs font-medium text-green-700">
+                  Save {formatINR(monthlyPreview.savings)}{monthlyPreview.savingsPercent > 0 ? ` (${monthlyPreview.savingsPercent}% off)` : ""} against the base nightly price.
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">This rate is not lower than the base nightly total, so no savings will be advertised.</p>
+              )}
+              <p>
+                {exampleNights} nights:{" "}
+                {longerStayPreview.savings > 0 && <span className="mr-2 text-muted-foreground line-through">{formatINR(longerStayPreview.regularTotal)}</span>}
+                <strong className="text-brand-dark">{formatINR(longerStayPreview.total)}</strong>
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Both prices include the {platformFeePercent}% Platform Fee. Extra nights use the same prorated rate.
+              </p>
+            </div>
+          )}
+          {form.monthlyStayDiscountRupees > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Existing fixed discount: {formatINR(form.monthlyStayDiscountRupees * 100)}.
+              It stays in effect until you enter a 30-night amount above, which replaces it.
+            </p>
+          )}
         </div>
       </section>
 

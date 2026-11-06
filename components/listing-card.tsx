@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Star } from "lucide-react";
-import { computePricing, computeStayPricing, formatINR, meetsMinimumStay, nightlyPrice, strikePrice } from "@/lib/pricing";
+import { computePricing, computeStayPricing, getMonthlyStayOffer, formatINR, meetsMinimumStay, nightlyPrice, strikePrice } from "@/lib/pricing";
 import { SmartImage } from "@/components/smart-image";
 import { WishlistButton } from "@/components/wishlist-button";
 import { useSearchDates } from "@/components/search-dates-context";
@@ -11,7 +11,7 @@ import { HomepageListingToggle } from "@/components/admin/homepage-listing-contr
 import { StayTerms } from "@/components/stay-terms";
 
 // Listing card. Shows only the cover photo (swiping through all photos happens
-// on the listing detail page). Price is the guest-facing TOTAL per night.
+// on the listing detail page). All displayed prices include the Platform Fee.
 export function ListingCard({
   listing,
   platformFeePercent,
@@ -43,11 +43,12 @@ export function ListingCard({
   const stayPricing = meetsMinimumStay(nights, listing.minimumNights)
     ? computeStayPricing(listing, nights, { platformFeePercent })
     : null;
-  const monthlyOffer = !!listing.minimumNights && !!listing.monthlyStayDiscount;
-  const displayedTotal = stayPricing?.total ?? total;
+  const monthlyOffer = getMonthlyStayOffer(listing, { platformFeePercent });
+  const hasMonthlyDiscount = !!monthlyOffer?.savings || (!!listing.minimumNights && !!listing.monthlyStayDiscount);
+  const displayedTotal = stayPricing?.total ?? monthlyOffer?.total ?? total;
   const displayedStrike = stayPricing
-    ? (stayPricing.monthlyStayDiscount > 0 ? stayPricing.totalBeforeDiscount : null)
-    : strikeTotal;
+    ? (stayPricing.savings > 0 ? stayPricing.regularTotal : null)
+    : monthlyOffer ? (monthlyOffer.savings > 0 ? monthlyOffer.regularTotal : null) : strikeTotal;
   const href = `/listings/${listing.id}${
     searchDates?.query ? `?${searchDates.query}` : ""
   }`;
@@ -70,11 +71,11 @@ export function ListingCard({
             </div>
           )}
         </Link>
-        {monthlyOffer ? (
+        {hasMonthlyDiscount ? (
           <div className="pointer-events-none absolute left-2 top-2 z-10 rounded-full bg-brand-dark px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm">
-            Monthly stays discount
+            {monthlyOffer?.savingsPercent ? `${monthlyOffer.savingsPercent}% off monthly stays` : "Monthly stays discount"}
           </div>
-        ) : percentOff > 0 ? (
+        ) : !monthlyOffer && percentOff > 0 ? (
           <div className="pointer-events-none absolute left-2 top-2 z-10">
             <span className="discount-badge inline-flex items-center rounded-full bg-rose-600 px-2 py-0.5 text-[11px] font-semibold text-white shadow-md shadow-rose-600/30">
               {percentOff}% off
@@ -98,9 +99,9 @@ export function ListingCard({
             {rating && rating.count > 0 ? rating.average : "New"}
           </span>
         </div>
-        {listing.minimumNights ? (
+        {listing.minimumNights || monthlyOffer ? (
           <div className="my-2">
-            <StayTerms minimumNights={listing.minimumNights} monthlyStayDiscount={listing.monthlyStayDiscount} compact />
+            <StayTerms minimumNights={listing.minimumNights} monthlyStayDiscount={listing.monthlyStayDiscount} monthlyOffer={monthlyOffer} compact />
           </div>
         ) : null}
         <p className="mt-auto pt-0.5 text-sm">
@@ -112,7 +113,7 @@ export function ListingCard({
           <span
             className={
               displayedStrike
-                ? monthlyOffer
+                ? monthlyOffer || hasMonthlyDiscount
                   ? "font-semibold text-brand-dark underline"
                   : "discount-price font-semibold text-rose-600 underline"
                 : "font-semibold underline"
@@ -122,7 +123,7 @@ export function ListingCard({
           </span>
           <span className="text-muted-foreground">
             {stayPricing ? ` total for ${nights} night${nights === 1 ? "" : "s"}`
-              : listing.minimumNights ? " / night" : " for 1 night"}
+              : monthlyOffer ? " / 30 nights" : listing.minimumNights ? " / night" : " for 1 night"}
           </span>
         </p>
       </Link>

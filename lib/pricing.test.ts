@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   computePricing,
   computeStayPricing,
+  getMonthlyStayOffer,
   meetsMinimumStay,
   formatINR,
   getPriceInsight,
@@ -91,6 +92,51 @@ describe("computePricing", () => {
     expect(r.base).toBe(0);
     expect(r.platformFee).toBe(0);
     expect(r.total).toBe(0);
+  });
+});
+
+describe("prorated monthly pricing and savings", () => {
+  const listing = {
+    basePrice: 200000, discountedPrice: 150000, monthlyPrice: 3000000, minimumNights: 30,
+  };
+
+  it.each([
+    [30, 3000000, 3300000, 6600000],
+    [44, 4400000, 4840000, 9680000],
+    [60, 6000000, 6600000, 13200000],
+  ])("prorates %i nights and compares against the base nightly price, not the sale price", (nights, base, total, regularTotal) => {
+    expect(computeStayPricing(listing, nights, settings)).toMatchObject({
+      base, total, regularTotal, monthly: true, savings: regularTotal - total,
+      savingsPercent: 50, monthlyStayDiscount: 0,
+    });
+  });
+
+  it("rounds only the complete prorated base, not the daily rate or each extra night", () => {
+    expect(computeStayPricing({ ...listing, monthlyPrice: 3000100 }, 44, settings)).toMatchObject({
+      base: 4400147, platformFee: 440000, total: 4840147,
+    });
+  });
+
+  it("keeps nightly sale pricing below 30 nights when the listing permits shorter stays", () => {
+    expect(computeStayPricing({ ...listing, minimumNights: null }, 29, settings)).toMatchObject({
+      monthly: false, total: 4785000, regularTotal: 6380000, savingsPercent: 25,
+    });
+  });
+
+  it("advertises the actual 30-night saving without requiring a separate minimum or fixed discount", () => {
+    expect(getMonthlyStayOffer(listing, settings)).toEqual({
+      total: 3300000, regularTotal: 6600000, savings: 3300000, savingsPercent: 50,
+    });
+    expect(getMonthlyStayOffer({ ...listing, monthlyPrice: null }, settings)).toBeNull();
+  });
+
+  it.each([6000000, 7000000])("does not invent savings when the monthly price %i is no cheaper", (monthlyPrice) => {
+    expect(getMonthlyStayOffer({ ...listing, monthlyPrice }, settings)).toMatchObject({ savings: 0, savingsPercent: 0 });
+    expect(computeStayPricing({ ...listing, monthlyPrice }, 44, settings)).toMatchObject({ savings: 0, savingsPercent: 0 });
+  });
+
+  it("does not round a positive monthly price into an advertised 100% discount", () => {
+    expect(getMonthlyStayOffer({ ...listing, monthlyPrice: 100 }, settings)?.savingsPercent).toBe(99);
   });
 });
 

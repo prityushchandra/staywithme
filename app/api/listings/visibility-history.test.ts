@@ -100,6 +100,15 @@ afterEach(() => {
 });
 
 describe("listing minimum stay persistence", () => {
+  it("replaces a legacy fixed offer with the entered 30-night amount without deducting it twice", async () => {
+    stored.minimumNights = 30;
+    stored.monthlyStayDiscount = 500000;
+    expect((await PATCH(request("PATCH", { monthlyPriceRupees: 30000, monthlyStayDiscountRupees: 0 }), {
+      params: Promise.resolve({ id }),
+    })).status).toBe(200);
+    expect(stored).toMatchObject({ minimumNights: 30, monthlyPrice: 3000000, monthlyStayDiscount: null });
+  });
+
   it("stores the configured minimum and converts the one-time offer to paise on create and edit", async () => {
     const terms = { minimumNights: 30, monthlyStayDiscountRupees: 5000 };
     expect((await POST(request("POST", terms))).status).toBe(201);

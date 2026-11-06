@@ -54,6 +54,21 @@ describe("online minimum stay and monthly offer", () => {
   const checkIn = new Date("2027-03-01T00:00:00Z");
   const checkout = (nights: number) => new Date(checkIn.getTime() + nights * 86_400_000);
 
+  it("persists and charges the prorated 44-night total without subtracting the advertised saving again", async () => {
+    mocks.settings.mockResolvedValue({ platformFeePercent: 10 });
+    mocks.db.listing.findUnique.mockResolvedValue({ ...listing, monthlyStayDiscount: null });
+    expect(await startOnlineBooking({
+      listingId: "flat", guestId: "owner", checkIn, checkOut: checkout(44), guests: 2,
+    })).toMatchObject({ ok: true, total: 4840000 });
+    expect(mocks.db.booking.update.mock.calls[0][0].data.totalAmount).toBe(4840000);
+    mocks.db.booking.findUnique.mockResolvedValue({
+      ...booking, checkIn, checkOut: checkout(44), idDocs: [guest(0, [scan("first")]), guest(1, [scan("second")])],
+    });
+    mocks.createOrder.mockImplementation(async (amount) => ({ id: "mock-order-only", amount }));
+    expect(await createBookingOrder(booking.id, "owner")).toMatchObject({ ok: true, amount: 4840000 });
+    expect(mocks.createOrder.mock.calls[0][0]).toBe(4840000);
+  });
+
   it("rejects a short direct request before creating or reusing a draft", async () => {
     mocks.db.listing.findUnique.mockResolvedValue(listing);
     expect(await startOnlineBooking({

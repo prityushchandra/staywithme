@@ -13,6 +13,7 @@ import {
 } from "@/lib/dates";
 import { useOverlayHistory } from "@/lib/use-overlay-history";
 import { StayTerms } from "@/components/stay-terms";
+import type { MonthlyStayOffer } from "@/lib/pricing";
 
 // Airbnb-style "When" range picker: a single trigger that opens a calendar.
 // Click a start date, then an end date; the range highlights and the picker
@@ -84,6 +85,7 @@ export function DateRangePicker({
   onOpenChange,
   minimumNights,
   monthlyStayDiscount,
+  monthlyOffer,
 }: {
   checkIn: string;
   checkOut: string;
@@ -108,6 +110,7 @@ export function DateRangePicker({
   onOpenChange?: (open: boolean) => void;
   minimumNights?: number | null;
   monthlyStayDiscount?: number | null;
+  monthlyOffer?: MonthlyStayOffer | null;
 }) {
   const [openState, setOpenState] = useState(false);
   const controlled = openProp !== undefined;
@@ -422,9 +425,9 @@ export function DateRangePicker({
               </button>
             </div>
 
-            {minimumNights ? (
+            {minimumNights || monthlyOffer ? (
               <div className="mb-4">
-                <StayTerms minimumNights={minimumNights} monthlyStayDiscount={monthlyStayDiscount} compact />
+                <StayTerms minimumNights={minimumNights} monthlyStayDiscount={monthlyStayDiscount} monthlyOffer={monthlyOffer} compact />
               </div>
             ) : null}
 

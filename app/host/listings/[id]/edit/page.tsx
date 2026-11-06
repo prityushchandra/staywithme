@@ -68,6 +68,7 @@ export default async function EditListingPage({
           }))}
           suggestedMinPaise={settings.suggestedPriceMin}
           suggestedMaxPaise={settings.suggestedPriceMax}
+          platformFeePercent={settings.platformFeePercent}
           initial={{
             title: listing.title,
             description: listing.description,

@@ -36,6 +36,13 @@ beforeEach(() => {
 });
 
 describe("live stay quote", () => {
+  it("quotes all 44 nights at the entered 30-night rate plus the Platform Fee, with no second discount", async () => {
+    mocks.listing.mockResolvedValue({ ...listing, monthlyStayDiscount: null });
+    expect(await (await quote(44)).json()).toMatchObject({
+      bookable: true, nights: 44, monthlyPrice: 3000000, monthlyStayDiscount: null, total: 4840000,
+    });
+  });
+
   it("returns the current minimum and an explicit refusal, not a total, for short stays", async () => {
     const response = await quote(29);
     expect(response.headers.get("cache-control")).toBe("no-store");

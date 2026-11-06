@@ -53,6 +53,7 @@ export interface ListingPrice {
 
 export interface ListingStayTerms {
   minimumNights?: number | null;
+  /** Legacy fixed offer; preserved until the host replaces it with a 30-night price. */
   monthlyStayDiscount?: number | null;
 }
 
@@ -68,7 +69,7 @@ export function minimumStayMessage(minimumNights: number): string {
   return `Minimum ${minimumNights} night${minimumNights === 1 ? "" : "s"}`;
 }
 
-/** Existing rate and fee first; the fixed offer is deducted once, not per month. */
+/** Prorate the monthly amount, add the fee, then preserve any legacy fixed offer. */
 export function computeStayPricing(
   listing: ListingStayPrice,
   nights: number,
@@ -84,13 +85,39 @@ export function computeStayPricing(
   if (!Number.isSafeInteger(discount) || discount < 0 || (discount > 0 && discount >= pricing.total)) {
     throw new RangeError("The monthly stays discount must be lower than the booking total.");
   }
+  const total = pricing.total - discount;
+  const regularTotal = computePricing(
+    listing.basePrice * Math.max(1, Math.round(nights)),
+    settings
+  ).total;
+  const savings = Math.max(0, regularTotal - total);
   return {
     ...pricing,
     totalBeforeDiscount: pricing.total,
     monthlyStayDiscount: discount,
-    total: pricing.total - discount,
+    total,
+    regularTotal,
+    savings,
+    savingsPercent: savings > 0 ? Math.floor((savings / regularTotal) * 100) : 0,
+    monthly: isMonthlyRate(listing.monthlyPrice, nights),
   };
 }
+
+/** The advertised 30-night rate, compared with 30 nights at the regular base price. */
+export function getMonthlyStayOffer(
+  listing: Pick<ListingStayPrice, "basePrice" | "monthlyPrice">,
+  settings: Pick<PricingSettings, "platformFeePercent">
+) {
+  if (!listing.monthlyPrice || listing.monthlyPrice <= 0) return null;
+  const { total, regularTotal, savings, savingsPercent } = computeStayPricing(
+    { basePrice: listing.basePrice, monthlyPrice: listing.monthlyPrice },
+    MONTHLY_MIN_NIGHTS,
+    settings
+  );
+  return { total, regularTotal, savings, savingsPercent };
+}
+
+export type MonthlyStayOffer = NonNullable<ReturnType<typeof getMonthlyStayOffer>>;
 
 /**
  * The nightly rate a guest is actually charged. EVERY money path — the bill,

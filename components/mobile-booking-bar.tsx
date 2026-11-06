@@ -4,9 +4,8 @@ import { useMemo } from "react";
 import { ReserveButton } from "@/components/reserve-button";
 import { useBooking } from "@/components/booking-context";
 import {
-  computePricing,
   computeStayPricing,
-  isMonthlyRate,
+  getMonthlyStayOffer,
   formatINR,
   nightlyPrice,
   strikePrice,
@@ -67,18 +66,14 @@ export function MobileBookingBar({
 
   const n = nights || 1;
   const meetsMinimum = meetsMinimumStay(nights, minimumNights);
-  const monthly = isMonthlyRate(monthlyPrice, n);
   const pricing = hasDates && meetsMinimum
-    ? computeStayPricing({ basePrice, monthlyPrice, minimumNights, monthlyStayDiscount }, n, { platformFeePercent })
+    ? computeStayPricing({ basePrice: listPrice, discountedPrice, monthlyPrice, minimumNights, monthlyStayDiscount }, n, { platformFeePercent })
     : null;
+  const monthly = pricing?.monthly ?? false;
   const total = pricing?.total ?? 0;
-  const nightlyTotal = computePricing(basePrice * n, { platformFeePercent }).total;
-  // A sale only moves the bill on nightly stays — a monthly stay is priced off
-  // monthlyPrice, so the monthly strike stays the one that's shown there.
-  const saleTotal =
-    !monthly && strike ? computePricing(strike * n, { platformFeePercent }).total : null;
-  const strikeTotal = saleTotal ?? (monthly && nightlyTotal > total ? nightlyTotal
-    : pricing?.monthlyStayDiscount ? pricing.totalBeforeDiscount : null);
+  const strikeTotal = pricing?.savings ? pricing.regularTotal : null;
+  const monthlyOffer = getMonthlyStayOffer({ basePrice: listPrice, monthlyPrice }, { platformFeePercent });
+  const fallbackStrike = monthlyOffer ? (monthlyOffer.savings > 0 ? monthlyOffer.regularTotal : null) : strike;
 
   // Only mount on compact screens: on desktop the booking card owns the Reserve
   // button, and rendering both is what used to put two Reserve buttons on screen.
@@ -105,21 +100,21 @@ export function MobileBookingBar({
                 {nights} night{nights > 1 ? "s" : ""} · {guests} adult
                 {guests > 1 ? "s" : ""}
                 {infants > 0 ? ` · ${infants} infant${infants > 1 ? "s" : ""}` : ""}
-                {pricing?.monthlyStayDiscount ? " · discount included" : monthly ? " · monthly rate" : ""}
+                {monthly && pricing?.savings ? " · monthly discount included" : pricing?.monthlyStayDiscount ? " · discount included" : monthly ? " · monthly rate" : ""}
               </div>
             </>
           ) : (
             <>
               <div className="text-sm font-semibold">
-                {strike ? (
+                {fallbackStrike ? (
                   <span className="mr-1 font-normal text-muted-foreground line-through">
-                    {formatINR(strike)}
+                    {formatINR(fallbackStrike)}
                   </span>
                 ) : null}
                 <span>
-                  {formatINR(basePrice)}
+                  {formatINR(monthlyOffer?.total ?? basePrice)}
                 </span>{" "}
-                <span className="font-normal text-muted-foreground">/ night</span>
+                <span className="font-normal text-muted-foreground">{monthlyOffer ? "/ 30 nights" : "/ night"}</span>
               </div>
               <div className="text-xs text-muted-foreground">
                 {hasDates && !available ? "Dates unavailable"

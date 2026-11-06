@@ -8,9 +8,11 @@ import { ReserveButton } from "@/components/reserve-button";
 import { useBooking, type ReserveCta } from "@/components/booking-context";
 import {
   computeStayPricing,
+  getMonthlyStayOffer,
   formatINR,
   meetsMinimumStay,
   minimumStayMessage,
+  MONTHLY_MIN_NIGHTS,
   nightlyPrice,
   strikePrice,
 } from "@/lib/pricing";
@@ -107,6 +109,7 @@ export function InquiryPanel({
   const monthlyPrice = liveListing ? liveListing.monthlyPrice : monthlyPriceProp;
   const platformFeePercent = liveListing?.platformFeePercent ?? platformFeePercentProp;
   const blockedRanges = liveListing?.blockedRanges ?? blockedRangesProp;
+  const monthlyOffer = getMonthlyStayOffer({ basePrice: listPrice, monthlyPrice }, { platformFeePercent });
 
   // A valid stay needs checkout strictly after check-in (guards reversed/equal
   // dates that can arrive via stale URL params).
@@ -133,13 +136,13 @@ export function InquiryPanel({
   const meetsMinimum = meetsMinimumStay(nights, minimumNights);
   const pricing = hasDates && meetsMinimum
     ? computeStayPricing(
-        { basePrice, monthlyPrice, minimumNights, monthlyStayDiscount },
+        { basePrice: listPrice, discountedPrice, monthlyPrice, minimumNights, monthlyStayDiscount },
         nights,
         { platformFeePercent }
       )
     : null;
   const total = pricing?.total ?? 0;
-  const appliedStayDiscount = pricing?.monthlyStayDiscount ?? 0;
+  const appliedStayDiscount = pricing ? (pricing.monthly ? pricing.savings : pricing.monthlyStayDiscount) : 0;
 
   /** The guests + total block the guest is sent to once a stay is complete. */
   const summaryRef = useRef<HTMLDivElement>(null);
@@ -289,29 +292,26 @@ export function InquiryPanel({
   return (
     <Card className="sticky top-24 rounded-[1.75rem] border-foreground/10 bg-card/95 shadow-[0_12px_48px_-20px_rgba(46,35,25,0.28)]">
       <CardContent className="space-y-5 p-5 sm:p-6">
-        <StayTerms minimumNights={minimumNights} monthlyStayDiscount={monthlyStayDiscount} />
-        <div className="border-b border-foreground/10 pb-5">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">Your stay</p>
-            {strike ? (
-              <span className="rounded-full bg-brand/10 px-2.5 py-1 text-[11px] font-medium text-brand-dark">
-                {Math.round(((strike - basePrice) / strike) * 100)}% off
-              </span>
-            ) : null}
+        <StayTerms minimumNights={minimumNights} monthlyStayDiscount={monthlyStayDiscount} monthlyOffer={monthlyOffer} />
+        {(!monthlyOffer || (!pricing?.monthly && (minimumNights ?? 1) < MONTHLY_MIN_NIGHTS)) && (
+          <div className="border-b border-foreground/10 pb-5">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">{monthlyOffer ? "Short-stay nightly rate" : "Your stay"}</p>
+              {strike ? (
+                <span className="rounded-full bg-brand/10 px-2.5 py-1 text-[11px] font-medium text-brand-dark">
+                  {Math.round(((strike - basePrice) / strike) * 100)}% off
+                </span>
+              ) : null}
+            </div>
+            <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <span className="text-3xl font-semibold tracking-tight">{formatINR(basePrice)}</span>
+              <span className="text-sm text-muted-foreground">/ night</span>
+              {strike ? (
+                <span className="text-sm text-muted-foreground line-through">{formatINR(strike)}</span>
+              ) : null}
+            </div>
           </div>
-          <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-            <span className="text-3xl font-semibold tracking-tight">{formatINR(basePrice)}</span>
-            <span className="text-sm text-muted-foreground">/ night</span>
-            {strike ? (
-              <span className="text-sm text-muted-foreground line-through">{formatINR(strike)}</span>
-            ) : null}
-          </div>
-        </div>
-        {monthlyPrice ? (
-          <p className="-mt-2 text-xs text-muted-foreground">
-            or {formatINR(monthlyPrice)}/month for stays of 30+ nights
-          </p>
-        ) : null}
+        )}
 
         <DateRangePicker
           checkIn={checkIn}
@@ -324,6 +324,7 @@ export function InquiryPanel({
           onOpenChange={setPickerOpen}
           minimumNights={minimumNights}
           monthlyStayDiscount={monthlyStayDiscount}
+          monthlyOffer={monthlyOffer}
         />
 
         <div ref={summaryRef} className="space-y-4">

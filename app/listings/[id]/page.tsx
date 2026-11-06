@@ -26,7 +26,7 @@ import { MobileBookingBar } from "@/components/mobile-booking-bar";
 import { ListingFaqs } from "@/components/listing-faqs";
 import { listingFaqsSchema } from "@/lib/validation";
 import { StayTerms } from "@/components/stay-terms";
-import { minimumStayMessage } from "@/lib/pricing";
+import { getMonthlyStayOffer, minimumStayMessage } from "@/lib/pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -154,6 +154,7 @@ export default async function ListingPage({
       ? `${ratingSummary.average} · ${plural(ratingSummary.count, "review")}`
       : "New";
   const faqs = listingFaqsSchema.parse(listing.faqs);
+  const monthlyOffer = getMonthlyStayOffer(listing, settings);
   const [headline, ...titleDetails] = listing.title.split("|").map((part) => part.trim()).filter(Boolean);
   const stayDetails = [
     { icon: UsersRound, value: listing.maxGuests, label: listing.maxGuests === 1 ? "Guest" : "Guests" },
@@ -226,9 +227,9 @@ export default async function ListingPage({
           )}
           <span className="text-muted-foreground">{ROOM_TYPE_LABEL[listing.roomType]}</span>
         </div>
-        {listing.minimumNights ? (
+        {listing.minimumNights || monthlyOffer ? (
           <div className="mt-5 max-w-xl">
-            <StayTerms minimumNights={listing.minimumNights} monthlyStayDiscount={listing.monthlyStayDiscount} />
+            <StayTerms minimumNights={listing.minimumNights} monthlyStayDiscount={listing.monthlyStayDiscount} monthlyOffer={monthlyOffer} />
           </div>
         ) : null}
       </header>

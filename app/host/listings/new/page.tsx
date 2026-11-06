@@ -46,6 +46,7 @@ export default async function NewListingPage() {
           }))}
           suggestedMinPaise={settings.suggestedPriceMin}
           suggestedMaxPaise={settings.suggestedPriceMax}
+          platformFeePercent={settings.platformFeePercent}
         />
       </div>
     </div>
