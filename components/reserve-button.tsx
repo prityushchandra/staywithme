@@ -17,11 +17,13 @@ import {
 import {
   compareQuote,
   parseFreshQuote,
+  QUOTE_CHECK_FAILED_MESSAGE,
   type FreshQuote,
   type QuoteOutcome,
 } from "@/lib/quote-check";
 import { cn, prefersReducedMotion, scrollBehavior } from "@/lib/utils";
 import { buildWhatsAppLink } from "@/lib/whatsapp";
+import { minimumStayMessage } from "@/lib/pricing";
 
 // The page's ONE Reserve button. The booking card resolves what Reserve should
 // do and publishes it to the booking context; only the active surface (the card
@@ -41,7 +43,7 @@ import { buildWhatsAppLink } from "@/lib/whatsapp";
 
 /** The booking card, which owns the date picker and the price breakdown. */
 const BOOK_SECTION_ID = "book";
-/** Abandon the live re-check after this and let the booking through. */
+/** Bound the re-check; a timeout asks the guest to retry rather than bypass it. */
 const QUOTE_TIMEOUT_MS = 4000;
 /** How long an already-fetched quote stays good enough to act on. */
 const QUOTE_FRESH_MS = 10_000;
@@ -89,7 +91,8 @@ function flashAttention(el: HTMLElement) {
  *  invalidates whatever we fetched last. */
 function quoteKey(cta: ReadyCta) {
   const d = cta.details;
-  return [d.propertyId, d.checkIn, d.checkOut, d.guests, d.infants, cta.quote.total].join(
+  return [d.propertyId, d.checkIn, d.checkOut, d.guests, d.infants, cta.quote.total,
+    cta.quote.minimumNights, cta.quote.monthlyStayDiscount].join(
     "|"
   );
 }
@@ -105,9 +108,8 @@ function tripKey(cta: ReserveCta) {
 /**
  * Ask the server what this stay really costs and whether it's still free.
  * Returns null whenever we couldn't get a trustworthy answer — offline, a
- * timeout, a 5xx, a malformed body. The caller treats null as "carry on": a
- * flaky connection must never cost a reservation, and the host confirms every
- * booking by hand on WhatsApp anyway.
+ * timeout, a 5xx, a malformed body. The caller shows a retry message instead
+ * of sending a potentially invalid stay or an outdated offer to WhatsApp.
  */
 async function fetchFreshQuote(cta: ReadyCta): Promise<FreshQuote | null> {
   const { propertyId, checkIn, checkOut, guests, infants } = cta.details;
@@ -247,7 +249,7 @@ export function ReserveButton({
     const promise = fetchFreshQuote(ready).then((fresh) => {
       result = fresh
         ? { outcome: compareQuote(ready.quote, fresh), fresh }
-        : { outcome: { kind: "proceed" }, fresh: null };
+        : { outcome: { kind: "check-failed", message: QUOTE_CHECK_FAILED_MESSAGE }, fresh: null };
       return result;
     });
 
@@ -314,6 +316,8 @@ export function ReserveButton({
         basePrice: result.fresh.basePrice,
         discountedPrice: result.fresh.discountedPrice,
         monthlyPrice: result.fresh.monthlyPrice,
+        minimumNights: result.fresh.minimumNights,
+        monthlyStayDiscount: result.fresh.monthlyStayDiscount,
         platformFeePercent: result.fresh.platformFeePercent,
         blockedRanges: result.fresh.blockedRanges,
       });
@@ -323,7 +327,7 @@ export function ReserveButton({
     // Dates gone: reopen the picker, which now knows about the nights that
     // were taken. A price change deliberately does nothing else — the new
     // total is on screen and the guest presses Reserve again.
-    if (result.outcome.kind === "unavailable") revealDates();
+    if (result.outcome.kind === "unavailable" || result.outcome.kind === "minimum-stay") revealDates();
   }
 
   function handleReadyClick(event: React.MouseEvent<HTMLElement>, ready: ReadyCta) {
@@ -460,6 +464,19 @@ export function ReserveButton({
         size="lg"
         className={className}
         onClick={() => promptForDates(datePromptMessage("unavailable"))}
+      >
+        {label}
+      </Button>
+    );
+  }
+
+  if (cta.kind === "minimum-stay") {
+    return (
+      <Button
+        variant="brand"
+        size="lg"
+        className={className}
+        onClick={() => promptForDates(`${minimumStayMessage(cta.minimumNights)}. Please choose a longer stay.`)}
       >
         {label}
       </Button>

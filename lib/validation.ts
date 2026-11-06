@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { computeStayBase, MONTHLY_MIN_NIGHTS } from "./pricing";
 
 // A Property ID (Listing.refCode) is the short code a guest quotes over
 // WhatsApp, e.g. "HAXGT". Stored uppercase: the bot looks it up
@@ -173,6 +174,10 @@ export const listingInputSchema = z
   discountedPriceRupees: z.coerce.number().int().min(0).max(10_000_000).default(0),
   // Optional monthly rate (rupees); 0/empty = not offered. Applies to 30+ night stays.
   monthlyPriceRupees: z.coerce.number().int().min(0).max(100_000_000).default(0),
+  minimumNights: z.coerce.number().int("Minimum nights must be a whole number")
+    .min(0).max(365, "Minimum nights cannot exceed 365").default(0),
+  monthlyStayDiscountRupees: z.coerce.number().int("Enter a whole-rupee discount")
+    .min(0).max(10_000_000).default(0),
   cancellationPolicy: z.enum(["FLEXIBLE", "MODERATE", "STRICT"]),
   // Host-set "things to know" details (all optional).
   checkInTime: z.string().trim().max(40).optional(),
@@ -203,6 +208,29 @@ export const listingInputSchema = z
         path: ["discountedPriceRupees"],
         message: "The discounted price must be lower than the base price",
       });
+    }
+    if (v.monthlyStayDiscountRupees > 0) {
+      if (!v.minimumNights) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["minimumNights"],
+          message: "Set minimum booking nights before adding a monthly stays discount",
+        });
+        return;
+      }
+      const rate = v.discountedPriceRupees || v.basePriceRupees;
+      // The monthly tier can be cheaper than the shortest eligible nightly stay.
+      const smallestStay = Math.min(
+        computeStayBase(rate * 100, v.monthlyPriceRupees * 100, v.minimumNights),
+        computeStayBase(rate * 100, v.monthlyPriceRupees * 100, Math.max(v.minimumNights, MONTHLY_MIN_NIGHTS))
+      );
+      if (v.monthlyStayDiscountRupees * 100 >= smallestStay) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["monthlyStayDiscountRupees"],
+          message: "The monthly stays discount must be lower than the shortest eligible stay price before fees, including the monthly rate",
+        });
+      }
     }
   });
 

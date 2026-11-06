@@ -12,6 +12,8 @@ const shown: QuoteSnapshot = {
   basePrice: 200000,
   discountedPrice: null,
   monthlyPrice: null,
+  minimumNights: null,
+  monthlyStayDiscount: null,
   platformFeePercent: 10,
   total: 440000,
 };
@@ -27,6 +29,18 @@ function fresh(overrides: Partial<FreshQuote> = {}): FreshQuote {
 }
 
 describe("compareQuote", () => {
+  it("blocks a previously valid selection when the host increases the minimum", () => {
+    expect(compareQuote(shown, fresh({ minimumNights: 30, total: null }))).toEqual({
+      kind: "minimum-stay", message: "Minimum 30 nights. Please choose a longer stay.",
+    });
+  });
+
+  it("refreshes changed or removed stay terms even if the total happens to match", () => {
+    expect(compareQuote(shown, fresh({ minimumNights: 2 })).kind).toBe("price-changed");
+    expect(compareQuote(shown, fresh({ monthlyStayDiscount: 5000 })).kind).toBe("price-changed");
+    expect(compareQuote({ ...shown, minimumNights: 2, monthlyStayDiscount: 5000 }, fresh()).kind).toBe("price-changed");
+  });
+
   it("proceeds when nothing moved since the page was rendered", () => {
     expect(compareQuote(shown, fresh())).toEqual({ kind: "proceed" });
   });
@@ -89,6 +103,14 @@ describe("compareQuote", () => {
 });
 
 describe("parseFreshQuote", () => {
+  it("accepts an explicit unpriced minimum-stay response, but not a missing price for an eligible stay", () => {
+    expect(parseFreshQuote(fresh({ minimumNights: 30, monthlyStayDiscount: 50000, total: null })))
+      .toMatchObject({ minimumNights: 30, monthlyStayDiscount: 50000, total: null });
+    expect(parseFreshQuote(fresh({ total: null }))).toBeNull();
+    expect(parseFreshQuote({ ...fresh(), minimumNights: "30" })).toBeNull();
+    expect(parseFreshQuote({ ...fresh(), monthlyStayDiscount: -100 })).toBeNull();
+  });
+
   it("reads a well-formed response", () => {
     const parsed = parseFreshQuote({
       available: true,
@@ -126,7 +148,7 @@ describe("parseFreshQuote", () => {
     ["a missing availability flag", { total: 1, basePrice: 1, platformFeePercent: 10, nights: 1 }],
     ["a non-numeric total", { available: true, total: "1", basePrice: 1, platformFeePercent: 10, nights: 1 }],
     ["an error payload", { error: "Listing not found" }],
-  ])("rejects %s so the booking falls through", (_label, payload) => {
+  ])("rejects %s so the guest is asked to retry", (_label, payload) => {
     expect(parseFreshQuote(payload)).toBeNull();
   });
 });

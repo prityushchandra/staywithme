@@ -67,4 +67,11 @@ describe("buildListingWhere", () => {
     const w = buildListingWhere({ checkIn: "2026-07-10" }, 10);
     expect(w.AND).toBeUndefined();
   });
+
+  it("only returns stays whose minimum is met by the selected dates", () => {
+    const w = buildListingWhere({ destination: "goa", checkIn: "2027-03-01", checkOut: "2027-03-31" }, 10);
+    expect(w.AND).toContainEqual({ OR: [{ minimumNights: null }, { minimumNights: { lte: 30 } }] });
+    expect(w.OR).toHaveLength(3);
+    expect(buildListingWhere({}, 10).AND).toBeUndefined();
+  });
 });

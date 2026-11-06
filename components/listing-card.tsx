@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { Star } from "lucide-react";
-import { computePricing, formatINR, nightlyPrice, strikePrice } from "@/lib/pricing";
+import { computePricing, computeStayPricing, formatINR, meetsMinimumStay, nightlyPrice, strikePrice } from "@/lib/pricing";
 import { SmartImage } from "@/components/smart-image";
 import { WishlistButton } from "@/components/wishlist-button";
 import { useSearchDates } from "@/components/search-dates-context";
 import type { ListingCardData } from "@/lib/data-access";
 import { HomepageListingToggle } from "@/components/admin/homepage-listing-controls";
+import { StayTerms } from "@/components/stay-terms";
 
 // Listing card. Shows only the cover photo (swiping through all photos happens
 // on the listing detail page). Price is the guest-facing TOTAL per night.
@@ -36,6 +37,17 @@ export function ListingCard({
 
   // Carry the dates/guests chosen in the search bar into the listing link.
   const searchDates = useSearchDates();
+  const nights = searchDates?.checkIn && searchDates.checkOut
+    ? Math.round((Date.parse(searchDates.checkOut) - Date.parse(searchDates.checkIn)) / 86_400_000)
+    : 0;
+  const stayPricing = meetsMinimumStay(nights, listing.minimumNights)
+    ? computeStayPricing(listing, nights, { platformFeePercent })
+    : null;
+  const monthlyOffer = !!listing.minimumNights && !!listing.monthlyStayDiscount;
+  const displayedTotal = stayPricing?.total ?? total;
+  const displayedStrike = stayPricing
+    ? (stayPricing.monthlyStayDiscount > 0 ? stayPricing.totalBeforeDiscount : null)
+    : strikeTotal;
   const href = `/listings/${listing.id}${
     searchDates?.query ? `?${searchDates.query}` : ""
   }`;
@@ -58,7 +70,11 @@ export function ListingCard({
             </div>
           )}
         </Link>
-        {percentOff > 0 ? (
+        {monthlyOffer ? (
+          <div className="pointer-events-none absolute left-2 top-2 z-10 rounded-full bg-brand-dark px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm">
+            Monthly stays discount
+          </div>
+        ) : percentOff > 0 ? (
           <div className="pointer-events-none absolute left-2 top-2 z-10">
             <span className="discount-badge inline-flex items-center rounded-full bg-rose-600 px-2 py-0.5 text-[11px] font-semibold text-white shadow-md shadow-rose-600/30">
               {percentOff}% off
@@ -82,22 +98,32 @@ export function ListingCard({
             {rating && rating.count > 0 ? rating.average : "New"}
           </span>
         </div>
+        {listing.minimumNights ? (
+          <div className="my-2">
+            <StayTerms minimumNights={listing.minimumNights} monthlyStayDiscount={listing.monthlyStayDiscount} compact />
+          </div>
+        ) : null}
         <p className="mt-auto pt-0.5 text-sm">
-          {strikeTotal ? (
+          {displayedStrike ? (
             <span className="mr-1 text-muted-foreground line-through">
-              {formatINR(strikeTotal)}
+              {formatINR(displayedStrike)}
             </span>
           ) : null}
           <span
             className={
-              strikeTotal
-                ? "discount-price font-semibold text-rose-600 underline"
+              displayedStrike
+                ? monthlyOffer
+                  ? "font-semibold text-brand-dark underline"
+                  : "discount-price font-semibold text-rose-600 underline"
                 : "font-semibold underline"
             }
           >
-            {formatINR(total)}
+            {formatINR(displayedTotal)}
           </span>
-          <span className="text-muted-foreground"> for 1 night</span>
+          <span className="text-muted-foreground">
+            {stayPricing ? ` total for ${nights} night${nights === 1 ? "" : "s"}`
+              : listing.minimumNights ? " / night" : " for 1 night"}
+          </span>
         </p>
       </Link>
       {showVisibilityToggle && <HomepageListingToggle listingId={listing.id} />}

@@ -64,6 +64,8 @@ export interface ListingFormInitial {
   basePriceRupees: number;
   discountedPriceRupees?: number;
   monthlyPriceRupees?: number;
+  minimumNights?: number;
+  monthlyStayDiscountRupees?: number;
   cancellationPolicy: string;
   checkInTime?: string;
   checkOutTime?: string;
@@ -123,6 +125,8 @@ export function ListingForm({
     basePriceRupees: initial?.basePriceRupees ?? 0,
     discountedPriceRupees: initial?.discountedPriceRupees ?? 0,
     monthlyPriceRupees: initial?.monthlyPriceRupees ?? 0,
+    minimumNights: initial?.minimumNights ?? 0,
+    monthlyStayDiscountRupees: initial?.monthlyStayDiscountRupees ?? 0,
     cancellationPolicy: initial?.cancellationPolicy ?? policies[0]?.policy ?? "FLEXIBLE",
     checkInTime: initial?.checkInTime ?? "",
     checkOutTime: initial?.checkOutTime ?? "",
@@ -747,6 +751,63 @@ export function ListingForm({
             this monthly rate (pro-rated per night) instead of the nightly price.
             Leave blank if you don&apos;t offer monthly stays.
           </p>
+        </div>
+
+        <div className="space-y-4 rounded-2xl border border-brand/20 bg-brand/5 p-4 sm:p-5">
+          <div>
+            <h3 className="font-semibold">Minimum stay & monthly stays discount</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Set a minimum stay and an optional fixed discount. Guests see these
+              terms on the listing card and before choosing dates.
+            </p>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label htmlFor="minimumNights">Minimum booking nights — optional</Label>
+              <Input
+                id="minimumNights"
+                type="number"
+                min={1}
+                max={365}
+                step={1}
+                value={form.minimumNights || ""}
+                onChange={(e) => {
+                  const minimumNights = Number(e.target.value) || 0;
+                  setForm((current) => ({
+                    ...current,
+                    minimumNights,
+                    monthlyStayDiscountRupees: minimumNights ? current.monthlyStayDiscountRupees : 0,
+                  }));
+                }}
+                placeholder="30"
+                aria-describedby="minimumNightsHelp"
+              />
+              <p id="minimumNightsHelp" className="text-xs text-muted-foreground">
+                Guests must book at least this many nights. Leave blank for no
+                minimum; clearing it also removes the monthly stays discount.
+              </p>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="monthlyStayDiscount">Monthly stays discount (₹) — optional</Label>
+              <Input
+                id="monthlyStayDiscount"
+                type="number"
+                min={0}
+                max={10_000_000}
+                step={1}
+                value={form.monthlyStayDiscountRupees || ""}
+                onChange={(e) => set("monthlyStayDiscountRupees", Number(e.target.value) || 0)}
+                disabled={!form.minimumNights}
+                placeholder="5000"
+                aria-describedby="monthlyStayDiscountHelp"
+              />
+              <p id="monthlyStayDiscountHelp" className="text-xs text-muted-foreground">
+                Deducted once from the total, including fees, after existing sale
+                or monthly pricing. Applies from the minimum nights onward, not
+                once per month. Leave blank for no extra discount.
+              </p>
+            </div>
+          </div>
         </div>
       </section>
 

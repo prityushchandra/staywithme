@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeBookingMoney, computeBookingMoneyFromTotal } from "./payouts";
+import { computeBookingMoney, computeBookingMoneyFromTotal, computeRefund } from "./payouts";
 
 describe("computeBookingMoney (from the listing's base price)", () => {
   it("adds the platform fee on top of base × nights", () => {
@@ -9,6 +9,25 @@ describe("computeBookingMoney (from the listing's base price)", () => {
     expect(m.platformFee).toBe(75000);
     expect(m.guestTotal).toBe(825000);
     expect(m.hostPayout).toBe(750000);
+  });
+
+  it("uses the discounted total for both the guest and the exact host/fee split", () => {
+    const money = computeBookingMoney(200000, 30, 10, 3000000, {
+      minimumNights: 30, monthlyStayDiscount: 50000,
+    });
+    expect(money.guestTotal).toBe(3250000);
+    expect(money.baseTotal + money.platformFee).toBe(money.guestTotal);
+    expect(money.hostPayout).toBe(money.baseTotal);
+  });
+
+  it("keeps a booked discount in refunds even after listing prices change", () => {
+    const refund = computeRefund(
+      "FLEXIBLE", 900000, 30, 10, 3250000,
+      new Date("2027-03-01"), new Date("2027-02-01"), 9000000, 3250000
+    );
+    const money = computeBookingMoneyFromTotal(3250000, 30, 10);
+    expect(refund.guestRefund).toBe(money.baseTotal);
+    expect(refund.platformFee).toBe(money.platformFee);
   });
 });
 

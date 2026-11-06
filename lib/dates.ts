@@ -2,6 +2,8 @@
 // in client components. Ranges are half-open: [start, end). A stay occupies
 // nights start..end-1, so a checkout matching another stay's check-in is fine.
 
+import { meetsMinimumStay, minimumStayMessage } from "./pricing";
+
 export interface DateRange {
   startDate: Date;
   endDate: Date;
@@ -81,7 +83,8 @@ export interface RangeSelection {
 export function nextRangeSelection(
   current: RangeSelection,
   day: Date,
-  blocks: DateRange[]
+  blocks: DateRange[],
+  minimumNights?: number | null
 ): RangeSelection | null {
   const { checkIn, checkOut } = current;
   const startingNew = !checkIn || !!checkOut;
@@ -95,6 +98,8 @@ export function nextRangeSelection(
     return { checkIn: day, checkOut: null };
   }
   if (isSelectableCheckout(checkIn!, day, blocks)) {
+    const nights = Math.round((day.getTime() - checkIn!.getTime()) / 86_400_000);
+    if (!meetsMinimumStay(nights, minimumNights)) return null;
     return { checkIn, checkOut: day };
   }
   // Range would cross an occupied night → treat as a fresh check-in if possible.
@@ -119,6 +124,7 @@ export type DayAvailabilityKind =
   | "selectable"
   | "checkout-only"
   | "restart"
+  | "minimum-stay"
   | "blocked"
   | "past";
 
@@ -136,6 +142,7 @@ export interface DayAvailability {
   blockedNight: boolean;
   /** The day is before `today` (ignored when `allowPast`). */
   past: boolean;
+  minimumNights?: number;
 }
 
 export interface DayAvailabilityOptions {
@@ -151,6 +158,7 @@ export interface DayAvailabilityOptions {
   allowBlocked?: boolean;
   /** Admin override: past dates stay selectable (recording a stay that happened). */
   allowPast?: boolean;
+  minimumNights?: number | null;
 }
 
 /**
@@ -174,6 +182,7 @@ export function getDayAvailability(
     today = null,
     allowBlocked = false,
     allowPast = false,
+    minimumNights = null,
   } = options;
 
   const t = day.getTime();
@@ -216,6 +225,13 @@ export function getDayAvailability(
     // Re-clicking the pending check-in clears it, so there is always a way out.
     if (clearsSelection) return { ...selectable, clearsSelection: true };
     if (t > pendingCheckIn.getTime() && isSelectableCheckout(pendingCheckIn, day, blocks)) {
+      const nights = Math.round((t - pendingCheckIn.getTime()) / 86_400_000);
+      if (!meetsMinimumStay(nights, minimumNights)) {
+        return {
+          ...base, kind: "minimum-stay", disabled: true, checkoutOnly: false,
+          minimumNights: minimumNights ?? 1,
+        };
+      }
       return blockedNight
         ? { ...base, kind: "checkout-only", disabled: false, checkoutOnly: true }
         : selectable;
@@ -234,6 +250,7 @@ export function getDayAvailability(
  */
 export function dayHint(status: DayAvailability, isEndpoint = false): string | undefined {
   if (isEndpoint) return undefined;
+  if (status.kind === "minimum-stay") return minimumStayMessage(status.minimumNights ?? 1);
   if (status.checkoutOnly) return "Checkout only — the next guest checks in";
   if (status.restartsRange) return "Starts a new trip";
   if (status.kind === "blocked") return "Booked";

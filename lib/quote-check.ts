@@ -5,6 +5,8 @@
 //
 // Kept DOM- and React-free so the decision can be unit-tested directly.
 
+import { meetsMinimumStay, minimumStayMessage } from "./pricing";
+
 /** The price figures the booking card is showing right now. */
 export type QuoteSnapshot = {
   /** Nightly LIST rate, minor units (paise) — before any discount. */
@@ -13,13 +15,17 @@ export type QuoteSnapshot = {
   discountedPrice: number | null;
   /** Long-stay monthly rate, minor units, or null when the host set none. */
   monthlyPrice: number | null;
+  minimumNights: number | null;
+  monthlyStayDiscount: number | null;
   platformFeePercent: number;
   /** Grand total for the selected stay, minor units. */
   total: number;
 };
 
 /** The authoritative answer from POST /api/listings/[id]/quote. */
-export type FreshQuote = QuoteSnapshot & {
+export type FreshQuote = Omit<QuoteSnapshot, "total"> & {
+  /** No price is offered for a stay below the current minimum. */
+  total: number | null;
   available: boolean;
   nights: number;
   /** Current blocked/booked ranges, so the calendar can repaint immediately. */
@@ -29,11 +35,15 @@ export type FreshQuote = QuoteSnapshot & {
 export type QuoteOutcome =
   | { kind: "proceed" }
   | { kind: "unavailable"; message: string }
+  | { kind: "minimum-stay"; message: string }
+  | { kind: "check-failed"; message: string }
   | { kind: "price-changed"; message: string };
 
 export const DATES_TAKEN_MESSAGE =
   "Those dates were just booked. Please choose new dates.";
 export const PRICE_CHANGED_MESSAGE = "Prices have been updated.";
+export const QUOTE_CHECK_FAILED_MESSAGE =
+  "We couldn't check the latest booking terms. Please try again before reserving.";
 
 /**
  * What should happen to a Reserve click, given what the guest can see and what
@@ -49,13 +59,23 @@ export function compareQuote(shown: QuoteSnapshot, fresh: FreshQuote): QuoteOutc
   if (!fresh.available) {
     return { kind: "unavailable", message: DATES_TAKEN_MESSAGE };
   }
+  if (!meetsMinimumStay(fresh.nights, fresh.minimumNights)) {
+    return {
+      kind: "minimum-stay",
+      message: `${minimumStayMessage(fresh.minimumNights ?? 1)}. Please choose a longer stay.`,
+    };
+  }
   const priceMoved =
     fresh.total !== shown.total ||
     fresh.basePrice !== shown.basePrice ||
     (fresh.discountedPrice ?? null) !== (shown.discountedPrice ?? null) ||
-    (fresh.monthlyPrice ?? null) !== (shown.monthlyPrice ?? null);
+    (fresh.monthlyPrice ?? null) !== (shown.monthlyPrice ?? null) ||
+    (fresh.monthlyStayDiscount ?? null) !== (shown.monthlyStayDiscount ?? null);
   if (priceMoved) {
     return { kind: "price-changed", message: PRICE_CHANGED_MESSAGE };
+  }
+  if ((fresh.minimumNights ?? null) !== (shown.minimumNights ?? null)) {
+    return { kind: "price-changed", message: "Minimum booking nights have been updated." };
   }
   return { kind: "proceed" };
 }
@@ -75,17 +95,30 @@ function isRangeList(value: unknown): value is { startDate: string; endDate: str
 
 /**
  * Narrow an untyped response body to a usable quote. Anything unexpected
- * returns null, which the caller treats as "couldn't check" and lets through —
- * a malformed reply must never cost a reservation.
+ * returns null, which the caller reports explicitly and requires a retry for.
  */
 export function parseFreshQuote(data: unknown): FreshQuote | null {
   if (!data || typeof data !== "object") return null;
   const q = data as Record<string, unknown>;
   if (typeof q.available !== "boolean") return null;
-  if (typeof q.total !== "number" || !Number.isFinite(q.total)) return null;
   if (typeof q.basePrice !== "number" || !Number.isFinite(q.basePrice)) return null;
-  if (typeof q.platformFeePercent !== "number") return null;
-  if (typeof q.nights !== "number") return null;
+  if (typeof q.platformFeePercent !== "number" || !Number.isFinite(q.platformFeePercent)) return null;
+  if (typeof q.nights !== "number" || !Number.isInteger(q.nights) || q.nights < 1) return null;
+  if (q.minimumNights != null && (
+    typeof q.minimumNights !== "number" || !Number.isInteger(q.minimumNights) ||
+    q.minimumNights < 1 || q.minimumNights > 365
+  )) return null;
+  if (q.monthlyStayDiscount != null && (
+    typeof q.monthlyStayDiscount !== "number" || !Number.isSafeInteger(q.monthlyStayDiscount) ||
+    q.monthlyStayDiscount < 0
+  )) return null;
+  const minimumNights = typeof q.minimumNights === "number" ? q.minimumNights : null;
+  const monthlyStayDiscount = typeof q.monthlyStayDiscount === "number" ? q.monthlyStayDiscount : null;
+  if (q.total === null) {
+    if (meetsMinimumStay(q.nights, minimumNights)) return null;
+  } else if (typeof q.total !== "number" || !Number.isFinite(q.total) || q.total < 0) {
+    return null;
+  }
   const monthlyPrice = typeof q.monthlyPrice === "number" ? q.monthlyPrice : null;
   const discountedPrice = typeof q.discountedPrice === "number" ? q.discountedPrice : null;
   return {
@@ -94,6 +127,8 @@ export function parseFreshQuote(data: unknown): FreshQuote | null {
     basePrice: q.basePrice,
     discountedPrice,
     monthlyPrice,
+    minimumNights,
+    monthlyStayDiscount,
     platformFeePercent: q.platformFeePercent,
     total: q.total,
     blockedRanges: isRangeList(q.blockedRanges) ? q.blockedRanges : [],

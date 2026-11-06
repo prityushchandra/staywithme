@@ -29,7 +29,15 @@ export async function PATCH(
   if ("error" in ctx) return NextResponse.json({ error: ctx.error }, { status: ctx.status });
 
   const body = await req.json().catch(() => null);
-  const parsed = listingInputSchema.safeParse(body);
+  const parsed = listingInputSchema.safeParse(
+    body && typeof body === "object" && !Array.isArray(body)
+      ? {
+          minimumNights: ctx.listing.minimumNights ?? 0,
+          monthlyStayDiscountRupees: (ctx.listing.monthlyStayDiscount ?? 0) / 100,
+          ...body,
+        }
+      : body
+  );
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "Invalid input" },
@@ -88,6 +96,8 @@ export async function PATCH(
         discountedPrice:
           d.discountedPriceRupees > 0 ? d.discountedPriceRupees * 100 : null,
         monthlyPrice: d.monthlyPriceRupees > 0 ? d.monthlyPriceRupees * 100 : null,
+        minimumNights: d.minimumNights || null,
+        monthlyStayDiscount: d.monthlyStayDiscountRupees > 0 ? d.monthlyStayDiscountRupees * 100 : null,
         cancellationPolicy: d.cancellationPolicy,
         checkInTime: d.checkInTime || null,
         checkOutTime: d.checkOutTime || null,

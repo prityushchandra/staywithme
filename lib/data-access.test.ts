@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { revalidateTag } from "next/cache";
 import {
   getPublishedListings, getFeaturedListings, getPublishedListingsByIds, getPublishedListingById,
+  toListingCardData,
 } from "./data-access";
 import { searchListings } from "./search";
 import { clearMemo } from "./memo";
@@ -31,6 +32,18 @@ const fixture = () => [
   { id: "draft", status: "DRAFT", isVisible: true, featured: true, images: [] },
 ];
 let rows = fixture();
+
+it("projects public stay terms onto cards without exposing private listing data", () => {
+  const card = toListingCardData({
+    id: "synthetic", title: "Monthly apartment", basePrice: 200000, discountedPrice: null,
+    monthlyPrice: 3000000, minimumNights: 30, monthlyStayDiscount: 500000,
+    images: [{ url: "cover" }],
+  });
+  expect(card).toEqual({
+    id: "synthetic", title: "Monthly apartment", basePrice: 200000, discountedPrice: null,
+    monthlyPrice: 3000000, minimumNights: 30, monthlyStayDiscount: 500000, cover: "cover",
+  });
+});
 
 beforeEach(() => {
   vi.clearAllMocks();

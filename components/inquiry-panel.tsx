@@ -7,9 +7,10 @@ import { PricingBreakdown } from "@/components/pricing-breakdown";
 import { ReserveButton } from "@/components/reserve-button";
 import { useBooking, type ReserveCta } from "@/components/booking-context";
 import {
-  computePricing,
-  computeStayBase,
+  computeStayPricing,
   formatINR,
+  meetsMinimumStay,
+  minimumStayMessage,
   nightlyPrice,
   strikePrice,
 } from "@/lib/pricing";
@@ -23,6 +24,7 @@ import {
 } from "@/lib/reserve-prompt";
 import { isRangeAvailable, toUtcDate } from "@/lib/dates";
 import { scrollBehavior } from "@/lib/utils";
+import { StayTerms } from "@/components/stay-terms";
 
 // Sticky booking card. Dates & guests come from the shared booking context, so
 // it stays in sync with the on-page availability calendar. It also resolves the
@@ -87,6 +89,8 @@ export function InquiryPanel({
     setPickerOpen,
     setReserveCta,
     liveListing,
+    minimumNights,
+    monthlyStayDiscount,
   } = useBooking();
   const loginHref = `/sign-in?callbackUrl=${encodeURIComponent(`/listings/${propertyId}`)}`;
 
@@ -126,14 +130,21 @@ export function InquiryPanel({
     return !isRangeAvailable(toUtcDate(checkIn), toUtcDate(checkOut), blocks);
   }, [hasDates, checkIn, checkOut, blockedRanges]);
 
-  const total = computePricing(computeStayBase(basePrice, monthlyPrice, nights), {
-    platformFeePercent,
-  }).total;
+  const meetsMinimum = meetsMinimumStay(nights, minimumNights);
+  const pricing = hasDates && meetsMinimum
+    ? computeStayPricing(
+        { basePrice, monthlyPrice, minimumNights, monthlyStayDiscount },
+        nights,
+        { platformFeePercent }
+      )
+    : null;
+  const total = pricing?.total ?? 0;
+  const appliedStayDiscount = pricing?.monthlyStayDiscount ?? 0;
 
   /** The guests + total block the guest is sent to once a stay is complete. */
   const summaryRef = useRef<HTMLDivElement>(null);
   /** Identifies a complete stay, so a changed one can be told from an unchanged one. */
-  const rangeKey = hasDates ? `${checkIn}/${checkOut}` : "";
+  const rangeKey = hasDates && meetsMinimum ? `${checkIn}/${checkOut}` : "";
   /** The stay the card already held when the picker was opened. */
   const rangeAtOpen = useRef<string | null>(null);
 
@@ -150,6 +161,12 @@ export function InquiryPanel({
     }
     if (datesUnavailable) {
       return { kind: "unavailable", label: "Choose other dates", shortLabel: "New dates" };
+    }
+    if (!meetsMinimum) {
+      return {
+        kind: "minimum-stay", minimumNights: minimumNights ?? 1,
+        label: `Choose ${minimumNights}+ nights`, shortLabel: "Change dates",
+      };
     }
     if (!isAuthenticated) {
       return { kind: "login", label: "Log in to reserve", shortLabel: "Log in", href: loginHref };
@@ -177,6 +194,7 @@ export function InquiryPanel({
         guests,
         infants,
         totalMinorUnits: total,
+        monthlyStayDiscountMinorUnits: appliedStayDiscount,
       },
       // What this card is currently quoting, so Reserve can compare it against
       // the database before anything reaches WhatsApp.
@@ -184,6 +202,8 @@ export function InquiryPanel({
         basePrice: listPrice,
         discountedPrice,
         monthlyPrice: monthlyPrice ?? null,
+        minimumNights,
+        monthlyStayDiscount,
         platformFeePercent,
         total,
       },
@@ -191,6 +211,10 @@ export function InquiryPanel({
   }, [
     hasDates,
     datesUnavailable,
+    meetsMinimum,
+    minimumNights,
+    monthlyStayDiscount,
+    appliedStayDiscount,
     isAuthenticated,
     loginHref,
     whatsappNumber,
@@ -265,6 +289,7 @@ export function InquiryPanel({
   return (
     <Card className="sticky top-24 rounded-[1.75rem] border-foreground/10 bg-card/95 shadow-[0_12px_48px_-20px_rgba(46,35,25,0.28)]">
       <CardContent className="space-y-5 p-5 sm:p-6">
+        <StayTerms minimumNights={minimumNights} monthlyStayDiscount={monthlyStayDiscount} />
         <div className="border-b border-foreground/10 pb-5">
           <div className="flex items-center justify-between gap-3">
             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">Your stay</p>
@@ -297,6 +322,8 @@ export function InquiryPanel({
           blockedRanges={blockedRanges}
           open={pickerOpen}
           onOpenChange={setPickerOpen}
+          minimumNights={minimumNights}
+          monthlyStayDiscount={monthlyStayDiscount}
         />
 
         <div ref={summaryRef} className="space-y-4">
@@ -322,14 +349,21 @@ export function InquiryPanel({
             )}
           </div>
 
-          {hasDates && (
+          {hasDates && meetsMinimum && (
             <PricingBreakdown
               basePrice={basePrice}
               listPrice={strike}
               monthlyPrice={monthlyPrice}
               platformFeePercent={platformFeePercent}
               nights={nights}
+              minimumNights={minimumNights}
+              monthlyStayDiscount={monthlyStayDiscount}
             />
+          )}
+          {hasDates && !meetsMinimum && (
+            <p role="status" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">
+              {minimumStayMessage(minimumNights ?? 1)}. Choose a longer stay to see your total.
+            </p>
           )}
         </div>
 
@@ -345,7 +379,7 @@ export function InquiryPanel({
         {!isCompactLayout && <ReserveButton cta={cta} className="w-full" />}
 
         <p className="text-center text-xs leading-relaxed text-muted-foreground">
-          {hasDates && !datesUnavailable
+          {hasDates && meetsMinimum && !datesUnavailable
             ? "You won't be charged here — reserving opens WhatsApp to confirm with the platform."
             : "Inquiries are handled by the platform on WhatsApp. You won't be charged here."}
         </p>

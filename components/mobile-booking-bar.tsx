@@ -5,11 +5,13 @@ import { ReserveButton } from "@/components/reserve-button";
 import { useBooking } from "@/components/booking-context";
 import {
   computePricing,
-  computeStayBase,
+  computeStayPricing,
   isMonthlyRate,
   formatINR,
   nightlyPrice,
   strikePrice,
+  meetsMinimumStay,
+  minimumStayMessage,
 } from "@/lib/pricing";
 import { isRangeAvailable, toUtcDate } from "@/lib/dates";
 
@@ -33,7 +35,7 @@ export function MobileBookingBar({
   platformFeePercent: number;
   blockedRanges?: { startDate: string; endDate: string }[];
 }) {
-  const { checkIn, checkOut, guests, infants, isCompactLayout, reserveCta, liveListing } =
+  const { checkIn, checkOut, guests, infants, isCompactLayout, reserveCta, liveListing, minimumNights, monthlyStayDiscount } =
     useBooking();
   const listPrice = liveListing?.basePrice ?? basePriceProp;
   const discountedPrice = liveListing
@@ -64,14 +66,19 @@ export function MobileBookingBar({
   }, [hasDates, checkIn, checkOut, blockedRanges]);
 
   const n = nights || 1;
+  const meetsMinimum = meetsMinimumStay(nights, minimumNights);
   const monthly = isMonthlyRate(monthlyPrice, n);
-  const total = computePricing(computeStayBase(basePrice, monthlyPrice, n), { platformFeePercent }).total;
+  const pricing = hasDates && meetsMinimum
+    ? computeStayPricing({ basePrice, monthlyPrice, minimumNights, monthlyStayDiscount }, n, { platformFeePercent })
+    : null;
+  const total = pricing?.total ?? 0;
   const nightlyTotal = computePricing(basePrice * n, { platformFeePercent }).total;
   // A sale only moves the bill on nightly stays — a monthly stay is priced off
   // monthlyPrice, so the monthly strike stays the one that's shown there.
   const saleTotal =
     !monthly && strike ? computePricing(strike * n, { platformFeePercent }).total : null;
-  const strikeTotal = saleTotal ?? (monthly && nightlyTotal > total ? nightlyTotal : null);
+  const strikeTotal = saleTotal ?? (monthly && nightlyTotal > total ? nightlyTotal
+    : pricing?.monthlyStayDiscount ? pricing.totalBeforeDiscount : null);
 
   // Only mount on compact screens: on desktop the booking card owns the Reserve
   // button, and rendering both is what used to put two Reserve buttons on screen.
@@ -81,7 +88,7 @@ export function MobileBookingBar({
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 px-3 pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)] lg:hidden">
       <div className="pointer-events-auto mx-auto flex max-w-md items-center justify-between gap-3 rounded-2xl border border-black/5 bg-white/95 px-4 py-3 shadow-[0_8px_30px_rgba(0,0,0,0.18)] backdrop-blur">
         <div className="min-w-0">
-          {hasDates && available ? (
+          {hasDates && available && meetsMinimum ? (
             <>
               <div className="text-sm font-semibold">
                 {strikeTotal ? (
@@ -98,7 +105,7 @@ export function MobileBookingBar({
                 {nights} night{nights > 1 ? "s" : ""} · {guests} adult
                 {guests > 1 ? "s" : ""}
                 {infants > 0 ? ` · ${infants} infant${infants > 1 ? "s" : ""}` : ""}
-                {monthly ? " · monthly rate" : ""}
+                {pricing?.monthlyStayDiscount ? " · discount included" : monthly ? " · monthly rate" : ""}
               </div>
             </>
           ) : (
@@ -115,7 +122,8 @@ export function MobileBookingBar({
                 <span className="font-normal text-muted-foreground">/ night</span>
               </div>
               <div className="text-xs text-muted-foreground">
-                {hasDates ? "Dates unavailable" : "Add dates to reserve"}
+                {hasDates && !available ? "Dates unavailable"
+                  : minimumNights ? minimumStayMessage(minimumNights) : "Add dates to reserve"}
               </div>
             </>
           )}

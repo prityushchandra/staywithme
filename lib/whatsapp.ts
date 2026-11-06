@@ -35,6 +35,7 @@ export interface InquiryDetails {
   infants?: number;
   /** displayed total in MINOR units (paise) */
   totalMinorUnits: number;
+  monthlyStayDiscountMinorUnits?: number;
 }
 
 /** Strip everything but digits from a stored number like "+91 9113805548". */
@@ -115,6 +116,9 @@ export function buildInquiryMessage(details: InquiryDetails): string {
     `Check-out: ${details.checkOut || "—"}${co}`,
     `Nights: ${nights > 0 ? nights : "—"} · Guests: ${details.guests && details.guests > 0 ? details.guests : "—"}${details.infants && details.infants > 0 ? ` · Infants: ${details.infants}` : ""}`,
     "",
+    ...(details.monthlyStayDiscountMinorUnits
+      ? [`Monthly stays discount: ${formatINR(details.monthlyStayDiscountMinorUnits)} off (included)`, ""]
+      : []),
     `Total: *${formatINR(details.totalMinorUnits)}*`,
     "",
     `My contact: ${details.guestPhone || "—"}`,

@@ -25,6 +25,8 @@ import { MapPreview } from "@/components/map-preview";
 import { MobileBookingBar } from "@/components/mobile-booking-bar";
 import { ListingFaqs } from "@/components/listing-faqs";
 import { listingFaqsSchema } from "@/lib/validation";
+import { StayTerms } from "@/components/stay-terms";
+import { minimumStayMessage } from "@/lib/pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -224,6 +226,11 @@ export default async function ListingPage({
           )}
           <span className="text-muted-foreground">{ROOM_TYPE_LABEL[listing.roomType]}</span>
         </div>
+        {listing.minimumNights ? (
+          <div className="mt-5 max-w-xl">
+            <StayTerms minimumNights={listing.minimumNights} monthlyStayDiscount={listing.monthlyStayDiscount} />
+          </div>
+        ) : null}
       </header>
 
       <Gallery images={galleryImages} title={listing.title} />
@@ -247,6 +254,8 @@ export default async function ListingPage({
         initialCheckOut={sp.checkOut ?? ""}
         initialGuests={initialGuests}
         blockedRanges={serializedBlocks}
+        minimumNights={listing.minimumNights}
+        monthlyStayDiscount={listing.monthlyStayDiscount}
       >
         <div className="mt-8 grid grid-cols-1 gap-x-14 gap-y-10 sm:mt-10 lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)] xl:gap-x-20">
           {/* Left: details */}
@@ -333,6 +342,7 @@ export default async function ListingPage({
                   <h4 className="mb-3 font-medium">House rules</h4>
                   <ul className="space-y-2 text-sm text-muted-foreground">
                     <li>{plural(listing.maxGuests, "guest")} maximum</li>
+                    {listing.minimumNights ? <li>{minimumStayMessage(listing.minimumNights)}</li> : null}
                     {houseRules.map((rule) => (
                       <li key={rule}>{rule}</li>
                     ))}

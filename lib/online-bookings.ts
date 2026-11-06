@@ -16,7 +16,7 @@ import { prisma } from "./db";
 import { clearMemo } from "./memo";
 import { isRangeAvailable } from "./dates";
 import { sendWhatsApp, sendNotification } from "./wa-send";
-import { formatINR, computePricing, computeStayBase, nightlyPrice } from "./pricing";
+import { formatINR, computeStayPricing, meetsMinimumStay, minimumStayMessage } from "./pricing";
 import { getPlatformSettings } from "./settings";
 import { unitBlock } from "./bookings";
 import {
@@ -81,9 +81,14 @@ export async function quoteStay(
       basePrice: true,
       discountedPrice: true,
       monthlyPrice: true,
+      minimumNights: true,
+      monthlyStayDiscount: true,
     },
   });
   if (!listing || listing.status !== "PUBLISHED") return fail("Listing not found.");
+  if (!meetsMinimumStay(nights, listing.minimumNights)) {
+    return fail(`${minimumStayMessage(listing.minimumNights ?? 1)}. Please choose a longer stay.`);
+  }
 
   const [blocks, settings] = await Promise.all([
     prisma.availabilityBlock.findMany({
@@ -93,10 +98,9 @@ export async function quoteStay(
     getPlatformSettings(),
   ]);
 
-  const { total } = computePricing(
-    computeStayBase(nightlyPrice(listing), listing.monthlyPrice, nights),
-    { platformFeePercent: settings.platformFeePercent }
-  );
+  const { total } = computeStayPricing(listing, nights, {
+    platformFeePercent: settings.platformFeePercent,
+  });
 
   return {
     ok: true,

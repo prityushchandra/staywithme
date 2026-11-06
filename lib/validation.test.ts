@@ -28,6 +28,33 @@ const baseListing = {
   imageUrls: ["https://example.com/a.jpg"],
 };
 
+describe("listing minimum stay input", () => {
+  const parse = (extra: Record<string, unknown>) => listingInputSchema.safeParse({ ...baseListing, ...extra });
+
+  it("keeps existing listings unrestricted and accepts an optional minimum without an offer", () => {
+    expect(listingInputSchema.parse(baseListing)).toMatchObject({ minimumNights: 0, monthlyStayDiscountRupees: 0 });
+    expect(parse({ minimumNights: 30 }).success).toBe(true);
+    expect(parse({ minimumNights: 30, monthlyStayDiscountRupees: 5000 }).success).toBe(true);
+  });
+
+  it.each([-1, 1.5, 366, "abc"])("rejects invalid minimum nights %s", (minimumNights) => {
+    expect(parse({ minimumNights }).success).toBe(false);
+  });
+
+  it("requires a minimum for a fixed offer and rejects negative or fractional discounts", () => {
+    expect(parse({ monthlyStayDiscountRupees: 500 }).success).toBe(false);
+    expect(parse({ minimumNights: 2, monthlyStayDiscountRupees: -1 }).success).toBe(false);
+    expect(parse({ minimumNights: 2, monthlyStayDiscountRupees: 50.5 }).success).toBe(false);
+  });
+
+  it("validates against the sale rate and the later monthly tier, not just the headline price", () => {
+    expect(parse({ minimumNights: 2, discountedPriceRupees: 1000, monthlyStayDiscountRupees: 2000 }).success).toBe(false);
+    expect(parse({ minimumNights: 7, monthlyPriceRupees: 5000, monthlyStayDiscountRupees: 5000 }).success).toBe(false);
+    expect(parse({ minimumNights: 60, monthlyPriceRupees: 5000, monthlyStayDiscountRupees: 9999 }).success).toBe(true);
+    expect(parse({ minimumNights: 60, monthlyPriceRupees: 5000, monthlyStayDiscountRupees: 10000 }).success).toBe(false);
+  });
+});
+
 describe("isHttpUrl", () => {
   it("accepts http(s) links with a real host", () => {
     expect(isHttpUrl("https://maps.app.goo.gl/abc123")).toBe(true);

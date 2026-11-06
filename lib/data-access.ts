@@ -51,6 +51,9 @@ export type ListingCardData = {
   title: string;
   basePrice: number;
   discountedPrice: number | null;
+  monthlyPrice: number | null;
+  minimumNights: number | null;
+  monthlyStayDiscount: number | null;
   cover: string | null;
 };
 
@@ -59,6 +62,9 @@ export function toListingCardData(l: {
   title: string;
   basePrice: number;
   discountedPrice: number | null;
+  monthlyPrice: number | null;
+  minimumNights: number | null;
+  monthlyStayDiscount: number | null;
   images: { url: string }[];
 }): ListingCardData {
   return {
@@ -66,6 +72,9 @@ export function toListingCardData(l: {
     title: l.title,
     basePrice: l.basePrice,
     discountedPrice: l.discountedPrice,
+    monthlyPrice: l.monthlyPrice,
+    minimumNights: l.minimumNights,
+    monthlyStayDiscount: l.monthlyStayDiscount,
     cover: l.images[0]?.url ?? null,
   };
 }

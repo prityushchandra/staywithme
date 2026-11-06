@@ -51,6 +51,47 @@ export interface ListingPrice {
   discountedPrice?: number | null;
 }
 
+export interface ListingStayTerms {
+  minimumNights?: number | null;
+  monthlyStayDiscount?: number | null;
+}
+
+export interface ListingStayPrice extends ListingPrice, ListingStayTerms {
+  monthlyPrice?: number | null;
+}
+
+export function meetsMinimumStay(nights: number, minimumNights?: number | null): boolean {
+  return Number.isInteger(nights) && nights >= (minimumNights || 1);
+}
+
+export function minimumStayMessage(minimumNights: number): string {
+  return `Minimum ${minimumNights} night${minimumNights === 1 ? "" : "s"}`;
+}
+
+/** Existing rate and fee first; the fixed offer is deducted once, not per month. */
+export function computeStayPricing(
+  listing: ListingStayPrice,
+  nights: number,
+  settings: Pick<PricingSettings, "platformFeePercent">
+) {
+  const pricing = computePricing(
+    computeStayBase(nightlyPrice(listing), listing.monthlyPrice, nights),
+    settings
+  );
+  const discount = listing.minimumNights && meetsMinimumStay(nights, listing.minimumNights)
+    ? listing.monthlyStayDiscount ?? 0
+    : 0;
+  if (!Number.isSafeInteger(discount) || discount < 0 || (discount > 0 && discount >= pricing.total)) {
+    throw new RangeError("The monthly stays discount must be lower than the booking total.");
+  }
+  return {
+    ...pricing,
+    totalBeforeDiscount: pricing.total,
+    monthlyStayDiscount: discount,
+    total: pricing.total - discount,
+  };
+}
+
 /**
  * The nightly rate a guest is actually charged. EVERY money path — the bill,
  * the live Reserve re-check, the booking record and the host payout — must

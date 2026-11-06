@@ -206,6 +206,9 @@ model Listing {
   // Optional monthly rate (paise). When set, stays of 30+ nights are charged at
   // this rate pro-rated per night instead of the nightly basePrice.
   monthlyPrice Int?
+  minimumNights Int?
+  // Fixed paise off the fee-inclusive stay total, once per eligible booking.
+  monthlyStayDiscount Int?
   cancellationPolicy CancellationPolicy
 
   // Host-set "things to know" details

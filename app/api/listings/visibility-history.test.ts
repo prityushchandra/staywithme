@@ -52,7 +52,12 @@ const input = {
   cancellationPolicy: "FLEXIBLE",
   imageUrls: ["https://example.com/test.jpg"],
 };
-let stored: { id: string; hostId: string; status: string; isVisible: boolean; rejectionReason: string | null; refCode: string; guestFavorite: boolean; faqs: { question: string; answer: string }[] };
+let stored: {
+  id: string; hostId: string; status: string; isVisible: boolean;
+  rejectionReason: string | null; refCode: string; guestFavorite: boolean;
+  minimumNights: number | null; monthlyStayDiscount: number | null;
+  faqs: { question: string; answer: string }[];
+};
 
 function request(method: "POST" | "PATCH", extra: Record<string, unknown> = {}) {
   return new Request(`http://localhost/api/listings/${id}`, {
@@ -67,6 +72,7 @@ beforeEach(() => {
   stored = {
     id, hostId: "host", status: "PUBLISHED", isVisible: false, rejectionReason: null,
     refCode: "TEST1", guestFavorite: false,
+    minimumNights: null, monthlyStayDiscount: null,
     faqs: [{ question: "Existing question?", answer: "Existing answer." }],
   };
   mocks.auth.mockResolvedValue({ user: { id: "host", isAdmin: true, roles: ["HOST"] } });
@@ -91,6 +97,38 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+describe("listing minimum stay persistence", () => {
+  it("stores the configured minimum and converts the one-time offer to paise on create and edit", async () => {
+    const terms = { minimumNights: 30, monthlyStayDiscountRupees: 5000 };
+    expect((await POST(request("POST", terms))).status).toBe(201);
+    expect(mocks.listing.create.mock.calls[0][0].data).toMatchObject({
+      minimumNights: 30, monthlyStayDiscount: 500000,
+    });
+    expect((await PATCH(request("PATCH", terms), { params: Promise.resolve({ id }) })).status).toBe(200);
+    expect(stored).toMatchObject({ minimumNights: 30, monthlyStayDiscount: 500000 });
+  });
+
+  it("preserves saved terms for an older client and supports explicitly removing them", async () => {
+    stored.minimumNights = 30;
+    stored.monthlyStayDiscount = 500000;
+    expect((await PATCH(request("PATCH"), { params: Promise.resolve({ id }) })).status).toBe(200);
+    expect(stored).toMatchObject({ minimumNights: 30, monthlyStayDiscount: 500000 });
+    expect((await PATCH(request("PATCH", { minimumNights: 0, monthlyStayDiscountRupees: 0 }), {
+      params: Promise.resolve({ id }),
+    })).status).toBe(200);
+    expect(stored).toMatchObject({ minimumNights: null, monthlyStayDiscount: null });
+  });
+
+  it("rejects price edits that would invalidate a saved discount before any writes", async () => {
+    stored.minimumNights = 30;
+    stored.monthlyStayDiscount = 500000;
+    const response = await PATCH(request("PATCH", { monthlyPriceRupees: 4000 }), { params: Promise.resolve({ id }) });
+    expect(response.status).toBe(400);
+    expect(mocks.listing.update).not.toHaveBeenCalled();
+    expect(mocks.listingImage.deleteMany).not.toHaveBeenCalled();
+  });
 });
 
 describe("listing FAQ persistence", () => {

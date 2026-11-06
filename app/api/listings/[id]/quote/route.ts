@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { computePricing, computeStayBase, nightlyPrice } from "@/lib/pricing";
+import { computeStayPricing, meetsMinimumStay, minimumStayMessage } from "@/lib/pricing";
 import { isRangeAvailable, toUtcDate } from "@/lib/dates";
 
 // Live price + availability re-check, called the moment a guest presses Reserve.
@@ -76,6 +76,8 @@ export async function POST(
       basePrice: true,
       discountedPrice: true,
       monthlyPrice: true,
+      minimumNights: true,
+      monthlyStayDiscount: true,
     },
   });
   // Drafts, pending and rejected listings are invisible to guests — same 404 as
@@ -104,18 +106,23 @@ export async function POST(
 
   // Reuse the card's own maths rather than re-deriving it: a rounding
   // difference here would surface as a phantom "prices have been updated".
-  const { total } = computePricing(
-    computeStayBase(nightlyPrice(listing), listing.monthlyPrice, nights),
-    { platformFeePercent }
-  );
+  const meetsMinimum = meetsMinimumStay(nights, listing.minimumNights);
+  const total = meetsMinimum
+    ? computeStayPricing(listing, nights, { platformFeePercent }).total
+    : null;
+  const available = isRangeAvailable(checkIn, checkOut, blocks);
 
   return NextResponse.json(
     {
-      available: isRangeAvailable(checkIn, checkOut, blocks),
+      available,
+      bookable: available && meetsMinimum,
+      ...(!meetsMinimum ? { error: `${minimumStayMessage(listing.minimumNights ?? 1)}. Please choose a longer stay.` } : {}),
       nights,
       basePrice: listing.basePrice,
       discountedPrice: listing.discountedPrice,
       monthlyPrice: listing.monthlyPrice,
+      minimumNights: listing.minimumNights,
+      monthlyStayDiscount: listing.monthlyStayDiscount,
       platformFeePercent,
       total,
       status: listing.status,

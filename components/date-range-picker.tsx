@@ -12,6 +12,7 @@ import {
   type DayAvailability,
 } from "@/lib/dates";
 import { useOverlayHistory } from "@/lib/use-overlay-history";
+import { StayTerms } from "@/components/stay-terms";
 
 // Airbnb-style "When" range picker: a single trigger that opens a calendar.
 // Click a start date, then an end date; the range highlights and the picker
@@ -81,6 +82,8 @@ export function DateRangePicker({
   allowPast = false,
   open: openProp,
   onOpenChange,
+  minimumNights,
+  monthlyStayDiscount,
 }: {
   checkIn: string;
   checkOut: string;
@@ -103,6 +106,8 @@ export function DateRangePicker({
   /** Controlled open state (optional). */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  minimumNights?: number | null;
+  monthlyStayDiscount?: number | null;
 }) {
   const [openState, setOpenState] = useState(false);
   const controlled = openProp !== undefined;
@@ -164,6 +169,7 @@ export function DateRangePicker({
       today,
       allowBlocked,
       allowPast,
+      minimumNights,
     });
   }
 
@@ -286,7 +292,8 @@ export function DateRangePicker({
     const next = nextRangeSelection(
       { checkIn: start, checkOut: end },
       day,
-      allowBlocked ? [] : blockDates
+      allowBlocked ? [] : blockDates,
+      allowBlocked ? null : minimumNights
     );
     if (!next) return;
     onChange(
@@ -414,6 +421,12 @@ export function DateRangePicker({
                 <X className="h-5 w-5" />
               </button>
             </div>
+
+            {minimumNights ? (
+              <div className="mb-4">
+                <StayTerms minimumNights={minimumNights} monthlyStayDiscount={monthlyStayDiscount} compact />
+              </div>
+            ) : null}
 
             <div className="relative">
               <button
@@ -599,6 +612,9 @@ function Month({
                   status.kind === "past" &&
                     !isEndpoint &&
                     "cursor-default text-muted-foreground/30",
+                  status.kind === "minimum-stay" &&
+                    !isEndpoint &&
+                    "cursor-not-allowed text-muted-foreground/40",
                   // Admin override: occupied but still selectable → amber strike.
                   status.blockedNight &&
                     !status.disabled &&

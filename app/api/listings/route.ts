@@ -74,6 +74,8 @@ export async function POST(req: Request) {
         discountedPrice:
           d.discountedPriceRupees > 0 ? d.discountedPriceRupees * 100 : null,
         monthlyPrice: d.monthlyPriceRupees > 0 ? d.monthlyPriceRupees * 100 : null,
+        minimumNights: d.minimumNights || null,
+        monthlyStayDiscount: d.monthlyStayDiscountRupees > 0 ? d.monthlyStayDiscountRupees * 100 : null,
         cancellationPolicy: d.cancellationPolicy,
         checkInTime: d.checkInTime || null,
         checkOutTime: d.checkOutTime || null,

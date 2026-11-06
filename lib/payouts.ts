@@ -11,7 +11,7 @@
 // amount — but both are bounded by what the admin actually holds, since the due
 // was never collected.
 
-import { computePricing, computeStayBase } from "./pricing";
+import { computeStayPricing, type ListingStayTerms } from "./pricing";
 
 export interface BookingMoney {
   nights: number;
@@ -25,11 +25,19 @@ export function computeBookingMoney(
   basePrice: number,
   nights: number,
   feePercent: number,
-  monthlyPrice?: number | null
+  monthlyPrice?: number | null,
+  stayTerms?: ListingStayTerms
 ): BookingMoney {
-  const baseTotal = computeStayBase(basePrice, monthlyPrice, nights);
-  const guestTotal = computePricing(baseTotal, { platformFeePercent: feePercent }).total;
-  const platformFee = guestTotal - baseTotal;
+  const pricing = computeStayPricing({
+    basePrice,
+    monthlyPrice,
+    minimumNights: stayTerms?.minimumNights,
+    monthlyStayDiscount: stayTerms?.monthlyStayDiscount,
+  }, nights, { platformFeePercent: feePercent });
+  if (pricing.monthlyStayDiscount > 0) {
+    return computeBookingMoneyFromTotal(pricing.total, nights, feePercent);
+  }
+  const { base: baseTotal, total: guestTotal, platformFee } = pricing;
   return { nights, baseTotal, platformFee, guestTotal, hostPayout: baseTotal };
 }
 
@@ -78,9 +86,12 @@ export function computeRefund(
   amountPaid: number,
   checkIn: Date,
   now: Date,
-  monthlyPrice?: number | null
+  monthlyPrice?: number | null,
+  bookedTotal?: number
 ): RefundResult {
-  const { baseTotal, platformFee } = computeBookingMoney(basePrice, nights, feePercent, monthlyPrice);
+  const { baseTotal, platformFee } = bookedTotal !== undefined
+    ? computeBookingMoneyFromTotal(bookedTotal, nights, feePercent)
+    : computeBookingMoney(basePrice, nights, feePercent, monthlyPrice);
   // The non-refundable "first night" is the effective nightly rate (monthly stays
   // are charged at the monthly per-night rate, not the headline base price).
   const firstNight = Math.round(baseTotal / Math.max(1, nights));

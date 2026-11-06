@@ -79,7 +79,7 @@ export async function reserveForGuest(input: {
   const negotiated = input.guestTotal && input.guestTotal > 0;
   const money = negotiated
     ? computeBookingMoneyFromTotal(input.guestTotal!, nights, settings.platformFeePercent)
-    : computeBookingMoney(nightlyPrice(listing), nights, settings.platformFeePercent, listing.monthlyPrice);
+    : computeBookingMoney(nightlyPrice(listing), nights, settings.platformFeePercent, listing.monthlyPrice, listing);
   const perNight = perNightFromBase(money.baseTotal, nights);
   const paid = Math.max(0, Math.min(input.amountPaid ?? 0, money.guestTotal));
   const due = money.guestTotal - paid;
@@ -178,7 +178,9 @@ export async function cancelBooking(
     booking.amountPaid,
     booking.checkIn,
     new Date(),
-    booking.listing.monthlyPrice
+    booking.listing.monthlyPrice,
+    // Preserve the accepted total, including offers, even after listing edits.
+    booking.totalAmount > 0 ? booking.totalAmount : undefined
   );
 
   if (booking.blockId) {

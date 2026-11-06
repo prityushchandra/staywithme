@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createBookingOrder, startOnlineBooking } from "./online-bookings";
+import { createBookingOrder, startOnlineBooking, quoteStay } from "./online-bookings";
 import type { GuestDocumentRecord } from "./booking-documents";
 
 const mocks = vi.hoisted(() => ({
   createOrder: vi.fn(),
+  settings: vi.fn(),
   db: {
     booking: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn(), create: vi.fn() },
     bookingGuest: { findMany: vi.fn() },
@@ -12,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 vi.mock("./db", () => ({ prisma: mocks.db }));
-vi.mock("./settings", () => ({ getPlatformSettings: async () => ({ platformFeePercent: 0 }) }));
+vi.mock("./settings", () => ({ getPlatformSettings: mocks.settings }));
 vi.mock("./razorpay", () => ({ createRazorpayOrder: mocks.createOrder }));
 vi.mock("./wa-send", () => ({ sendWhatsApp: vi.fn(), sendNotification: vi.fn() }));
 vi.mock("./bookings", () => ({ unitBlock: vi.fn() }));
@@ -32,6 +33,7 @@ const booking = {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.settings.mockResolvedValue({ platformFeePercent: 0 });
   mocks.db.booking.findUnique.mockResolvedValue(booking);
   mocks.db.booking.findFirst.mockResolvedValue({ id: booking.id });
   mocks.db.booking.update.mockResolvedValue({ id: booking.id });
@@ -41,6 +43,63 @@ beforeEach(() => {
   });
   mocks.db.availabilityBlock.findMany.mockResolvedValue([]);
   mocks.createOrder.mockResolvedValue({ id: "mock-order-only", amount: 200000 });
+});
+
+describe("online minimum stay and monthly offer", () => {
+  const listing = {
+    title: "Synthetic monthly stay", status: "PUBLISHED",
+    basePrice: 200000, discountedPrice: 150000, monthlyPrice: 3000000,
+    minimumNights: 30, monthlyStayDiscount: 50000,
+  };
+  const checkIn = new Date("2027-03-01T00:00:00Z");
+  const checkout = (nights: number) => new Date(checkIn.getTime() + nights * 86_400_000);
+
+  it("rejects a short direct request before creating or reusing a draft", async () => {
+    mocks.db.listing.findUnique.mockResolvedValue(listing);
+    expect(await startOnlineBooking({
+      listingId: "flat", guestId: "owner", checkIn, checkOut: checkout(29), guests: 2,
+    })).toEqual({ ok: false, error: "Minimum 30 nights. Please choose a longer stay." });
+    expect(mocks.db.booking.create).not.toHaveBeenCalled();
+    expect(mocks.db.booking.update).not.toHaveBeenCalled();
+    expect(mocks.db.booking.findFirst).not.toHaveBeenCalled();
+  });
+
+  it.each([[30, 3250000], [31, 3360000], [60, 6550000]])(
+    "quotes %i nights with one fixed discount after the existing monthly rate and fee",
+    async (nights, total) => {
+      mocks.settings.mockResolvedValue({ platformFeePercent: 10 });
+      mocks.db.listing.findUnique.mockResolvedValue(listing);
+      expect(await quoteStay("flat", checkIn, checkout(nights))).toMatchObject({ ok: true, total, nights });
+    }
+  );
+
+  it("rejects a previously started draft if the minimum increases before payment", async () => {
+    mocks.db.booking.findUnique.mockResolvedValue({
+      ...booking, checkIn, checkOut: checkout(30), idDocs: [guest(0, [scan("first")]), guest(1, [scan("second")])],
+    });
+    mocks.db.listing.findUnique.mockResolvedValue({ ...listing, minimumNights: 31 });
+    expect((await createBookingOrder(booking.id, "owner")).ok).toBe(false);
+    expect(mocks.createOrder).not.toHaveBeenCalled();
+    expect(mocks.db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("persists the discounted draft total and rechecks the current offer before taking payment", async () => {
+    mocks.settings.mockResolvedValue({ platformFeePercent: 10 });
+    mocks.db.listing.findUnique.mockResolvedValue(listing);
+    expect(await startOnlineBooking({
+      listingId: "flat", guestId: "owner", checkIn, checkOut: checkout(30), guests: 2,
+    })).toMatchObject({ ok: true, total: 3250000 });
+    expect(mocks.db.booking.update.mock.calls[0][0].data.totalAmount).toBe(3250000);
+
+    mocks.db.booking.findUnique.mockResolvedValue({
+      ...booking, checkIn, checkOut: checkout(30), idDocs: [guest(0, [scan("first")]), guest(1, [scan("second")])],
+    });
+    mocks.db.listing.findUnique.mockResolvedValue({ ...listing, monthlyStayDiscount: 100000 });
+    mocks.createOrder.mockImplementation(async (amount) => ({ id: "mock-order-only", amount }));
+    expect(await createBookingOrder(booking.id, "owner")).toMatchObject({ ok: true, amount: 3200000 });
+    expect(mocks.createOrder.mock.calls[0][0]).toBe(3200000);
+    expect(mocks.db.booking.update.mock.calls[1][0].data.totalAmount).toBe(3200000);
+  });
 });
 
 describe("payment requires an ID for every guest", () => {

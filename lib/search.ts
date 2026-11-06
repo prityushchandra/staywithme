@@ -117,6 +117,8 @@ export function buildListingWhere(
       and.push({
         availability: { none: { startDate: { lt: co }, endDate: { gt: ci } } },
       });
+      const nights = Math.round((co.getTime() - ci.getTime()) / 86_400_000);
+      and.push({ OR: [{ minimumNights: null }, { minimumNights: { lte: nights } }] });
     }
   }
 

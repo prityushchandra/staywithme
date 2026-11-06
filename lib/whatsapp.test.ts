@@ -57,6 +57,13 @@ describe("toWhatsAppAppLink", () => {
 });
 
 describe("buildInquiryMessage", () => {
+  it("shows the applied monthly discount without deducting it again from the quoted total", () => {
+    const message = buildInquiryMessage({ ...details, monthlyStayDiscountMinorUnits: 50000 });
+    expect(message).toContain("Monthly stays discount: ₹500 off (included)");
+    expect(message).toContain("Total: *₹8,800*");
+    expect(buildInquiryMessage(details)).not.toContain("Monthly stays discount");
+  });
+
   it("greets the contact and includes the reservation details", () => {
     const msg = buildInquiryMessage(details);
     expect(msg).toContain("Hi Chandra,");

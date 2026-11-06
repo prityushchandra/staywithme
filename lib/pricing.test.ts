@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   computePricing,
+  computeStayPricing,
+  meetsMinimumStay,
   formatINR,
   getPriceInsight,
   nightlyPrice,
@@ -20,6 +22,55 @@ describe("computePricing", () => {
     expect(r.platformFee).toBe(10000); // ₹100
     expect(r.total).toBe(110000); // ₹1100
     expect(r.platformFeePercent).toBe(10);
+  });
+
+  describe("minimum nights and fixed monthly stays discount", () => {
+    const listing = {
+      basePrice: 200000, discountedPrice: 150000, monthlyPrice: 3000000,
+      minimumNights: 7, monthlyStayDiscount: 50000,
+    };
+
+    it("accepts the exact minimum and longer stays, but not shorter or incomplete ones", () => {
+      expect(meetsMinimumStay(6, 7)).toBe(false);
+      expect(meetsMinimumStay(7, 7)).toBe(true);
+      expect(meetsMinimumStay(8, 7)).toBe(true);
+      expect(meetsMinimumStay(1, null)).toBe(true);
+      expect(meetsMinimumStay(0, 7)).toBe(false);
+    });
+
+    it("deducts a flat amount after the nightly sale price and platform fee", () => {
+      expect(computeStayPricing(listing, 7, settings)).toMatchObject({
+        base: 1050000, platformFee: 105000, totalBeforeDiscount: 1155000,
+        monthlyStayDiscount: 50000, total: 1105000,
+      });
+    });
+
+    it.each([
+      [30, 3300000, 3250000],
+      [31, 3410000, 3360000],
+      [60, 6600000, 6550000],
+    ])("deducts the offer only once for %i nights on the existing monthly rate", (nights, before, total) => {
+      expect(computeStayPricing(listing, nights, settings)).toMatchObject({
+        totalBeforeDiscount: before, monthlyStayDiscount: 50000, total,
+      });
+    });
+
+    it("does not grant an offer below the threshold or without a configured minimum", () => {
+      expect(computeStayPricing(listing, 6, settings).monthlyStayDiscount).toBe(0);
+      expect(computeStayPricing({ ...listing, minimumNights: null }, 30, settings).monthlyStayDiscount).toBe(0);
+      expect(computeStayPricing({ ...listing, monthlyStayDiscount: null }, 7, settings).total).toBe(1155000);
+    });
+
+    it("preserves fee rounding and rejects a discount that would make the stay free or negative", () => {
+      const quote = computeStayPricing({
+        basePrice: 109900, minimumNights: 2, monthlyStayDiscount: 9900,
+      }, 2, settings);
+      expect(quote.totalBeforeDiscount).toBe(241800);
+      expect(quote.total).toBe(231900);
+      expect(() => computeStayPricing({
+        basePrice: 100000, minimumNights: 1, monthlyStayDiscount: 110000,
+      }, 1, settings)).toThrow("lower than the booking total");
+    });
   });
 
   it("rounds the platform fee to the nearest whole rupee", () => {

@@ -38,6 +38,7 @@ export type ReserveCta = { label: string; shortLabel: string } & (
   | { kind: "incomplete"; missing: MissingTripField[] }
   /** The chosen nights are already booked. */
   | { kind: "unavailable" }
+  | { kind: "minimum-stay"; minimumNights: number }
   /** Signed-out guest: send them to sign-in first. */
   | { kind: "login"; href: string }
   /** Everything is set — open the booking options (Airbnb / pay direct / WhatsApp). */
@@ -63,6 +64,8 @@ export type LiveListingData = {
   basePrice: number;
   discountedPrice: number | null;
   monthlyPrice: number | null;
+  minimumNights: number | null;
+  monthlyStayDiscount: number | null;
   platformFeePercent: number;
   blockedRanges: { startDate: string; endDate: string }[];
 };
@@ -90,6 +93,8 @@ type BookingState = {
   setLiveListing: (next: LiveListingData | null) => void;
   /** Blocked ranges actually in force — the live ones when we have them. */
   blockedRanges: { startDate: string; endDate: string }[];
+  minimumNights: number | null;
+  monthlyStayDiscount: number | null;
 };
 
 const BookingCtx = createContext<BookingState | null>(null);
@@ -114,6 +119,8 @@ export function BookingProvider({
   initialCheckOut = "",
   initialGuests = 1,
   blockedRanges = [],
+  minimumNights: minimumNightsProp = null,
+  monthlyStayDiscount: monthlyStayDiscountProp = null,
 }: {
   children: React.ReactNode;
   initialCheckIn?: string;
@@ -121,6 +128,8 @@ export function BookingProvider({
   initialGuests?: number;
   /** Booked/blocked ranges (start inclusive, end exclusive) to enforce. */
   blockedRanges?: { startDate: string; endDate: string }[];
+  minimumNights?: number | null;
+  monthlyStayDiscount?: number | null;
 }) {
   const [checkIn, setCheckIn] = useState(initialCheckIn);
   const [checkOut, setCheckOut] = useState(initialCheckOut);
@@ -134,6 +143,8 @@ export function BookingProvider({
   // Once the Reserve re-check has told us what the server really holds, that
   // list is the one every surface (and the selection rule below) enforces.
   const effectiveRanges = liveListing?.blockedRanges ?? blockedRanges;
+  const minimumNights = liveListing ? liveListing.minimumNights : minimumNightsProp;
+  const monthlyStayDiscount = liveListing ? liveListing.monthlyStayDiscount : monthlyStayDiscountProp;
 
   const blockDates = useMemo<DateRange[]>(
     () =>
@@ -160,7 +171,8 @@ export function BookingProvider({
     const next = nextRangeSelection(
       { checkIn: parseYmd(checkIn), checkOut: parseYmd(checkOut) },
       day,
-      blockDates
+      blockDates,
+      minimumNights
     );
     if (!next) return; // click ignored (e.g. an occupied night as check-in)
     setCheckIn(next.checkIn ? toYmd(next.checkIn) : "");
@@ -186,6 +198,8 @@ export function BookingProvider({
         liveListing,
         setLiveListing,
         blockedRanges: effectiveRanges,
+        minimumNights,
+        monthlyStayDiscount,
       }}
     >
       {children}

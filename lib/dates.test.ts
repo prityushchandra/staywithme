@@ -7,10 +7,41 @@ import {
   isSelectableCheckout,
   nextRangeSelection,
   getDayAvailability,
+  dayHint,
   type DateRange,
 } from "./dates";
 
 const d = (s: string) => new Date(s + "T00:00:00Z");
+
+describe("minimum-stay calendar selection", () => {
+  const start = d("2027-03-01");
+  const pending = { checkIn: start, checkOut: null };
+
+  it("disables short checkouts with an explanation without restarting the chosen check-in", () => {
+    const day = d("2027-03-03");
+    const status = getDayAvailability(day, { ...pending, minimumNights: 3 });
+    expect(status).toMatchObject({ kind: "minimum-stay", disabled: true });
+    expect(dayHint(status)).toBe("Minimum 3 nights");
+    expect(nextRangeSelection(pending, day, [], 3)).toBeNull();
+  });
+
+  it("allows the exact minimum, including same-day turnover, and longer free stays", () => {
+    const checkout = d("2027-03-04");
+    const blocks = [{ startDate: checkout, endDate: d("2027-03-06") }];
+    expect(getDayAvailability(checkout, { ...pending, minimumNights: 3, blocks }))
+      .toMatchObject({ kind: "checkout-only", disabled: false });
+    expect(nextRangeSelection(pending, checkout, blocks, 3)).toEqual({ checkIn: start, checkOut: checkout });
+    expect(nextRangeSelection(pending, d("2027-03-05"), [], 3)?.checkOut).toEqual(d("2027-03-05"));
+  });
+
+  it("keeps clearing, restarting past a blocked range, and admin overrides usable", () => {
+    expect(getDayAvailability(start, { ...pending, minimumNights: 30 })).toMatchObject({ clearsSelection: true, disabled: false });
+    const blocks = [{ startDate: d("2027-03-02"), endDate: d("2027-03-03") }];
+    expect(nextRangeSelection(pending, d("2027-03-04"), blocks, 30))
+      .toEqual({ checkIn: d("2027-03-04"), checkOut: null });
+    expect(getDayAvailability(d("2027-03-02"), { ...pending, minimumNights: 30, allowBlocked: true }).disabled).toBe(false);
+  });
+});
 
 describe("rangesOverlap", () => {
   it("detects clear overlap", () => {
