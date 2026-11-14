@@ -10,6 +10,7 @@ import {
   Lock,
   MessageCircle,
   Phone,
+  RefreshCw,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -34,7 +35,7 @@ import { isUploadedGuestDocument, uploadGuestFiles, type GuestUpload, type Guest
  * "paying" spans order creation and the gateway window; "verifying" is the few
  * seconds after Razorpay hands back a signature, which must not be interrupted.
  */
-type Stage = "form" | "paying" | "verifying" | "done";
+type Stage = "form" | "paying" | "verifying" | "recheck" | "done";
 
 function prettySize(bytes: number) {
   return bytes < 1024 * 1024
@@ -262,6 +263,35 @@ export function BookDirectSheet({
     reason.trim().length >= 3 &&
     phone.trim().length >= 6;
 
+  async function checkPayment(handler?: unknown, allowUnpaidRetry = false) {
+    if (!bookingId) return;
+    setStage("verifying");
+    setError(null);
+    try {
+      const response = await fetch(`/api/bookings/online/${bookingId}/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: handler === undefined ? undefined : JSON.stringify(handler),
+        signal: AbortSignal.timeout(45_000),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not check your payment.");
+      if (result.paid === true) {
+        setStage("done");
+      } else if (result.paid === false && allowUnpaidRetry) {
+        setStage("form");
+      } else {
+        setStage("recheck");
+        setError("Razorpay has not confirmed the payment yet. If you were debited, do not pay again. Please check again shortly.");
+      }
+    } catch (error) {
+      setStage("recheck");
+      setError(error instanceof Error
+        ? `${error.message} Please check payment status instead of paying again.`
+        : "Could not check your payment. Please check its status instead of paying again.");
+    }
+  }
+
   async function pay() {
     if (!bookingId || !ready || documentRequest.current) return;
     setStage("paying");
@@ -288,29 +318,13 @@ export function BookDirectSheet({
       });
       closeCheckout.current = null;
 
-      setStage("verifying");
-      const verify = await fetch(`/api/bookings/online/${bookingId}/verify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(handler),
-      });
-      const result = await verify.json().catch(() => ({}));
-      if (!verify.ok) throw new Error(result.error || "We could not confirm that payment.");
-      setStage("done");
+      await checkPayment(handler);
     } catch (err) {
       closeCheckout.current = null;
       // A dismissed sheet is not a failure — but the guest may still have been
       // debited in a flaky network, so ask the gateway before giving up.
       if (err instanceof RazorpayCheckoutError && err.reason === "dismissed" && bookingId) {
-        setStage("verifying");
-        const recon = await fetch(`/api/bookings/online/${bookingId}/verify`, { method: "POST" })
-          .then((r) => r.json())
-          .catch(() => ({ paid: false }));
-        if (recon?.paid) {
-          setStage("done");
-          return;
-        }
-        setStage("form");
+        await checkPayment(undefined, true);
         return;
       }
       setError(err instanceof Error ? err.message : "Payment failed.");
@@ -363,7 +377,7 @@ export function BookDirectSheet({
     // rules it renders but cannot be clicked or typed into — the guest sees a
     // frozen payment screen. Standing down to non-modal for the duration of
     // the gateway hands the page back.
-    <Sheet open={open} onOpenChange={close} modal={stage === "form" || stage === "done"}>
+    <Sheet open={open} onOpenChange={close} modal={stage !== "paying" && stage !== "verifying"}>
       <SheetContent
         side="bottom"
         className="mx-auto max-h-[92vh] gap-5 rounded-t-3xl p-6 sm:max-w-lg sm:rounded-3xl"
@@ -418,6 +432,7 @@ export function BookDirectSheet({
               <Textarea
                 id="reason"
                 rows={2}
+                disabled={stage !== "form"}
                 value={reason}
                 maxLength={500}
                 onChange={(e) => setReason(e.target.value)}
@@ -430,6 +445,7 @@ export function BookDirectSheet({
               <Input
                 id="contactPhone"
                 type="tel"
+                disabled={stage !== "form"}
                 inputMode="tel"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
@@ -553,10 +569,14 @@ export function BookDirectSheet({
                 variant="brand"
                 size="lg"
                 className="w-full"
-                disabled={!ready || stage !== "form" || starting}
-                onClick={pay}
+                disabled={stage === "recheck" ? !bookingId : !ready || stage !== "form" || starting}
+                onClick={() => void (stage === "recheck" ? checkPayment() : pay())}
               >
-                {stage === "verifying" ? (
+                {stage === "recheck" ? (
+                  <>
+                    <RefreshCw className="mr-2 h-4 w-4" /> Check payment status
+                  </>
+                ) : stage === "verifying" ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Confirming your payment…
                   </>

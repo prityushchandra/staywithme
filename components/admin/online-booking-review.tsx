@@ -6,6 +6,9 @@ import { AlertTriangle, Check, MessageCircle, Phone, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { BookingAttachments, type BookingDocument } from "@/components/admin/booking-attachments";
 import { formatINR } from "@/lib/pricing";
+import { SendReceiptButton } from "@/components/admin/send-receipt-button";
+import { BOOKING_RECEIPT_MESSAGE } from "@/lib/receipt-share";
+import { guestWhatsAppHref } from "@/lib/guest-messages";
 
 // One paid-but-unapproved online booking, with everything the admin needs to
 // decide: who is coming, why, what they paid, and their actual ID documents.
@@ -30,6 +33,8 @@ export type OnlineBookingCard = {
   paidAt: string | null;
   razorpayPaymentId: string | null;
   docs: BookingDocument[];
+  receiptUrl: string;
+  receiptFileName: string;
 };
 
 function digits(phone: string | null) {
@@ -135,6 +140,14 @@ export function OnlineBookingReview({ booking: b }: { booking: OnlineBookingCard
             <BookingAttachments docs={b.docs} />
             {b.docs.length === 0 && (
               <span className="text-xs text-destructive">No IDs attached.</span>
+            )}
+            {b.amountPaid > 0 && (
+              <SendReceiptButton
+                receiptUrl={b.receiptUrl}
+                chatLink={guestWhatsAppHref(b.contactPhone ?? b.guestPhone, BOOKING_RECEIPT_MESSAGE)}
+                message={BOOKING_RECEIPT_MESSAGE}
+                fileName={b.receiptFileName}
+              />
             )}
           </div>
 

@@ -115,6 +115,26 @@ uploading.
   (Prisma/bcrypt), so middleware never bundles Prisma.
 - DB-backed pages are `force-dynamic`, so the build never connects to a database.
 
+## Direct payments and bank settlements
+
+Direct online bookings use the server-only `RAZORPAY_KEY_ID` and
+`RAZORPAY_KEY_SECRET`. Configure a separate `RAZORPAY_WEBHOOK_SECRET` in the
+deployment and register `https://<production-host>/api/webhooks/razorpay` in the
+same Razorpay account and mode for `payment.captured` and `order.paid`.
+Setting the environment variable alone does not register the webhook.
+The callback verifies the raw-body signature, rechecks the captured order and
+amount, and atomically records payment and holds dates as `AWAITING_APPROVAL`.
+Repeated callbacks do not create another hold or automatically approve a stay.
+
+Admins can open `/admin/payments` for monthly Razorpay payments, fees, refunds,
+bank transfers, UTRs and settlement reconciliation. Reports use Indian month
+boundaries and cover the entire connected Razorpay account, not just linked
+StayWithMe bookings. Payment fees already include GST. Settlement creation time
+is not treated as the bank-credit time, and no future arrival date is guessed.
+Reports paginate the provider APIs; reaching 2,000 entries in any section is
+explicitly marked as incomplete. A captured payment linked to a pending online
+draft can be checked and recovered from this page without charging again.
+
 ## Project structure
 
 ```

@@ -111,6 +111,36 @@ function hide(index = 1) {
 }
 
 describe("month-aware listed-only P&L", () => {
+  it("counts confirmed Razorpay and WhatsApp guest stays alongside manual bookings, not pending or cancelled payments", async () => {
+    hide();
+    fixture.earnings = [];
+    const paid = {
+      listingId: "visible", checkIn: utc("2026-10-31"), checkOut: utc("2026-11-02"),
+      totalAmount: 32_000, amountPaid: 32_000, source: "ONLINE", status: "CONFIRMED",
+    };
+    const records = [
+      paid,
+      { ...paid, source: "WHATSAPP", checkIn: utc("2026-11-06"), checkOut: utc("2026-11-07"), totalAmount: 12_000 },
+      { ...paid, status: "AWAITING_APPROVAL", totalAmount: 999_999 },
+      { ...paid, status: "PENDING", amountPaid: 0, totalAmount: 999_999 },
+      { ...paid, status: "CANCELLED", totalAmount: 999_999 },
+    ];
+    mocks.booking.findMany.mockImplementation(async ({ where }: { where: { status: string } }) =>
+      records.filter((row) => row.status === where.status));
+    const result = await getPnlData();
+    expect(mocks.booking.findMany).toHaveBeenCalledWith({
+      where: { status: "CONFIRMED" },
+      select: { listingId: true, checkIn: true, checkOut: true, totalAmount: true },
+    });
+    expect(summarize(result.rows.filter((row) => row.month === "2026-10" && row.listingId === "visible"))).toMatchObject({
+      revenueDirect: 16_000, nightsDirect: 1,
+    });
+    expect(summarize(result.rows.filter((row) => row.month === "2026-11"))).toMatchObject({
+      revenueDirect: 28_000, revenueOffline: 20_000, revenueOnline: 30_000, revenueTotal: 78_000,
+      nightsDirect: 2,
+    });
+  });
+
   it("immediately excludes all current/future metrics, reallocates all net pay, and preserves past rows", async () => {
     const original = await getPnlData();
     hide();
@@ -227,6 +257,7 @@ describe("P&L Excel scope with mocked database and calendar sync", () => {
     const summary = sheets.find((s) => s.name === "Summary")!.rows;
     expect(summary).toEqual(expect.arrayContaining([
       ["Total revenue", 1_000],
+      ["Guest bookings", 100],
       ["Days booked", "7"],
       ["Staff salaries", 1_000.01],
       ["Total expenses", 1_120.01],

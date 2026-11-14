@@ -39,7 +39,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
     return NextResponse.json({ ok: true, paid: true });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Could not confirm the payment.";
-    return NextResponse.json({ error: message }, { status: 502 });
+    console.error("Guest payment verification failed", { bookingId: id, error: err });
+    return NextResponse.json(
+      { error: "Could not check the payment. Please retry checking its status; do not pay again yet." },
+      { status: 502 }
+    );
   }
 }

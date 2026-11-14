@@ -6,6 +6,7 @@ import { createBookingOrder } from "@/lib/online-bookings";
 import { razorpayConfigured, razorpayPublicKey } from "@/lib/razorpay";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const schema = z.object({
   reasonForVisit: z.string().trim().min(3).max(500),
@@ -42,7 +43,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   const { count } = await prisma.booking.updateMany({
-    where: { id, guestId: session.user.id, status: "PENDING" },
+    where: { id, guestId: session.user.id, status: "PENDING", source: "ONLINE" },
     data: {
       reasonForVisit: parsed.data.reasonForVisit,
       contactPhone: parsed.data.contactPhone,
@@ -61,7 +62,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       description: result.description,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Could not start the payment.";
-    return NextResponse.json({ error: message }, { status: 502 });
+    console.error("Creating booking payment failed", { bookingId: id, error: err });
+    return NextResponse.json({ error: "Could not check or start the payment. Please retry shortly." }, { status: 502 });
   }
 }

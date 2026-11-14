@@ -88,9 +88,9 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
 }
 
 const SOURCE_LABEL: Record<PnlSource, string> = {
-  both: "Online + offline",
-  online: "Online (Airbnb)",
-  offline: "Offline (direct)",
+  both: "All channels",
+  online: "Airbnb / other OTAs",
+  offline: "Direct bookings",
 };
 
 export function PnlDashboard({
@@ -141,10 +141,10 @@ export function PnlDashboard({
 
   const mix = useMemo(() => {
     const out: { name: string; value: number }[] = [];
-    if (source !== "offline") out.push({ name: "Online (Airbnb)", value: total.revenueOnline });
+    if (source !== "offline") out.push({ name: "Airbnb / other OTAs", value: total.revenueOnline });
     if (source !== "online") {
       out.push({ name: "Offline / walk-in", value: total.revenueOffline });
-      out.push({ name: "Direct (WhatsApp)", value: total.revenueDirect });
+      out.push({ name: "Guest bookings", value: total.revenueDirect });
     }
     return out;
   }, [total, source]);
@@ -178,14 +178,18 @@ export function PnlDashboard({
             One-off setup spend is tracked separately and left out of profit.
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
+            Direct bookings include confirmed guest bookings (Razorpay and WhatsApp) and offline / walk-in stays.
+            Paid requests awaiting approval count only after approval. Revenue is split across the months of the stay.
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
             Listing changes apply to the whole current month and later months. Earlier months keep their recorded listing scope.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ToggleSelect value={source} onValueChange={(v) => setSource(v as PnlSource)} triggerClassName="h-9 w-[170px]" ariaLabel="Revenue channel">
-            <SelectItem value="both">Online + offline</SelectItem>
-            <SelectItem value="online">Online (Airbnb)</SelectItem>
-            <SelectItem value="offline">Offline (direct)</SelectItem>
+            <SelectItem value="both">{SOURCE_LABEL.both}</SelectItem>
+            <SelectItem value="online">{SOURCE_LABEL.online}</SelectItem>
+            <SelectItem value="offline">{SOURCE_LABEL.offline}</SelectItem>
           </ToggleSelect>
           <ToggleSelect value={String(fy)} onValueChange={(v) => { setFy(Number(v)); setMonth("all"); }} triggerClassName="h-9 w-[140px]" ariaLabel="Financial year">
             {fyStarts.map((y) => (

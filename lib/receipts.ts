@@ -1,5 +1,6 @@
 // Shared helpers for generated receipts (booking + staff payouts).
 import { prisma } from "./db";
+export { bookingReceiptFileName } from "./receipt-share";
 
 const RECEIPT_NUMBER = /^SWM-\d{4}-(\d+)$/;
 
@@ -58,20 +59,4 @@ export async function withReceiptNumber<T>(
     }
   }
   throw lastError;
-}
-
-/**
- * Friendly download name for a booking receipt, e.g.
- * "booking_receipt_ravi_kumar_2026-08-15.pdf" — from the guest's name and
- * their check-in date. The name is slugified to safe filename characters and
- * the date is the UTC calendar day (bookings are stored at UTC midnight).
- */
-export function bookingReceiptFileName(guestName: string, checkIn: Date): string {
-  const name =
-    guestName
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "_")
-      .replace(/^_+|_+$/g, "") || "guest";
-  const date = checkIn.toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
-  return `booking_receipt_${name}_${date}.pdf`;
 }

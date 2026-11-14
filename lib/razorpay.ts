@@ -1,11 +1,10 @@
-// Razorpay, server side. A thin REST client rather than the SDK: there is one
-// order to create and one signature to verify, so pulling in a dependency (and
-// its types) earns nothing.
+// Server-side Razorpay client. Private credentials never leave this module.
 //
 // Everything here is optional. Until the keys are set the whole online-booking
 // path stays dark and Reserve falls back to the WhatsApp flow, so a missing key
 // is never a crash — call `razorpayConfigured()` before offering to take money.
 import { createHmac, timingSafeEqual } from "crypto";
+import { z } from "zod";
 
 const API_BASE = "https://api.razorpay.com/v1";
 
@@ -37,9 +36,10 @@ async function razorpayRequest<T>(
     method,
     headers: { Authorization: authHeader(), "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
+    cache: "no-store",
+    signal: AbortSignal.timeout(15_000),
   });
-  const text = await res.text().catch(() => "");
-  const data = text ? JSON.parse(text) : {};
+  const data = await res.json();
   if (!res.ok) {
     const desc =
       (data as RazorpayErrorBody)?.error?.description ||
@@ -49,12 +49,18 @@ async function razorpayRequest<T>(
   return data as T;
 }
 
-export type RazorpayOrder = {
-  id: string;
-  amount: number;
-  currency: string;
-  status: string;
-};
+const orderSchema = z.object({
+  id: z.string().min(1),
+  amount: z.number().int().positive(),
+  currency: z.string(),
+  status: z.string(),
+});
+
+export type RazorpayOrder = z.infer<typeof orderSchema>;
+
+export async function fetchRazorpayOrder(orderId: string): Promise<RazorpayOrder> {
+  return orderSchema.parse(await razorpayRequest<unknown>(`/orders/${encodeURIComponent(orderId)}`, "GET"));
+}
 
 /**
  * Create an order. `amountPaise` is passed through untouched — the rest of this
@@ -65,26 +71,32 @@ export async function createRazorpayOrder(
   receipt: string,
   notes?: Record<string, string>
 ): Promise<RazorpayOrder> {
-  return razorpayRequest<RazorpayOrder>("/orders", "POST", {
+  return orderSchema.parse(await razorpayRequest<unknown>("/orders", "POST", {
     amount: Math.round(amountPaise),
     currency: "INR",
     receipt: receipt.slice(0, 40),
     notes,
-  });
+  }));
 }
 
-export type RazorpayPayment = {
-  id: string;
-  order_id: string | null;
-  status: string;
-  amount: number;
-  method?: string;
-  email?: string;
-  contact?: string;
-};
+const paymentSchema = z.object({
+  id: z.string().min(1),
+  order_id: z.string().nullable(),
+  status: z.string(),
+  amount: z.number().int().nonnegative(),
+  currency: z.string(),
+  created_at: z.number().int().positive(),
+  captured: z.boolean(),
+  method: z.string().nullish(),
+  amount_refunded: z.number().int().nonnegative(),
+  fee: z.number().int().nonnegative().nullable(),
+  tax: z.number().int().nonnegative().nullable(),
+});
+
+export type RazorpayPayment = z.infer<typeof paymentSchema>;
 
 export async function fetchRazorpayPayment(paymentId: string): Promise<RazorpayPayment> {
-  return razorpayRequest<RazorpayPayment>(`/payments/${paymentId}`, "GET");
+  return paymentSchema.parse(await razorpayRequest<unknown>(`/payments/${encodeURIComponent(paymentId)}`, "GET"));
 }
 
 /**
@@ -93,11 +105,74 @@ export async function fetchRazorpayPayment(paymentId: string): Promise<RazorpayP
  * the money exists, so we look it up rather than losing the booking.
  */
 export async function listRazorpayOrderPayments(orderId: string): Promise<RazorpayPayment[]> {
-  const data = await razorpayRequest<{ items?: RazorpayPayment[] }>(
-    `/orders/${orderId}/payments`,
+  const data = await razorpayRequest<unknown>(
+    `/orders/${encodeURIComponent(orderId)}/payments`,
     "GET"
   );
-  return data.items ?? [];
+  return z.object({ items: z.array(paymentSchema) }).parse(data).items;
+}
+
+const settlementSchema = z.object({
+  id: z.string().min(1),
+  amount: z.number().int().nonnegative(),
+  currency: z.string().optional(),
+  status: z.string(),
+  fees: z.number().int().nonnegative(),
+  tax: z.number().int().nonnegative(),
+  utr: z.string().nullable(),
+  created_at: z.number().int().positive(),
+});
+
+const settlementTransactionSchema = z.object({
+  entity_id: z.string().min(1),
+  type: z.string(),
+  amount: z.number().int().nonnegative(),
+  currency: z.string(),
+  credit: z.number().int().nonnegative(),
+  debit: z.number().int().nonnegative(),
+  fee: z.number().int().nonnegative(),
+  tax: z.number().int().nonnegative(),
+  on_hold: z.boolean(),
+  settled: z.boolean(),
+  created_at: z.number().int().positive(),
+  settled_at: z.number().int().nonnegative().nullable(),
+  settlement_id: z.string().nullable(),
+  settlement_utr: z.string().nullable(),
+  order_id: z.string().nullable(),
+  payment_id: z.string().nullable(),
+});
+
+export type RazorpaySettlement = z.infer<typeof settlementSchema>;
+export type RazorpaySettlementTransaction = z.infer<typeof settlementTransactionSchema>;
+export type RazorpayCollection<T> = { items: T[]; truncated: boolean };
+
+async function collectRazorpay<T>(
+  path: string, params: Record<string, string>, schema: z.ZodType<T>
+): Promise<RazorpayCollection<T>> {
+  const items: T[] = [];
+  const pageSize = 100;
+  for (let page = 0; page < 20; page++) {
+    const query = new URLSearchParams({ ...params, count: String(pageSize), skip: String(page * pageSize) });
+    const data = await razorpayRequest<unknown>(`${path}?${query}`, "GET");
+    const batch = z.object({ items: z.array(schema) }).parse(data).items;
+    items.push(...batch);
+    if (batch.length < pageSize) return { items, truncated: false };
+  }
+  return { items, truncated: true };
+}
+
+export function listRazorpayPayments(from: number, to: number) {
+  return collectRazorpay("/payments", { from: String(from), to: String(to) }, paymentSchema);
+}
+
+export function listRazorpaySettlements(from: number, to: number) {
+  return collectRazorpay("/settlements", { from: String(from), to: String(to) }, settlementSchema);
+}
+
+export function listRazorpaySettlementTransactions(year: number, month: number) {
+  return collectRazorpay("/settlements/recon/combined", {
+    year: String(year), month: String(month),
+  }, settlementTransactionSchema);
 }
 
 function safeEqualHex(a: string, b: string): boolean {

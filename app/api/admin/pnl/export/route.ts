@@ -22,9 +22,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const SOURCE_LABEL: Record<PnlSource, string> = {
-  both: "Online + offline",
-  online: "Online (Airbnb)",
-  offline: "Offline (direct)",
+  both: "All channels",
+  online: "Airbnb / other OTAs",
+  offline: "Direct bookings",
 };
 
 function rupees(paise: number): number {
@@ -81,10 +81,10 @@ export async function GET(req: Request) {
     [],
     ["Metric", "Amount"],
   ];
-  if (source !== "offline") summaryRows.push(["Online (Airbnb)", rupees(total.revenueOnline)]);
+  if (source !== "offline") summaryRows.push(["Airbnb / other OTAs", rupees(total.revenueOnline)]);
   if (source !== "online") {
     summaryRows.push(["Offline / walk-in", rupees(total.revenueOffline)]);
-    summaryRows.push(["Direct (WhatsApp)", rupees(total.revenueDirect)]);
+    summaryRows.push(["Guest bookings", rupees(total.revenueDirect)]);
   }
   summaryRows.push(
     ["Total revenue", rupees(scopedTotal.revenue)],

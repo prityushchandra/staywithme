@@ -21,9 +21,11 @@ import { getPlatformSettings } from "./settings";
 import { unitBlock } from "./bookings";
 import {
   createRazorpayOrder,
+  fetchRazorpayOrder,
   fetchRazorpayPayment,
   listRazorpayOrderPayments,
   verifyRazorpayPaymentSignature,
+  type RazorpayPayment,
 } from "./razorpay";
 import crypto from "crypto";
 import { GUEST_DOCUMENT_SELECT, guestDocumentGroups } from "./booking-documents";
@@ -149,17 +151,31 @@ export async function startOnlineBooking(input: {
       checkIn: input.checkIn,
       checkOut: input.checkOut,
     },
-    select: { id: true },
+    select: { id: true, razorpayOrderId: true, totalAmount: true, guests: true },
   });
 
+  if (existing?.razorpayOrderId) {
+    const recovered = await reconcileBookingPayment(existing.id, input.guestId);
+    if (!recovered.ok) return recovered;
+    if (recovered.paid) return fail("Payment already received. Please open My bookings; do not pay again.");
+    if (existing.guests !== input.guests) {
+      return fail("Checkout has already started for this stay. Please contact us to change the guest count.");
+    }
+  }
   const data = {
     guests: input.guests,
-    totalAmount: quote.total,
+    totalAmount: existing?.razorpayOrderId ? existing.totalAmount : quote.total,
     contactPhone: input.contactPhone || null,
   };
 
   const booking = existing
-    ? await prisma.booking.update({ where: { id: existing.id }, data, select: { id: true } })
+    ? await prisma.booking.update({
+        where: {
+          id: existing.id,
+          AND: { status: "PENDING", razorpayOrderId: existing.razorpayOrderId ?? null },
+        },
+        data, select: { id: true },
+      })
     : await prisma.booking.create({
         data: {
           ...data,
@@ -183,7 +199,7 @@ export async function startOnlineBooking(input: {
     : [];
 
   return {
-    ok: true, bookingId: booking.id, total: quote.total, nights: quote.nights,
+    ok: true, bookingId: booking.id, total: data.totalAmount, nights: quote.nights,
     docs: guestDocumentGroups(docs).flatMap((guest) =>
       guest.documents.map((doc) => ({ ...doc, position: guest.position, name: guest.name }))
     ),
@@ -212,13 +228,28 @@ export async function createBookingOrder(
       checkOut: true,
       guests: true,
       status: true,
+      source: true,
+      totalAmount: true,
       reasonForVisit: true,
       razorpayOrderId: true,
       idDocs: { select: GUEST_DOCUMENT_SELECT, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
     },
   });
-  if (!booking || booking.guestId !== guestId) return fail("Booking not found.");
+  if (!booking || booking.guestId !== guestId || booking.source !== "ONLINE") return fail("Booking not found.");
   if (booking.status !== "PENDING") return fail("This booking has already been paid for.");
+  if (booking.razorpayOrderId) {
+    const payments = await listRazorpayOrderPayments(booking.razorpayOrderId);
+    const captured = payments.find((payment) => payment.status === "captured");
+    if (captured) {
+      const recovered = await holdAndNotify(booking, captured);
+      return recovered.ok
+        ? fail("Payment already received. Please open My bookings; do not pay again.")
+        : recovered;
+    }
+    if (payments.some((payment) => payment.status === "authorized" || payment.amount_refunded > 0)) {
+      return fail("This order already has a payment in progress or a refund. Please contact us before paying again.");
+    }
+  }
   if (!booking.reasonForVisit?.trim()) return fail("Please tell us the reason for your visit.");
   const covered = new Set(guestDocumentGroups(booking.idDocs)
     .filter((guest) => guest.documents.length > 0).map((guest) => guest.position));
@@ -230,15 +261,26 @@ export async function createBookingOrder(
   if (!quote.ok) return quote;
   if (!quote.available) return fail("Those dates have just been taken. Please pick another range.");
 
-  const order = await createRazorpayOrder(quote.total, `stay_${booking.id.slice(-12)}`, {
-    bookingId: booking.id,
-    listingId: booking.listingId,
-  });
+  const order = booking.razorpayOrderId
+    ? await fetchRazorpayOrder(booking.razorpayOrderId)
+    : await createRazorpayOrder(quote.total, `stay_${booking.id.slice(-12)}`, {
+        bookingId: booking.id,
+        listingId: booking.listingId,
+      });
+  if (order.amount !== quote.total || order.currency !== "INR") {
+    return fail("The price changed after checkout started. Please contact us before paying again.");
+  }
+  if (order.status !== "created" && order.status !== "attempted") {
+    return fail("This payment order is already being processed. Please check My bookings before paying again.");
+  }
 
-  await prisma.booking.update({
-    where: { id: booking.id },
-    data: { totalAmount: quote.total, razorpayOrderId: order.id },
-  });
+  if (!booking.razorpayOrderId) {
+    const claimed = await prisma.booking.updateMany({
+      where: { id: booking.id, status: "PENDING", razorpayOrderId: null },
+      data: { totalAmount: quote.total, razorpayOrderId: order.id },
+    });
+    if (!claimed.count) return fail("Another checkout is already in progress. Please reopen your booking before paying.");
+  }
 
   return {
     ok: true,
@@ -270,13 +312,17 @@ export async function confirmBookingPayment(
       checkOut: true,
       guests: true,
       status: true,
+      source: true,
       totalAmount: true,
       razorpayOrderId: true,
       blockId: true,
     },
   });
-  if (!booking || booking.guestId !== guestId) return fail("Booking not found.");
-  if (booking.status !== "PENDING") return { ok: true, alreadyDone: true };
+  if (!booking || booking.guestId !== guestId || booking.source !== "ONLINE") return fail("Booking not found.");
+  if (booking.status === "AWAITING_APPROVAL" || booking.status === "CONFIRMED") {
+    return { ok: true, alreadyDone: true };
+  }
+  if (booking.status !== "PENDING") return fail("This booking is no longer awaiting payment.");
   if (!booking.razorpayOrderId || booking.razorpayOrderId !== payload.razorpay_order_id) {
     return fail("That payment does not belong to this booking.");
   }
@@ -291,11 +337,8 @@ export async function confirmBookingPayment(
   }
 
   // Trust the gateway over the browser for the amount actually captured.
-  const captured = await fetchRazorpayPayment(payload.razorpay_payment_id).catch(() => null);
-  const amountPaid = captured?.amount ?? booking.totalAmount;
-
-  await holdAndNotify(booking, payload.razorpay_payment_id, amountPaid);
-  return { ok: true, alreadyDone: false };
+  const captured = await fetchRazorpayPayment(payload.razorpay_payment_id);
+  return holdAndNotify(booking, captured);
 }
 
 /**
@@ -317,20 +360,23 @@ export async function reconcileBookingPayment(
       checkOut: true,
       guests: true,
       status: true,
+      source: true,
       totalAmount: true,
       razorpayOrderId: true,
       blockId: true,
     },
   });
-  if (!booking || booking.guestId !== guestId) return fail("Booking not found.");
-  if (booking.status !== "PENDING") return { ok: true, paid: true };
+  if (!booking || booking.guestId !== guestId || booking.source !== "ONLINE") return fail("Booking not found.");
+  if (booking.status === "AWAITING_APPROVAL" || booking.status === "CONFIRMED") return { ok: true, paid: true };
+  if (booking.status !== "PENDING") return fail("This booking is no longer awaiting payment.");
   if (!booking.razorpayOrderId) return { ok: true, paid: false };
 
-  const payments = await listRazorpayOrderPayments(booking.razorpayOrderId).catch(() => []);
+  const payments = await listRazorpayOrderPayments(booking.razorpayOrderId);
   const captured = payments.find((p) => p.status === "captured");
   if (!captured) return { ok: true, paid: false };
 
-  await holdAndNotify(booking, captured.id, captured.amount);
+  const result = await holdAndNotify(booking, captured);
+  if (!result.ok) return result;
   return { ok: true, paid: true };
 }
 
@@ -341,6 +387,7 @@ type PayableBooking = {
   checkOut: Date;
   guests: number;
   totalAmount: number;
+  razorpayOrderId: string | null;
 };
 
 /**
@@ -354,20 +401,59 @@ type PayableBooking = {
  */
 async function holdAndNotify(
   booking: PayableBooking,
-  paymentId: string,
-  amountPaid: number
-): Promise<void> {
-  const clashes = await overlappingBlocks(booking.listingId, booking.checkIn, booking.checkOut);
-  const conflicted = clashes.length > 0;
+  payment: RazorpayPayment
+): Promise<{ ok: true; alreadyDone: boolean } | Fail> {
+  if (!booking.razorpayOrderId || payment.order_id !== booking.razorpayOrderId) {
+    return fail("That payment does not belong to this booking.");
+  }
+  if (payment.status !== "captured" || !payment.captured) {
+    return fail("Your payment is not captured yet. Please check its status before trying to pay again.");
+  }
+  if (payment.currency !== "INR" || payment.amount !== booking.totalAmount || payment.amount <= 0) {
+    return fail("The captured payment does not match the booking amount. Please contact us before paying again.");
+  }
+  if (payment.amount_refunded !== 0) {
+    return fail("This payment has already been refunded in part or in full. Please contact us.");
+  }
 
-  const guestRow = await prisma.booking.findUnique({
-    where: { id: booking.id },
-    select: { guest: { select: { name: true, phone: true } } },
-  });
+  const result = await prisma.$transaction(async (tx) => {
+    // Claim and hold atomically: a webhook can race the browser or an admin retry.
+    const claimed = await tx.booking.updateMany({
+      where: {
+        id: booking.id, source: "ONLINE", status: "PENDING",
+        razorpayOrderId: booking.razorpayOrderId, totalAmount: booking.totalAmount,
+      },
+      data: {
+        status: "AWAITING_APPROVAL",
+        amountPaid: payment.amount,
+        paidAt: new Date(payment.created_at * 1000),
+        razorpayPaymentId: payment.id,
+        publicToken: crypto.randomUUID().replace(/-/g, ""),
+      },
+    });
+    if (!claimed.count) {
+      const current = await tx.booking.findUnique({
+        where: { id: booking.id },
+        select: { status: true, razorpayPaymentId: true },
+      });
+      if (current?.razorpayPaymentId === payment.id &&
+          (current.status === "AWAITING_APPROVAL" || current.status === "CONFIRMED")) {
+        return { ok: true as const, alreadyDone: true, conflicted: false };
+      }
+      return fail("The booking changed while checking payment. Please contact us before paying again.");
+    }
 
-  let blockId: string | null = null;
-  if (!conflicted) {
-    const block = await prisma.availabilityBlock.create({
+    await tx.$queryRaw`SELECT "id" FROM "Listing" WHERE "id" = ${booking.listingId} FOR UPDATE`;
+    const clashes = await tx.availabilityBlock.findMany({
+      where: { listingId: booking.listingId, startDate: { lt: booking.checkOut }, endDate: { gt: booking.checkIn } },
+      select: { id: true },
+    });
+    const conflicted = clashes.length > 0;
+    const guestRow = await tx.booking.findUnique({
+      where: { id: booking.id },
+      select: { guest: { select: { name: true } } },
+    });
+    const block = conflicted ? null : await tx.availabilityBlock.create({
       data: {
         listingId: booking.listingId,
         startDate: booking.checkIn,
@@ -378,27 +464,25 @@ async function holdAndNotify(
         note: "Paid online — awaiting approval",
       },
     });
-    blockId = block.id;
+    await tx.booking.update({
+      where: { id: booking.id },
+      data: {
+        blockId: block?.id ?? null,
+        adminNote: conflicted
+          ? "DATE CONFLICT — these nights were already blocked when the payment landed. Refund or re-house the guest."
+          : null,
+      },
+    });
+    return { ok: true as const, alreadyDone: false, conflicted };
+  }, { timeout: 15_000 });
+
+  if (!result.ok) return result;
+  if (!result.alreadyDone) {
+    revalidateTag("listings");
+    clearMemo();
+    notifyAdminNewOnlineBooking(booking.id, result.conflicted);
   }
-
-  await prisma.booking.update({
-    where: { id: booking.id },
-    data: {
-      status: "AWAITING_APPROVAL",
-      amountPaid,
-      paidAt: new Date(),
-      razorpayPaymentId: paymentId,
-      blockId,
-      publicToken: crypto.randomUUID().replace(/-/g, ""),
-      adminNote: conflicted
-        ? "DATE CONFLICT — these nights were already blocked when the payment landed. Refund or re-house the guest."
-        : null,
-    },
-  });
-
-  revalidateTag("listings");
-  clearMemo();
-  notifyAdminNewOnlineBooking(booking.id, conflicted);
+  return { ok: true, alreadyDone: result.alreadyDone };
 }
 
 /** Admin accepts: the booking becomes CONFIRMED and starts counting in P&L. */

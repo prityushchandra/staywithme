@@ -8,6 +8,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DateRangePicker } from "@/components/date-range-picker";
+import { SendReceiptButton } from "@/components/admin/send-receipt-button";
+import { BOOKING_RECEIPT_MESSAGE, bookingReceiptFileName } from "@/lib/receipt-share";
+import { guestWhatsAppHref } from "@/lib/guest-messages";
 import {
   applyUploadedGuests, GuestUploadErrors, OfflineGuestFields,
   offlineGuestPayload, uploadOfflineGuestFiles,
@@ -16,7 +19,14 @@ import {
 
 export type OfflineBookingListing = { id: string; label: string };
 
-type Success = { id: string; receiptNumber: string; receiptUrl: string };
+type Success = {
+  id: string;
+  receiptNumber: string;
+  receiptUrl: string;
+  fileName: string;
+  chatLink: string | null;
+  searchHref: string;
+};
 type ConflictRange = { startDate: string; endDate: string; kind: string; guestName?: string | null };
 
 function fmtDay(iso: string) {
@@ -152,7 +162,15 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
         setError(data.error ?? "Could not record booking.");
         return;
       }
-      setSuccess({ id: data.id, receiptNumber: data.receiptNumber, receiptUrl: data.receiptUrl });
+      setSuccess({
+        id: data.id, receiptNumber: data.receiptNumber, receiptUrl: data.receiptUrl,
+        fileName: bookingReceiptFileName(form.guestName, new Date(`${form.checkIn}T00:00:00Z`)),
+        chatLink: guestWhatsAppHref(form.guestPhone, BOOKING_RECEIPT_MESSAGE),
+        searchHref: `/admin/booking-search?${new URLSearchParams({
+          source: "MANUAL", flat: form.listingId, guest: form.guestName,
+          from: form.checkIn, to: form.checkOut,
+        })}`,
+      });
       setConflicts(null);
       setBlocksVersion((v) => v + 1);
       await finishUploads(data.id, guests.uploads);
@@ -292,6 +310,13 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
         <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-900">
           <p className="font-semibold">Booking recorded · {success.receiptNumber}</p>
           <div className="mt-3 flex flex-wrap gap-2">
+            <SendReceiptButton
+              key={success.id}
+              receiptUrl={success.receiptUrl}
+              chatLink={success.chatLink}
+              message={BOOKING_RECEIPT_MESSAGE}
+              fileName={success.fileName}
+            />
             <Button asChild size="sm">
               <a href={`${success.receiptUrl}?download=1`} download>Download receipt</a>
             </Button>
@@ -299,6 +324,9 @@ export function OfflineBookingForm({ listings }: { listings: OfflineBookingListi
               <a href={success.receiptUrl} target="_blank" rel="noreferrer">Open</a>
             </Button>
             <Button type="button" size="sm" variant="outline" onClick={copyReceiptLink}>Copy link</Button>
+            <Button asChild size="sm" variant="outline">
+              <a href={success.searchHref}>View / manage booking</a>
+            </Button>
           </div>
         </div>
       )}

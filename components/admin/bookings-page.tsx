@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import type { Prisma } from "@prisma/client";
+import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { formatINR } from "@/lib/pricing";
 import { IndianRupee } from "lucide-react";
@@ -12,7 +14,8 @@ import { OnlineBookingReview } from "@/components/admin/online-booking-review";
 import { BookingAttachments } from "@/components/admin/booking-attachments";
 import { GuestContactActions } from "@/components/admin/guest-contact-actions";
 import { getPlatformSettings } from "@/lib/settings";
-import { bookingReceiptFileName } from "@/lib/receipts";
+import { BOOKING_RECEIPT_MESSAGE, bookingReceiptFileName } from "@/lib/receipt-share";
+import { todayInIndia } from "@/lib/pnl-compute";
 import { guestWhatsAppHref as waLink } from "@/lib/guest-messages";
 import { OFFLINE_GUEST_SELECT } from "@/lib/offline-booking-guests";
 import { GUEST_DOCUMENT_SELECT, guestDocumentGroups, type GuestDocumentRecord } from "@/lib/booking-documents";
@@ -24,6 +27,8 @@ export type AdminBookingSearchParams = {
   flat?: string;
   view?: string;
   source?: string;
+  guest?: string;
+  page?: string;
 };
 
 const CONTACT_LISTING_SELECT = {
@@ -74,12 +79,23 @@ const FIELD =
   "block h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 const DAY_MS = 86_400_000;
+const SEARCH_PAGE_SIZE = 20;
+const SEARCH_INDEX_SELECT = { id: true, checkIn: true, checkOut: true } satisfies Prisma.BookingSelect;
+type BookingIndexEntry = {
+  kind: "manual" | "guest";
+  booking: { id: string; checkIn: Date; checkOut: Date };
+};
 
 /** Reads a yyyy-mm-dd filter value as UTC midnight; ignores anything malformed. */
 function parseDay(value: string | undefined): Date | null {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
   const d = new Date(`${value}T00:00:00.000Z`);
-  return Number.isNaN(d.getTime()) ? null : d;
+  return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== value ? null : d;
+}
+
+function bookingReceiptUrl(booking: { id: string; publicToken: string | null }) {
+  const path = `/api/receipts/booking/${encodeURIComponent(booking.id)}`;
+  return booking.publicToken ? `${path}?t=${encodeURIComponent(booking.publicToken)}` : path;
 }
 
 /** Rebuilds the page URL, dropping any filter that isn't set. */
@@ -144,22 +160,19 @@ function GuestDetails({
 }
 
 function ManualBookingCard({
-  booking: b, origin, upiId,
+  booking: b, upiId,
 }: {
   booking: ManualBookingRecord;
-  origin: string;
   upiId: string;
 }) {
   const flat = `${b.listing.flatNumber || b.listing.title}${b.listing.block ? `, ${b.listing.block}` : ""}`;
   const n = nights(b.checkIn, b.checkOut);
-  const receiptUrl = b.publicToken
-    ? `${origin}/api/receipts/booking/${b.id}?t=${b.publicToken}`
-    : `${origin}/api/receipts/booking/${b.id}`;
+  const receiptUrl = bookingReceiptUrl(b);
   const ciTime = b.listing.checkInTime?.trim();
   const coTime = b.listing.checkOutTime?.trim();
   const checkinStr = `${fmt(b.checkIn)}${ciTime ? `, ${ciTime}` : ""}`;
   const checkoutStr = `${fmt(b.checkOut)}${coTime ? `, ${coTime}` : ""}`;
-  const receiptMessage = "Please find the booking confirmation receipt for your reference.";
+  const receiptMessage = BOOKING_RECEIPT_MESSAGE;
   const receiptChat = waLink(b.guestPhone, receiptMessage);
   const paymentMessage =
     `checkin: ${checkinStr}\n\n` +
@@ -240,6 +253,7 @@ function ManualBookingCard({
 
 function GuestBookingCard({ booking: b }: { booking: GuestBookingRecord }) {
   const phone = b.contactPhone ?? b.guest.phone;
+  const receiptUrl = bookingReceiptUrl(b);
   return (
     <article data-booking-kind="guest" className="rounded-xl border p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -256,15 +270,29 @@ function GuestBookingCard({ booking: b }: { booking: GuestBookingRecord }) {
           <p className="text-sm text-muted-foreground">Guest: {b.guest.name ?? "—"}{phone ? ` · ${phone}` : ""}</p>
           {b.reasonForVisit && <p className="mt-1 break-words text-sm text-muted-foreground">Reason for visit: {b.reasonForVisit}</p>}
           <GuestDetails count={b.guests} primaryName={b.guest.name} details={b.idDocs} />
-          <div className="mt-2">
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {b.amountPaid > 0 && (
+              <SendReceiptButton
+                key={b.updatedAt.toISOString()}
+                receiptUrl={receiptUrl}
+                chatLink={waLink(phone, BOOKING_RECEIPT_MESSAGE)}
+                message={BOOKING_RECEIPT_MESSAGE}
+                fileName={bookingReceiptFileName(b.guest.name ?? "Guest", b.checkIn)}
+              />
+            )}
             <GuestContactActions phone={phone} guestName={b.guest.firstName?.trim() || b.guest.name} status={b.status} listing={b.listing} />
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {b.source === "ONLINE" && b.publicToken && b.status !== "PENDING" && (
-            <a href={`/api/receipts/booking/${b.id}?t=${b.publicToken}&download=1`} download className="rounded-lg border px-3 py-1.5 text-sm font-medium transition hover:border-foreground">
-              Receipt
-            </a>
+          {b.amountPaid > 0 && (
+            <>
+              <a href={`${receiptUrl}${b.publicToken ? "&" : "?"}download=1`} download className="rounded-lg border px-3 py-1.5 text-sm font-medium transition hover:border-foreground">
+                Download receipt
+              </a>
+              <a href={receiptUrl} target="_blank" rel="noreferrer" className="rounded-lg border px-3 py-1.5 text-sm font-medium transition hover:border-foreground">
+                Open
+              </a>
+            </>
           )}
           <BookingActions bookingId={b.id} status={b.status} source={b.source} />
         </div>
@@ -278,63 +306,127 @@ export async function AdminBookingsPage({
   kind,
 }: {
   searchParams: Promise<AdminBookingSearchParams>;
-  kind: "offline" | "guest";
+  kind: "offline" | "guest" | "search";
 }) {
-  const guestOnly = kind === "guest";
-  const basePath = guestOnly ? "/admin/guest-bookings" : "/admin/bookings";
-  const { status, from, to, flat, view, source } = await searchParams;
-  const pastView = !guestOnly && view === "past";
-  const historySource = pastView && (source === "GUEST" || source === "MANUAL") ? source : "ALL";
-  const active = guestOnly || pastView
-    ? STATUSES.find((value) => value === status) ?? "ALL"
-    : "ALL";
+  const session = await auth();
+  if (!session?.user?.isAdmin) redirect("/");
 
+  const listingsRequest = prisma.listing.findMany({
+    select: { id: true, title: true, flatNumber: true, block: true },
+    orderBy: { title: "asc" },
+  });
+  if (kind === "offline") {
+    const listings = await listingsRequest;
+    return (
+      <div className="space-y-5">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-bold tracking-tight">Bookings</h1>
+          <p className="text-sm text-muted-foreground">Record a manual, Airbnb, or walk-in reservation and share its receipt.</p>
+        </div>
+        <Link href="/admin/booking-search?source=MANUAL" className="inline-flex rounded-full border px-3 py-1.5 text-sm hover:border-foreground">
+          Find and manage existing bookings
+        </Link>
+        <section className="space-y-3">
+          <h2 className="text-xl font-semibold tracking-tight">Record a booking</h2>
+          <OfflineBookingForm listings={listings.map((listing) => ({
+            id: listing.id,
+            label: `${listing.flatNumber || listing.title}${listing.block ? `, ${listing.block}` : ""}`,
+          }))} />
+        </section>
+      </div>
+    );
+  }
+
+  const guestOnly = kind === "guest";
+  const searching = kind === "search";
+  const basePath = guestOnly ? "/admin/guest-bookings" : "/admin/booking-search";
+  const { status, from, to, flat, view, source, guest, page: pageParam } = await searchParams;
+  const period = view === "past" || view === "upcoming" ? view : "all";
+  const historySource = searching && (source === "GUEST" || source === "MANUAL") ? source : "ALL";
+  const active = STATUSES.find((value) => value === status) ?? "ALL";
+  const guestName = guest?.trim() ?? "";
   const fromDay = parseDay(from);
   const toDay = parseDay(to);
   const fromStr = fromDay ? from! : "";
   const toStr = toDay ? to! : "";
   const flatId = flat || "";
+  const filterError = (from && !fromDay) || (to && !toDay)
+    ? "Choose valid calendar dates."
+    : fromDay && toDay && fromDay > toDay
+      ? "The From date must be on or before the To date."
+      : guestName.length > 120 ? "Use a guest name of 120 characters or fewer." : null;
 
   // A stay matches the date filter when it overlaps the range rather than when
   // it starts inside it, so a long stay still shows up in every month it runs
   // through. `to` is inclusive, hence the morning after; the checkout day isn't
   // a night, so a stay ending on `from` doesn't count as overlapping.
-  const nowMs = Date.now();
-  const stayWhere: { checkIn?: { lt: Date }; checkOut?: { gt?: Date; lt?: Date } } = {};
+  const todayMs = todayInIndia(new Date());
+  const stayWhere: { checkIn?: { lt: Date }; checkOut?: { gt?: Date; lte?: Date } } = {};
   if (toDay) stayWhere.checkIn = { lt: new Date(toDay.getTime() + DAY_MS) };
   if (fromDay) stayWhere.checkOut = { gt: fromDay };
-  if (pastView) stayWhere.checkOut = { ...stayWhere.checkOut, lt: new Date(nowMs) };
+  if (period === "past") stayWhere.checkOut = { ...stayWhere.checkOut, lte: new Date(todayMs) };
+  if (period === "upcoming") stayWhere.checkOut = { gt: new Date(Math.max(todayMs, fromDay?.getTime() ?? 0)) };
 
   const flatWhere = flatId ? { listingId: flatId } : {};
-  const filtersOn = Boolean(fromStr || toStr || flatId || (pastView && (historySource !== "ALL" || active !== "ALL")));
+  const filtersOn = Boolean(from || to || flatId || guestName || period !== "all" || historySource !== "ALL" || active !== "ALL");
+  const nameMatch = { contains: guestName, mode: "insensitive" } satisfies Prisma.StringFilter;
+  const guestWhere: Prisma.BookingWhereInput = {
+    ...(active !== "ALL" ? { status: active } : {}),
+    ...flatWhere, ...stayWhere,
+    NOT: { source: "ONLINE", status: "PENDING" },
+    ...(guestName ? { OR: [
+      { guest: { name: nameMatch } },
+      { guest: { firstName: nameMatch } },
+      { idDocs: { some: { name: nameMatch } } },
+    ] } : {}),
+  };
+  const manualWhere: Prisma.OfflineBookingWhereInput = {
+    ...flatWhere, ...stayWhere,
+    ...(active !== "ALL" ? { status: active } : {}),
+    ...(guestName ? { OR: [
+      { guestName: nameMatch },
+      { guestDetails: { some: { name: nameMatch } } },
+    ] } : {}),
+  };
 
+  // Merge lightweight date indexes before paging; load documents and contact
+  // details only for the visible page, without truncating either booking source.
+  const [guestIndex, manualIndex] = searching && !filterError ? await Promise.all([
+    historySource !== "MANUAL" ? prisma.booking.findMany({ where: guestWhere, select: SEARCH_INDEX_SELECT }) : [],
+    historySource !== "GUEST" ? prisma.offlineBooking.findMany({ where: manualWhere, select: SEARCH_INDEX_SELECT }) : [],
+  ]) : [[], []];
+  const compareStays = (a: BookingIndexEntry, b: BookingIndexEntry) => {
+    const aUpcoming = a.booking.checkOut.getTime() > todayMs;
+    const bUpcoming = b.booking.checkOut.getTime() > todayMs;
+    if (aUpcoming !== bUpcoming) return aUpcoming ? -1 : 1;
+    return (aUpcoming
+      ? a.booking.checkIn.getTime() - b.booking.checkIn.getTime()
+      : b.booking.checkOut.getTime() - a.booking.checkOut.getTime()) ||
+      b.booking.checkIn.getTime() - a.booking.checkIn.getTime() ||
+      a.kind.localeCompare(b.kind) || a.booking.id.localeCompare(b.booking.id);
+  };
+  const matches = [
+    ...manualIndex.map((booking) => ({ kind: "manual" as const, booking })),
+    ...guestIndex.map((booking) => ({ kind: "guest" as const, booking })),
+  ].sort(compareStays);
+  const pageCount = Math.max(1, Math.ceil(matches.length / SEARCH_PAGE_SIZE));
+  const requestedPage = Number(pageParam ?? 1);
+  const page = Math.min(pageCount, Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1);
+  const pageEntries = matches.slice((page - 1) * SEARCH_PAGE_SIZE, page * SEARCH_PAGE_SIZE);
+  const guestIds = pageEntries.filter((entry) => entry.kind === "guest").map((entry) => entry.booking.id);
+  const manualIds = pageEntries.filter((entry) => entry.kind === "manual").map((entry) => entry.booking.id);
   const [bookings, listings, offlineBookings, settings, pendingOnline] = await Promise.all([
-    guestOnly || (pastView && historySource !== "MANUAL") ? prisma.booking.findMany({
-      where: {
-        ...(active && active !== "ALL" ? { status: active } : {}),
-        ...flatWhere,
-        ...stayWhere,
-        // Abandoned "book with us" carts are not bookings — nothing was paid
-        // and no dates are held, so they'd only be noise here.
-        NOT: { source: "ONLINE", status: "PENDING" },
-      },
+    !filterError && (guestOnly || guestIds.length > 0) ? prisma.booking.findMany({
+      where: guestOnly ? guestWhere : { AND: [guestWhere, { id: { in: guestIds } }] },
       include: GUEST_BOOKING_INCLUDE,
-      orderBy: pastView ? [{ checkOut: "desc" }, { checkIn: "desc" }] : { createdAt: "desc" },
-      take: 200,
+      orderBy: { createdAt: "desc" },
+      ...(guestOnly ? { take: 200 } : {}),
     }) : [],
-    prisma.listing.findMany({
-      select: { id: true, title: true, flatNumber: true, block: true },
-      orderBy: { title: "asc" },
-    }),
-    guestOnly || (pastView && historySource === "GUEST") ? [] : prisma.offlineBooking.findMany({
-      where: {
-        ...flatWhere, ...stayWhere,
-        ...(pastView && active !== "ALL" ? { status: active } : {}),
-      },
+    listingsRequest,
+    manualIds.length > 0 ? prisma.offlineBooking.findMany({
+      where: { AND: [manualWhere, { id: { in: manualIds } }] },
       include: MANUAL_BOOKING_INCLUDE,
-      ...(pastView ? { orderBy: [{ checkOut: "desc" as const }, { checkIn: "desc" as const }] } : {}),
-      take: pastView ? 200 : 100,
-    }),
+    }) : [],
     getPlatformSettings(),
     // Paid online and waiting on a human. Deliberately ignores the filters —
     // money is sitting here and it must never be filtered out of sight.
@@ -350,25 +442,15 @@ export async function AdminBookingsPage({
     }) : [],
   ]);
 
-  const origin = process.env.NEXTAUTH_URL ?? "https://staywithme.co.in";
-
-  // Upcoming/active stays first (soonest check-in), then past stays (most recent).
-  const offline = [...offlineBookings].sort((a, b) => {
-    const aUpcoming = a.checkOut.getTime() >= nowMs;
-    const bUpcoming = b.checkOut.getTime() >= nowMs;
-    if (aUpcoming !== bUpcoming) return aUpcoming ? -1 : 1;
-    return aUpcoming
-      ? a.checkIn.getTime() - b.checkIn.getTime()
-      : b.checkIn.getTime() - a.checkIn.getTime();
-  });
   const history = [
-    ...offline.map((booking) => ({ kind: "manual" as const, booking })),
+    ...offlineBookings.map((booking) => ({ kind: "manual" as const, booking })),
     ...bookings.map((booking) => ({ kind: "guest" as const, booking })),
-  ].sort((a, b) =>
-    b.booking.checkOut.getTime() - a.booking.checkOut.getTime() ||
-    b.booking.checkIn.getTime() - a.booking.checkIn.getTime() ||
-    b.booking.id.localeCompare(a.booking.id)
-  );
+  ].sort(compareStays);
+  const filterParams = {
+    status: active === "ALL" ? undefined : active, from: fromStr, to: toStr, flat: flatId,
+    guest: guestName, view: period === "all" ? undefined : period,
+    source: historySource === "ALL" ? undefined : historySource,
+  };
 
   const listingOptions = listings.map((l) => ({
     id: l.id,
@@ -379,37 +461,23 @@ export async function AdminBookingsPage({
     <div className="space-y-5">
       <div className="space-y-1">
         <h1 className="text-2xl font-bold tracking-tight">
-          {guestOnly ? "Guest bookings" : pastView ? "Past bookings" : "Bookings"}
+          {guestOnly ? "Guest bookings" : "Booking search"}
         </h1>
         <p className="text-sm text-muted-foreground">
           {guestOnly
             ? "Review paid bookings, manage guest requests, and view their documents."
-            : pastView
-              ? "Guest and manual bookings together, latest checkout first. View guest details, Aadhaar / IDs and receipts here."
-              : "Manage offline, Airbnb, and walk-in reservations. Past bookings brings all booking sources together."}
+            : "Find past, current and upcoming stays across every listing. Manage guest details, attachments and receipts in one place."}
         </p>
       </div>
 
       {guestOnly ? (
-        <a href="/admin/bookings?view=past" className="inline-flex rounded-full border px-3 py-1.5 text-sm hover:border-foreground">
-          View past guest + manual bookings
+        <a href="/admin/booking-search" className="inline-flex rounded-full border px-3 py-1.5 text-sm hover:border-foreground">
+          Search guest + manual bookings
         </a>
       ) : (
-        <nav aria-label="Booking views" className="flex flex-wrap gap-2">
-          {[
-            { label: "Manual bookings", past: false },
-            { label: "Past bookings (all)", past: true },
-          ].map((tab) => (
-            <a
-              key={tab.label}
-              href={bookingsHref(basePath, { view: tab.past ? "past" : undefined, flat: flatId, from: fromStr, to: toStr })}
-              aria-current={pastView === tab.past ? "page" : undefined}
-              className={`rounded-full border px-3 py-1.5 text-sm transition ${pastView === tab.past ? "border-foreground bg-foreground text-background" : "hover:border-foreground"}`}
-            >
-              {tab.label}
-            </a>
-          ))}
-        </nav>
+        <Link href="/admin/bookings" className="inline-flex rounded-full border px-3 py-1.5 text-sm hover:border-foreground">
+          Record a manual booking
+        </Link>
       )}
 
       {pendingOnline.length > 0 && (
@@ -448,6 +516,8 @@ export async function AdminBookingsPage({
                   adminNote: b.adminNote,
                   paidAt: b.paidAt?.toISOString() ?? null,
                   razorpayPaymentId: b.razorpayPaymentId,
+                  receiptUrl: bookingReceiptUrl(b),
+                  receiptFileName: bookingReceiptFileName(b.guest.name ?? "Guest", b.checkIn),
                   docs: guestDocumentGroups(b.idDocs).flatMap((guest) =>
                     guest.documents.map((doc) => ({ ...doc, name: guest.name }))
                   ),
@@ -458,16 +528,6 @@ export async function AdminBookingsPage({
         </section>
       )}
 
-      {!guestOnly && !pastView && <section className="space-y-3">
-        <div>
-          <h2 className="text-xl font-semibold tracking-tight">Record a booking</h2>
-          <p className="text-sm text-muted-foreground">
-            Add offline, Airbnb, and walk-in reservations, then share the generated receipt.
-          </p>
-        </div>
-        <OfflineBookingForm listings={listingOptions} />
-      </section>}
-
       <section className="rounded-xl border p-4">
         <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
           <h2 className="text-sm font-semibold tracking-tight">Filters</h2>
@@ -476,15 +536,26 @@ export async function AdminBookingsPage({
           </p>
         </div>
         <form method="get" action={basePath} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {pastView && <input type="hidden" name="view" value="past" />}
-          {!pastView && active !== "ALL" && <input type="hidden" name="status" value={active} />}
+          {guestOnly && active !== "ALL" && <input type="hidden" name="status" value={active} />}
           <div className="space-y-1">
-            <label htmlFor="f-flat" className="text-sm font-medium">Flat</label>
+            <label htmlFor="f-flat" className="text-sm font-medium">Listing</label>
             <select id="f-flat" name="flat" defaultValue={flatId} className={FIELD}>
-              <option value="">All flats</option>
+              <option value="">All listings</option>
               {listingOptions.map((o) => (
                 <option key={o.id} value={o.id}>{o.label}</option>
               ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label htmlFor="f-guest" className="text-sm font-medium">Guest name</label>
+            <input id="f-guest" name="guest" defaultValue={guestName} maxLength={120} placeholder="Primary guest or companion" className={FIELD} />
+          </div>
+          <div className="space-y-1">
+            <label htmlFor="f-view" className="text-sm font-medium">Stay period</label>
+            <select id="f-view" name="view" defaultValue={period} className={FIELD}>
+              <option value="all">Past + upcoming</option>
+              <option value="upcoming">Upcoming / currently staying</option>
+              <option value="past">Past stays</option>
             </select>
           </div>
           <div className="space-y-1">
@@ -495,7 +566,7 @@ export async function AdminBookingsPage({
             <label htmlFor="f-to" className="text-sm font-medium">To</label>
             <input id="f-to" type="date" name="to" defaultValue={toStr} className={FIELD} />
           </div>
-          {pastView && (
+          {searching && (
             <>
               <div className="space-y-1">
                 <label htmlFor="f-source" className="text-sm font-medium">Booking source</label>
@@ -522,7 +593,7 @@ export async function AdminBookingsPage({
             </button>
             {filtersOn && (
               <a
-                href={bookingsHref(basePath, { view: pastView ? "past" : undefined, status: !pastView && active !== "ALL" ? active : undefined })}
+                href={basePath}
                 className="flex h-10 items-center rounded-lg border px-4 text-sm font-medium transition hover:border-foreground"
               >
                 Clear
@@ -532,55 +603,50 @@ export async function AdminBookingsPage({
         </form>
       </section>
 
-      {!guestOnly && !pastView && <section className="space-y-3">
-        <h2 className="text-xl font-semibold tracking-tight">Offline bookings</h2>
-        {offline.length === 0 ? (
-          <div className="rounded-xl border border-dashed p-8 text-center text-muted-foreground">
-            No offline bookings {filtersOn ? "match these filters." : "yet."}
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {offline.map((booking) => (
-              <ManualBookingCard key={booking.id} booking={booking} origin={origin} upiId={settings.upiId} />
-            ))}
-          </div>
-        )}
-      </section>}
+      {filterError && <p role="alert" className="rounded-xl border border-destructive/30 p-4 text-sm text-destructive">{filterError}</p>}
 
-      {pastView && (
+      {searching && !filterError && (
         <section className="space-y-3">
-          <h2 className="text-xl font-semibold tracking-tight">Guest + manual booking history</h2>
+          <div className="space-y-1">
+            <h2 className="text-xl font-semibold tracking-tight">Bookings ({matches.length})</h2>
+            <p className="text-xs text-muted-foreground">Current and upcoming stays first, then past stays by latest checkout. Unpaid online drafts are excluded.</p>
+          </div>
           {history.length === 0 ? (
             <div className="rounded-xl border border-dashed p-8 text-center text-muted-foreground">
-              No past bookings {filtersOn ? "match these filters." : "yet."}
+              No bookings {filtersOn ? "match these filters." : "yet."}
             </div>
           ) : (
             <div className="space-y-3">
               {history.map((entry) => entry.kind === "manual" ? (
-                <ManualBookingCard key={`manual-${entry.booking.id}`} booking={entry.booking} origin={origin} upiId={settings.upiId} />
+                <ManualBookingCard key={`manual-${entry.booking.id}`} booking={entry.booking} upiId={settings.upiId} />
               ) : (
                 <GuestBookingCard key={`guest-${entry.booking.id}`} booking={entry.booking} />
               ))}
             </div>
           )}
-          {(bookings.length === 200 || offlineBookings.length === 200) && (
-            <p className="text-sm text-muted-foreground">
-              Showing the latest 200 matching bookings per source. Narrow the dates or flat to find older stays.
-            </p>
+          {pageCount > 1 && (
+            <nav aria-label="Booking search pages" className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-muted-foreground">
+                {(page - 1) * SEARCH_PAGE_SIZE + 1}-{Math.min(page * SEARCH_PAGE_SIZE, matches.length)} of {matches.length} bookings
+              </p>
+              <div className="flex items-center gap-3 text-sm">
+                {page > 1 && <Link href={bookingsHref(basePath, { ...filterParams, page: String(page - 1) })} className="rounded-lg border px-3 py-2">Previous</Link>}
+                <span>Page {page} of {pageCount}</span>
+                {page < pageCount && <Link href={bookingsHref(basePath, { ...filterParams, page: String(page + 1) })} className="rounded-lg border px-3 py-2">Next</Link>}
+              </div>
+            </nav>
           )}
         </section>
       )}
 
-      {guestOnly && <section className="space-y-3">
+      {guestOnly && !filterError && <section className="space-y-3">
       <h2 className="text-xl font-semibold tracking-tight">Booking history</h2>
 
       <div className="flex flex-wrap gap-2">
         {STATUSES.map((s) => {
           const href = bookingsHref(basePath, {
+            ...filterParams,
             status: s === "ALL" ? undefined : s,
-            from: fromStr,
-            to: toStr,
-            flat: flatId,
           });
           const isActive = active === s;
           return (
@@ -606,6 +672,9 @@ export async function AdminBookingsPage({
           {bookings.map((booking) => <GuestBookingCard key={booking.id} booking={booking} />)}
         </div>
       )}
+      {bookings.length === 200 && <p className="text-sm text-muted-foreground">
+        Showing the latest 200 guest bookings. <Link href="/admin/booking-search?source=GUEST" className="underline">Search the complete history</Link>.
+      </p>}
       </section>}
     </div>
   );

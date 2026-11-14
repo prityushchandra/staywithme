@@ -16,7 +16,7 @@ import { ICAL_RESERVED_NOTE } from "@/lib/ical";
 // Profit & Loss data model. Everything is in MINOR units (paise).
 //
 // Revenue buckets:
-//   - Direct   : confirmed on-platform Bookings (WhatsApp)
+//   - Direct   : confirmed guest Bookings (Razorpay or WhatsApp)
 //   - Offline  : confirmed OfflineBookings, source OFFLINE
 //   - Online   : OnlineEarning monthly entries (Airbnb/Booking.com/…) +
 //                confirmed OfflineBookings, source AIRBNB
