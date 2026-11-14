@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { createBookingOrder } from "@/lib/online-bookings";
 import { razorpayConfigured, razorpayPublicKey } from "@/lib/razorpay";
+import { couponCodeSchema } from "@/lib/coupons";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -11,6 +12,8 @@ export const maxDuration = 60;
 const schema = z.object({
   reasonForVisit: z.string().trim().min(3).max(500),
   contactPhone: z.string().trim().min(6).max(20),
+  couponCode: couponCodeSchema.nullable().optional(),
+  expectedTotal: z.number().int().positive().max(2_147_483_647).optional(),
 });
 
 /**
@@ -52,14 +55,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!count) return NextResponse.json({ error: "Booking not found." }, { status: 404 });
 
   try {
-    const result = await createBookingOrder(id, session.user.id);
-    if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
+    const result = await createBookingOrder(id, session.user.id, {
+      couponCode: parsed.data.couponCode, expectedTotal: parsed.data.expectedTotal,
+    });
+    if (!result.ok) return NextResponse.json({
+      error: result.error, pricing: result.pricing, pricingLocked: result.pricingLocked,
+    }, { status: 400 });
     return NextResponse.json({
       keyId,
       razorpayOrderId: result.razorpayOrderId,
       amount: result.amount,
       currency: "INR",
       description: result.description,
+      pricing: result.pricing,
+      pricingLocked: result.pricingLocked,
     });
   } catch (err) {
     console.error("Creating booking payment failed", { bookingId: id, error: err });

@@ -16,7 +16,9 @@ import { prisma } from "./db";
 import { clearMemo } from "./memo";
 import { isRangeAvailable } from "./dates";
 import { sendWhatsApp, sendNotification } from "./wa-send";
-import { formatINR, computeStayPricing, meetsMinimumStay, minimumStayMessage } from "./pricing";
+import { formatINR, computeStayPricing, meetsMinimumStay, minimumStayMessage, type StayPricing } from "./pricing";
+import { availableCoupon, couponCodeSchema, reservedCouponPricing, reserveBookingCoupon } from "./coupons";
+import type { CouponReservation } from "@prisma/client";
 import { getPlatformSettings } from "./settings";
 import { unitBlock } from "./bookings";
 import {
@@ -36,7 +38,7 @@ const DAY_MS = 86_400_000;
 export const MAX_NIGHTS = 365;
 export { MAX_DOC_BYTES, ALLOWED_DOC_MIMES } from "./booking-documents";
 
-export type Fail = { ok: false; error: string };
+export type Fail = { ok: false; error: string; pricing?: StayPricing; pricingLocked?: boolean };
 const fail = (error: string): Fail => ({ ok: false, error });
 
 const nightsBetween = (a: Date, b: Date) => Math.round((b.getTime() - a.getTime()) / DAY_MS);
@@ -66,9 +68,10 @@ async function overlappingBlocks(listingId: string, checkIn: Date, checkOut: Dat
 export async function quoteStay(
   listingId: string,
   checkIn: Date,
-  checkOut: Date
+  checkOut: Date,
+  options: { couponCode?: string | null; reservation?: CouponReservation | null } = {}
 ): Promise<
-  | { ok: true; total: number; nights: number; available: boolean; title: string }
+  | { ok: true; total: number; nights: number; available: boolean; title: string; pricing: StayPricing }
   | Fail
 > {
   const nights = nightsBetween(checkIn, checkOut);
@@ -97,16 +100,34 @@ export async function quoteStay(
       where: { listingId, endDate: { gt: checkIn } },
       select: { startDate: true, endDate: true },
     }),
-    getPlatformSettings(),
+    prisma.platformSettings.findUnique({
+      where: { id: "singleton" }, select: { platformFeePercent: true },
+    }),
   ]);
 
-  const { total } = computeStayPricing(listing, nights, {
-    platformFeePercent: settings.platformFeePercent,
-  });
+  let pricing: StayPricing;
+  if (options.reservation) {
+    pricing = reservedCouponPricing(options.reservation);
+    if (options.couponCode !== undefined &&
+        options.couponCode?.trim().toUpperCase() !== options.reservation.code) {
+      return { ok: false, error: "This coupon is locked to your booking and cannot be changed.",
+        pricing, pricingLocked: true };
+    }
+  } else {
+    const coupon = options.couponCode ? await availableCoupon(listingId, options.couponCode, nights) : null;
+    if (coupon && !coupon.ok) return coupon;
+    pricing = computeStayPricing(listing, nights, {
+      platformFeePercent: settings?.platformFeePercent ?? 10,
+    }, coupon?.ok ? { code: coupon.coupon.code, kind: coupon.coupon.kind, amount: coupon.coupon.amount } : null);
+  }
+  if (!Number.isSafeInteger(pricing.total) || pricing.total <= 0 || pricing.total > 2_147_483_647) {
+    return fail("This stay total cannot be booked online. Please contact us.");
+  }
 
   return {
     ok: true,
-    total,
+    total: pricing.total,
+    pricing,
     nights,
     available: isRangeAvailable(checkIn, checkOut, blocks),
     title: listing.title,
@@ -131,6 +152,8 @@ export async function startOnlineBooking(input: {
       bookingId: string;
       total: number;
       nights: number;
+      pricing: StayPricing;
+      pricingLocked: boolean;
       /** IDs already attached to a reused draft, so the form can show them again. */
       docs: UploadedGuestDocument[];
     }
@@ -151,44 +174,55 @@ export async function startOnlineBooking(input: {
       checkIn: input.checkIn,
       checkOut: input.checkOut,
     },
-    select: { id: true, razorpayOrderId: true, totalAmount: true, guests: true },
+    select: { id: true, razorpayOrderId: true, totalAmount: true, guests: true, couponReservation: true },
   });
 
   if (existing?.razorpayOrderId) {
     const recovered = await reconcileBookingPayment(existing.id, input.guestId);
     if (!recovered.ok) return recovered;
     if (recovered.paid) return fail("Payment already received. Please open My bookings; do not pay again.");
-    if (existing.guests !== input.guests) {
-      return fail("Checkout has already started for this stay. Please contact us to change the guest count.");
-    }
+  }
+  if ((existing?.razorpayOrderId || existing?.couponReservation) && existing.guests !== input.guests) {
+    return fail("Checkout has already started for this stay. Please contact us to change the guest count.");
+  }
+  const pricing = existing?.couponReservation ? reservedCouponPricing(existing.couponReservation) : quote.pricing;
+  if (existing?.razorpayOrderId && existing.totalAmount !== pricing.total) {
+    return fail("The price changed after checkout started. Please contact us before paying again.");
   }
   const data = {
     guests: input.guests,
-    totalAmount: existing?.razorpayOrderId ? existing.totalAmount : quote.total,
+    totalAmount: pricing.total,
     contactPhone: input.contactPhone || null,
   };
 
-  const booking = existing
-    ? await prisma.booking.update({
-        where: {
-          id: existing.id,
-          AND: { status: "PENDING", razorpayOrderId: existing.razorpayOrderId ?? null },
-        },
-        data, select: { id: true },
-      })
-    : await prisma.booking.create({
-        data: {
-          ...data,
-          listingId: input.listingId,
-          guestId: input.guestId,
-          checkIn: input.checkIn,
-          checkOut: input.checkOut,
-          status: "PENDING",
-          source: "ONLINE",
-          amountPaid: 0,
-        },
-        select: { id: true },
-      });
+  let booking: { id: string };
+  if (existing) {
+    const updated = await prisma.booking.updateMany({
+      where: {
+        id: existing.id,
+        AND: { status: "PENDING", razorpayOrderId: existing.razorpayOrderId ?? null },
+        couponReservation: existing.couponReservation
+          ? { is: { couponId: existing.couponReservation.couponId } } : { is: null },
+      },
+      data,
+    });
+    if (!updated.count) return fail("Checkout changed in another tab. Please reopen your booking.");
+    booking = { id: existing.id };
+  } else {
+    booking = await prisma.booking.create({
+      data: {
+        ...data,
+        listingId: input.listingId,
+        guestId: input.guestId,
+        checkIn: input.checkIn,
+        checkOut: input.checkOut,
+        status: "PENDING",
+        source: "ONLINE",
+        amountPaid: 0,
+      },
+      select: { id: true },
+    });
+  }
 
   const docs = existing
     ? await prisma.bookingGuest.findMany({
@@ -199,7 +233,8 @@ export async function startOnlineBooking(input: {
     : [];
 
   return {
-    ok: true, bookingId: booking.id, total: data.totalAmount, nights: quote.nights,
+    ok: true, bookingId: booking.id, total: data.totalAmount, nights: quote.nights, pricing,
+    pricingLocked: !!(existing?.razorpayOrderId || existing?.couponReservation),
     docs: guestDocumentGroups(docs).flatMap((guest) =>
       guest.documents.map((doc) => ({ ...doc, position: guest.position, name: guest.name }))
     ),
@@ -213,9 +248,10 @@ export async function startOnlineBooking(input: {
  */
 export async function createBookingOrder(
   bookingId: string,
-  guestId: string
+  guestId: string,
+  options: { couponCode?: string | null; expectedTotal?: number } = {}
 ): Promise<
-  | { ok: true; razorpayOrderId: string; amount: number; description: string }
+  | { ok: true; razorpayOrderId: string; amount: number; description: string; pricing: StayPricing; pricingLocked: true }
   | Fail
 > {
   const booking = await prisma.booking.findUnique({
@@ -232,6 +268,7 @@ export async function createBookingOrder(
       totalAmount: true,
       reasonForVisit: true,
       razorpayOrderId: true,
+      couponReservation: true,
       idDocs: { select: GUEST_DOCUMENT_SELECT, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
     },
   });
@@ -257,17 +294,42 @@ export async function createBookingOrder(
     return fail("Please upload an ID for every guest before paying.");
   }
 
-  const quote = await quoteStay(booking.listingId, booking.checkIn, booking.checkOut);
+  const couponCode = options.couponCode === undefined
+    ? booking.couponReservation?.code
+    : options.couponCode?.trim().toUpperCase() ?? null;
+  if (couponCode && !couponCodeSchema.safeParse(couponCode).success) return fail("Enter a valid coupon code.");
+  if (couponCode && options.expectedTotal === undefined && !booking.couponReservation) {
+    return fail("Apply your coupon and review the total before paying.");
+  }
+  if (couponCode && booking.razorpayOrderId && !booking.couponReservation) {
+    return fail("Checkout already started without a coupon. Please retry the original payment.");
+  }
+  const quote = await quoteStay(booking.listingId, booking.checkIn, booking.checkOut, {
+    couponCode, reservation: booking.couponReservation,
+  });
   if (!quote.ok) return quote;
   if (!quote.available) return fail("Those dates have just been taken. Please pick another range.");
+  if (options.expectedTotal !== undefined && options.expectedTotal !== quote.total) {
+    return { ok: false, error: "The price changed. Review the updated total and select Pay now again.",
+      pricing: quote.pricing, pricingLocked: !!(booking.razorpayOrderId || booking.couponReservation) };
+  }
+  let pricing = quote.pricing;
+  if (couponCode && !booking.couponReservation) {
+    const reserved = await reserveBookingCoupon({
+      bookingId: booking.id, guestId, guests: booking.guests,
+      code: couponCode, expectedTotal: options.expectedTotal ?? quote.total,
+    });
+    if (!reserved.ok) return reserved;
+    pricing = reserved.pricing;
+  }
 
   const order = booking.razorpayOrderId
     ? await fetchRazorpayOrder(booking.razorpayOrderId)
-    : await createRazorpayOrder(quote.total, `stay_${booking.id.slice(-12)}`, {
+    : await createRazorpayOrder(pricing.total, `stay_${booking.id.slice(-12)}`, {
         bookingId: booking.id,
         listingId: booking.listingId,
       });
-  if (order.amount !== quote.total || order.currency !== "INR") {
+  if (order.amount !== pricing.total || order.currency !== "INR") {
     return fail("The price changed after checkout started. Please contact us before paying again.");
   }
   if (order.status !== "created" && order.status !== "attempted") {
@@ -276,8 +338,11 @@ export async function createBookingOrder(
 
   if (!booking.razorpayOrderId) {
     const claimed = await prisma.booking.updateMany({
-      where: { id: booking.id, status: "PENDING", razorpayOrderId: null },
-      data: { totalAmount: quote.total, razorpayOrderId: order.id },
+      where: {
+        id: booking.id, status: "PENDING", razorpayOrderId: null,
+        couponReservation: couponCode ? { is: { code: couponCode } } : { is: null },
+      },
+      data: { totalAmount: pricing.total, razorpayOrderId: order.id },
     });
     if (!claimed.count) return fail("Another checkout is already in progress. Please reopen your booking before paying.");
   }
@@ -286,6 +351,8 @@ export async function createBookingOrder(
     ok: true,
     razorpayOrderId: order.id,
     amount: order.amount,
+    pricing,
+    pricingLocked: true,
     description: `${quote.title} · ${quote.nights} night${quote.nights === 1 ? "" : "s"}`,
   };
 }

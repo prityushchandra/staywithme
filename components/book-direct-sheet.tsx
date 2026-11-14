@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { z } from "zod";
 import Link from "next/link";
 import {
   AlertCircle,
@@ -12,6 +13,7 @@ import {
   Phone,
   RefreshCw,
   Trash2,
+  TicketPercent,
   Upload,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -19,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { formatINR } from "@/lib/pricing";
+import { formatINR, type StayPricing } from "@/lib/pricing";
 import { openRazorpayCheckout, RazorpayCheckoutError } from "@/lib/razorpay-checkout";
 import { normalizeWhatsAppNumber } from "@/lib/whatsapp";
 import { ALLOWED_DOC_MIMES } from "@/lib/booking-documents";
@@ -36,6 +38,19 @@ import { isUploadedGuestDocument, uploadGuestFiles, type GuestUpload, type Guest
  * seconds after Razorpay hands back a signature, which must not be interrupted.
  */
 type Stage = "form" | "paying" | "verifying" | "recheck" | "done";
+
+const priceStateSchema = z.object({
+  pricing: z.object({
+    base: z.number().int().nonnegative(), platformFee: z.number().int().nonnegative(),
+    total: z.number().int().positive(), platformFeePercent: z.number().nonnegative(),
+    totalBeforeDiscount: z.number().int().positive(), monthlyStayDiscount: z.number().int().nonnegative(),
+    regularBase: z.number().int().nonnegative(), regularTotal: z.number().int().nonnegative(),
+    savings: z.number().int().nonnegative(), savingsPercent: z.number().int().nonnegative(),
+    monthly: z.boolean(),
+    coupon: z.object({ code: z.string(), kind: z.enum(["DAILY", "MONTHLY"]), amount: z.number().int().positive() }).nullable(),
+  }),
+  pricingLocked: z.boolean(),
+});
 
 function prettySize(bytes: number) {
   return bytes < 1024 * 1024
@@ -75,6 +90,11 @@ export function BookDirectSheet({
   const [startFailed, setStartFailed] = useState(false);
   const [stage, setStage] = useState<Stage>("form");
   const [error, setError] = useState<string | null>(null);
+  const [pricing, setPricing] = useState<StayPricing | null>(null);
+  const [pricingLocked, setPricingLocked] = useState(false);
+  const [couponInput, setCouponInput] = useState("");
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [couponError, setCouponError] = useState<string | null>(null);
 
   const [reason, setReason] = useState("");
   const [phone, setPhone] = useState(guestPhone ?? "");
@@ -90,10 +110,16 @@ export function BookDirectSheet({
   const requestVersion = useRef(0);
   const draftRequest = useRef<AbortController | null>(null);
   const documentRequest = useRef<AbortController | null>(null);
+  const couponRequest = useRef<AbortController | null>(null);
   const fileInputs = useRef<(HTMLInputElement | null)[]>([]);
   // Set while Razorpay's window is up, so we can tear it down if the guest
   // backs out of the booking from our side instead of theirs.
   const closeCheckout = useRef<(() => void) | null>(null);
+  const updatePricing = useCallback((value: z.infer<typeof priceStateSchema>) => {
+    setPricing(value.pricing);
+    setPricingLocked(value.pricingLocked);
+    setCouponInput(value.pricing.coupon?.code ?? "");
+  }, []);
 
   // Guest count can change behind the sheet (the card is still live); keep the
   // per-guest rows in step without discarding what has already been uploaded.
@@ -108,8 +134,10 @@ export function BookDirectSheet({
     requestVersion.current++;
     draftRequest.current?.abort();
     documentRequest.current?.abort();
+    couponRequest.current?.abort();
     draftRequest.current = null;
     documentRequest.current = null;
+    couponRequest.current = null;
     setStarting(false);
     setStartFailed(false);
     setUploading(null);
@@ -118,14 +146,21 @@ export function BookDirectSheet({
     setBookingId(null);
     setDocs(Array.from({ length: guests }, () => []));
     setError(null);
+    setPricing(null);
+    setPricingLocked(false);
+    setCouponInput("");
+    setCouponLoading(false);
+    setCouponError(null);
   }, [guests]);
 
   useEffect(() => () => {
     requestVersion.current++;
     draftRequest.current?.abort();
     documentRequest.current?.abort();
+    couponRequest.current?.abort();
     draftRequest.current = null;
     documentRequest.current = null;
+    couponRequest.current = null;
   }, []);
 
   const tripKey = `${propertyId}|${checkIn}|${checkOut}|${guests}`;
@@ -153,12 +188,15 @@ export function BookDirectSheet({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not start your booking.");
+      const prices = priceStateSchema.safeParse(data);
+      if (!prices.success) throw new Error("Could not load the booking price. Please retry.");
       if (typeof data.bookingId !== "string" || !Array.isArray(data.docs) ||
           !data.docs.every(isUploadedGuestDocument)) {
         throw new Error("Could not load your guest attachments. Please retry.");
       }
       if (version !== requestVersion.current || controller.signal.aborted) return;
       setBookingId(data.bookingId);
+      updatePricing(prices.data);
       // A reused draft may already carry IDs from an abandoned attempt.
       const existing: UploadedGuestDocument[] = data.docs;
       setDocs(Array.from({ length: guests }, (_, position) => existing.filter((doc) => doc.position === position)));
@@ -175,7 +213,7 @@ export function BookDirectSheet({
         setStarting(false);
       }
     }
-  }, [propertyId, checkIn, checkOut, guests]);
+  }, [propertyId, checkIn, checkOut, guests, updatePricing]);
 
   // Open the draft as soon as the sheet appears so the ID uploads have somewhere
   // to go. Re-opening after a reset starts a fresh one. Only ever while the
@@ -183,6 +221,39 @@ export function BookDirectSheet({
   useEffect(() => {
     if (open && !bookingId && !starting && !startFailed && stage === "form") void startDraft();
   }, [open, bookingId, starting, startFailed, stage, startDraft]);
+
+  async function applyCoupon(code: string | null) {
+    if (!bookingId || couponRequest.current || pricingLocked || stage !== "form") return;
+    const version = requestVersion.current;
+    const controller = new AbortController();
+    couponRequest.current = controller;
+    const timer = setTimeout(() => controller.abort(), 30_000);
+    setCouponLoading(true);
+    setCouponError(null);
+    try {
+      const response = await fetch(`/api/bookings/online/${encodeURIComponent(bookingId)}/quote`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ couponCode: code?.trim().toUpperCase() ?? null }), signal: controller.signal,
+      });
+      const data = await response.json();
+      if (version !== requestVersion.current || controller.signal.aborted) return;
+      const prices = priceStateSchema.safeParse(data);
+      if (prices.success) updatePricing(prices.data);
+      if (!response.ok) throw new Error(data.error || "Could not apply the coupon.");
+      if (!prices.success) throw new Error("Could not load the coupon price. Please retry.");
+    } catch (error) {
+      if (version === requestVersion.current) {
+        setCouponError(controller.signal.aborted ? "Checking the coupon timed out. Please retry."
+          : error instanceof Error ? error.message : "Could not check the coupon. Please retry.");
+      }
+    } finally {
+      clearTimeout(timer);
+      if (version === requestVersion.current) {
+        couponRequest.current = null;
+        setCouponLoading(false);
+      }
+    }
+  }
 
   async function uploadFiles(uploads: readonly GuestUpload[]) {
     if (!bookingId || documentRequest.current || stage !== "form" || uploads.length === 0) return;
@@ -256,6 +327,8 @@ export function BookDirectSheet({
   const allNamesIn = names.every((n) => n.trim().length > 1);
   const ready =
     Boolean(bookingId) &&
+    pricing !== null &&
+    !couponLoading &&
     !changingDocuments &&
     uploadFailures.length === 0 &&
     allDocsIn &&
@@ -293,17 +366,25 @@ export function BookDirectSheet({
   }
 
   async function pay() {
-    if (!bookingId || !ready || documentRequest.current) return;
+    if (!bookingId || !ready || !pricing || documentRequest.current || couponRequest.current || stage !== "form") return;
     setStage("paying");
     setError(null);
     try {
       const res = await fetch(`/api/bookings/online/${bookingId}/pay`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reasonForVisit: reason.trim(), contactPhone: phone.trim() }),
+        body: JSON.stringify({
+          reasonForVisit: reason.trim(), contactPhone: phone.trim(),
+          couponCode: pricing.coupon?.code ?? null, expectedTotal: pricing.total,
+        }),
       });
       const order = await res.json().catch(() => ({}));
+      const prices = priceStateSchema.safeParse(order);
+      if (prices.success) updatePricing(prices.data);
       if (!res.ok) throw new Error(order.error || "Could not start the payment.");
+      if (!prices.success || order.amount !== prices.data.pricing.total) {
+        throw new Error("Could not confirm the payment total. Please reopen your booking before paying.");
+      }
 
       const handler = await openRazorpayCheckout({
         keyId: order.keyId,
@@ -426,6 +507,61 @@ export function BookDirectSheet({
                 {guests} guest{guests === 1 ? "" : "s"}
               </p>
             </div>
+
+            <section aria-label="Coupon and booking price" className="space-y-3 rounded-xl border p-3">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <TicketPercent className="h-4 w-4" />
+                {pricing?.coupon ? "Coupon applied" : "Have a coupon?"}
+              </div>
+              {pricing?.coupon ? (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <code className="break-all text-sm font-semibold text-brand-dark">{pricing.coupon.code}</code>
+                  {!pricingLocked && (
+                    <button type="button" className="text-xs underline" disabled={couponLoading || stage !== "form"}
+                      onClick={() => void applyCoupon(null)}>{couponLoading ? "Updating..." : "Remove coupon"}</button>
+                  )}
+                </div>
+              ) : (
+                <div className="flex min-w-0 gap-2">
+                  <Input id="booking-coupon" aria-label="Coupon code" value={couponInput}
+                    onChange={(event) => setCouponInput(event.target.value.toUpperCase())}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") { event.preventDefault(); void applyCoupon(couponInput); }
+                    }}
+                    placeholder="Enter code" maxLength={32} autoComplete="off" autoCapitalize="characters" spellCheck={false}
+                    disabled={!bookingId || pricingLocked || couponLoading || stage !== "form"} className="min-w-0" />
+                  <Button type="button" variant="outline"
+                    disabled={!bookingId || !couponInput.trim() || pricingLocked || couponLoading || stage !== "form"}
+                    onClick={() => void applyCoupon(couponInput)}>
+                    {couponLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-label="Checking coupon" /> : "Apply"}
+                  </Button>
+                </div>
+              )}
+              {couponError && <p role="alert" className="text-sm text-destructive">{couponError}</p>}
+              {pricing?.coupon && (
+                <div aria-live="polite" className="space-y-2 border-t pt-3 text-sm">
+                  <div className="flex flex-wrap items-baseline gap-2">
+                    {pricing.regularBase > pricing.base && <span className="text-muted-foreground line-through">{formatINR(pricing.regularBase / nights)}</span>}
+                    <span className="text-lg font-semibold text-brand-dark">
+                      {formatINR(pricing.coupon.kind === "MONTHLY" ? pricing.coupon.amount / 30 : pricing.coupon.amount)}
+                    </span>
+                    <span className="text-xs text-muted-foreground">/ night, before Platform Fee</span>
+                  </div>
+                  {pricing.coupon.kind === "MONTHLY" && (
+                    <p className="text-xs text-muted-foreground">
+                      {formatINR(pricing.coupon.amount)} / 30 x {nights} nights, prorated.
+                    </p>
+                  )}
+                  <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1">
+                    <dt>Stay price</dt><dd>{formatINR(pricing.base)}</dd>
+                    <dt>Platform Fee ({pricing.platformFeePercent}%)</dt><dd>{formatINR(pricing.platformFee)}</dd>
+                  </dl>
+                  {pricing.savings > 0 && <p className="font-medium text-brand-dark">You save {formatINR(pricing.savings)} ({pricing.savingsPercent}% off the regular total)</p>}
+                  <p className="text-xs text-muted-foreground">Replaces other listing discounts. Pay now locks this single-use code to this booking, even if checkout is abandoned. You can retry the same booking.</p>
+                </div>
+              )}
+              {pricingLocked && <p className="text-xs text-muted-foreground">Checkout has started. This booking&apos;s coupon selection is locked.</p>}
+            </section>
 
             <div className="space-y-1">
               <Label htmlFor="reason">Reason for visit</Label>
@@ -561,9 +697,12 @@ export function BookDirectSheet({
             )}
 
             <div className="sticky bottom-0 -mx-6 border-t bg-background px-6 pb-1 pt-3">
-              <div className="mb-2 flex items-baseline justify-between">
+              <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2" aria-live="polite">
                 <span className="text-sm text-muted-foreground">Total</span>
-                <span className="text-lg font-semibold">{formatINR(total)}</span>
+                <span className="flex flex-wrap items-baseline justify-end gap-2">
+                  {pricing?.coupon && pricing.savings > 0 && <span className="text-sm text-muted-foreground line-through">{formatINR(pricing.regularTotal)}</span>}
+                  <span className="text-lg font-semibold">{formatINR(pricing?.total ?? total)}</span>
+                </span>
               </div>
               <Button
                 variant="brand"
@@ -586,7 +725,7 @@ export function BookDirectSheet({
                   </>
                 ) : (
                   <>
-                    <Lock className="mr-2 h-4 w-4" /> Pay {formatINR(total)}
+                    <Lock className="mr-2 h-4 w-4" /> Pay {formatINR(pricing?.total ?? total)}
                   </>
                 )}
               </Button>
@@ -603,7 +742,9 @@ export function BookDirectSheet({
               )}
               {stage === "form" && !ready && (
                 <p className="mt-2 text-center text-xs text-muted-foreground">
-                  {changingDocuments ? "Wait for attachment changes to finish"
+                  {starting || !pricing ? "Loading your booking price"
+                    : couponLoading ? "Checking the coupon price"
+                    : changingDocuments ? "Wait for attachment changes to finish"
                     : uploadFailures.length > 0 ? "Retry or remove the failed attachments to continue"
                     : !allNamesIn || !allDocsIn
                     ? "Add every guest's name and ID to continue"

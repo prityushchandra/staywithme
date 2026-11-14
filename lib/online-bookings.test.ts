@@ -16,6 +16,9 @@ const mocks = vi.hoisted(() => ({
     booking: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn(), create: vi.fn() },
     bookingGuest: { findMany: vi.fn() },
     listing: { findUnique: vi.fn() },
+    platformSettings: { findUnique: vi.fn() },
+    listingCoupon: { findUnique: vi.fn() },
+    couponReservation: { create: vi.fn() },
     availabilityBlock: { findMany: vi.fn(), create: vi.fn() },
   },
 }));
@@ -44,6 +47,7 @@ const booking = {
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.settings.mockResolvedValue({ platformFeePercent: 0 });
+  mocks.db.platformSettings.findUnique.mockResolvedValue({ platformFeePercent: 0 });
   mocks.db.booking.findUnique.mockResolvedValue(booking);
   mocks.db.booking.findFirst.mockResolvedValue({ id: booking.id });
   mocks.db.booking.update.mockResolvedValue({ id: booking.id });
@@ -171,12 +175,12 @@ describe("online minimum stay and monthly offer", () => {
   const checkout = (nights: number) => new Date(checkIn.getTime() + nights * 86_400_000);
 
   it("persists and charges the prorated 44-night total without subtracting the advertised saving again", async () => {
-    mocks.settings.mockResolvedValue({ platformFeePercent: 10 });
+    mocks.db.platformSettings.findUnique.mockResolvedValue({ platformFeePercent: 10 });
     mocks.db.listing.findUnique.mockResolvedValue({ ...listing, monthlyStayDiscount: null });
     expect(await startOnlineBooking({
       listingId: "flat", guestId: "owner", checkIn, checkOut: checkout(44), guests: 2,
     })).toMatchObject({ ok: true, total: 4840000 });
-    expect(mocks.db.booking.update.mock.calls[0][0].data.totalAmount).toBe(4840000);
+    expect(mocks.db.booking.updateMany.mock.calls[0][0].data.totalAmount).toBe(4840000);
     mocks.db.booking.findUnique.mockResolvedValue({
       ...booking, checkIn, checkOut: checkout(44), idDocs: [guest(0, [scan("first")]), guest(1, [scan("second")])],
     });
@@ -198,7 +202,7 @@ describe("online minimum stay and monthly offer", () => {
   it.each([[30, 3250000], [31, 3360000], [60, 6550000]])(
     "quotes %i nights with one fixed discount after the existing monthly rate and fee",
     async (nights, total) => {
-      mocks.settings.mockResolvedValue({ platformFeePercent: 10 });
+      mocks.db.platformSettings.findUnique.mockResolvedValue({ platformFeePercent: 10 });
       mocks.db.listing.findUnique.mockResolvedValue(listing);
       expect(await quoteStay("flat", checkIn, checkout(nights))).toMatchObject({ ok: true, total, nights });
     }
@@ -215,12 +219,13 @@ describe("online minimum stay and monthly offer", () => {
   });
 
   it("persists the discounted draft total and rechecks the current offer before taking payment", async () => {
-    mocks.settings.mockResolvedValue({ platformFeePercent: 10 });
+    mocks.db.platformSettings.findUnique.mockResolvedValue({ platformFeePercent: 10 });
     mocks.db.listing.findUnique.mockResolvedValue(listing);
     expect(await startOnlineBooking({
       listingId: "flat", guestId: "owner", checkIn, checkOut: checkout(30), guests: 2,
     })).toMatchObject({ ok: true, total: 3250000 });
-    expect(mocks.db.booking.update.mock.calls[0][0].data.totalAmount).toBe(3250000);
+    expect(mocks.db.booking.updateMany.mock.calls[0][0].data.totalAmount).toBe(3250000);
+    mocks.db.booking.updateMany.mockClear();
 
     mocks.db.booking.findUnique.mockResolvedValue({
       ...booking, checkIn, checkOut: checkout(30), idDocs: [guest(0, [scan("first")]), guest(1, [scan("second")])],
@@ -230,6 +235,91 @@ describe("online minimum stay and monthly offer", () => {
     expect(await createBookingOrder(booking.id, "owner")).toMatchObject({ ok: true, amount: 3200000 });
     expect(mocks.createOrder.mock.calls[0][0]).toBe(3200000);
     expect(mocks.db.booking.updateMany.mock.calls[0][0].data.totalAmount).toBe(3200000);
+  });
+});
+
+describe("coupon checkout pricing", () => {
+  const listing = {
+    title: "Coupon stay", status: "PUBLISHED", basePrice: 100000,
+    discountedPrice: 90000, monthlyPrice: null, minimumNights: 2, monthlyStayDiscount: 5000,
+  };
+  const coupon = { id: "coupon", listingId: "flat", code: "STAY-ONCE", kind: "DAILY", amount: 80000, active: true, reservation: null };
+  const reservation = {
+    couponId: coupon.id, bookingId: booking.id, code: coupon.code, kind: "DAILY" as const, amount: 80000,
+    baseAmount: 160000, platformFee: 16000, platformFeePercent: 10, regularBase: 200000, regularTotal: 220000,
+    createdAt: new Date("2027-01-01"),
+  };
+  const readyBooking = {
+    ...booking, listing, couponReservation: null, totalAmount: 193000,
+    idDocs: [guest(0, [scan("first")]), guest(1, [scan("second")])],
+  };
+
+  beforeEach(() => {
+    mocks.db.platformSettings.findUnique.mockResolvedValue({ platformFeePercent: 10 });
+    mocks.db.listing.findUnique.mockResolvedValue(listing);
+    mocks.db.listingCoupon.findUnique.mockResolvedValue(coupon);
+    mocks.db.booking.findUnique.mockResolvedValue(readyBooking);
+    mocks.createOrder.mockImplementation(async (amount) => ({ id: "coupon-order", amount, currency: "INR", status: "created" }));
+  });
+
+  it("only previews a coupon until Pay now reserves it and creates an order for that exact total", async () => {
+    expect(await quoteStay("flat", booking.checkIn, booking.checkOut, { couponCode: "stay-once" }))
+      .toMatchObject({ ok: true, total: 176000, pricing: { base: 160000, platformFee: 16000, monthlyStayDiscount: 0 } });
+    expect(mocks.db.couponReservation.create).not.toHaveBeenCalled();
+    expect(await createBookingOrder(booking.id, "owner", { couponCode: "stay-once", expectedTotal: 176000 }))
+      .toMatchObject({ ok: true, amount: 176000, pricingLocked: true });
+    expect(mocks.db.couponReservation.create).toHaveBeenCalledOnce();
+    expect(mocks.createOrder).toHaveBeenCalledWith(176000, expect.any(String), expect.objectContaining({ bookingId: booking.id }));
+    expect(mocks.db.booking.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ couponReservation: { is: { code: "STAY-ONCE" } } }),
+      data: { totalAmount: 176000, razorpayOrderId: "coupon-order" },
+    }));
+  });
+
+  it("does not reserve a coupon or charge when the guest has not accepted its current total", async () => {
+    expect((await createBookingOrder(booking.id, "owner", { couponCode: coupon.code })).ok).toBe(false);
+    expect(await createBookingOrder(booking.id, "owner", { couponCode: coupon.code, expectedTotal: 1 }))
+      .toMatchObject({ ok: false, pricing: { total: 176000 }, pricingLocked: false });
+    expect(mocks.db.couponReservation.create).not.toHaveBeenCalled();
+    expect(mocks.createOrder).not.toHaveBeenCalled();
+  });
+
+  it("reopens and retries the same locked price even after listing prices and the Platform Fee change", async () => {
+    const locked = { ...readyBooking, totalAmount: 176000, couponReservation: reservation, razorpayOrderId: "locked-order" };
+    mocks.db.booking.findFirst.mockResolvedValue(locked);
+    mocks.db.booking.findUnique.mockResolvedValue(locked);
+    mocks.db.platformSettings.findUnique.mockResolvedValue({ platformFeePercent: 25 });
+    mocks.db.listing.findUnique.mockResolvedValue({ ...listing, basePrice: 200000, discountedPrice: null });
+    mocks.fetchOrder.mockResolvedValue({ id: "locked-order", amount: 176000, currency: "INR", status: "attempted" });
+    expect(await startOnlineBooking({
+      listingId: "flat", guestId: "owner", guests: 2, checkIn: booking.checkIn, checkOut: booking.checkOut,
+    })).toMatchObject({ ok: true, total: 176000, pricingLocked: true, pricing: { platformFeePercent: 10 } });
+    expect(await createBookingOrder(booking.id, "owner", { expectedTotal: 176000 }))
+      .toMatchObject({ ok: true, amount: 176000, razorpayOrderId: "locked-order" });
+    expect(mocks.db.listingCoupon.findUnique).not.toHaveBeenCalled();
+    expect(mocks.db.couponReservation.create).not.toHaveBeenCalled();
+    expect(mocks.createOrder).not.toHaveBeenCalled();
+  });
+
+  it("does not replace or remove a reserved coupon, even if the gateway has not created an order yet", async () => {
+    mocks.db.booking.findUnique.mockResolvedValue({ ...readyBooking, totalAmount: 176000, couponReservation: reservation });
+    for (const couponCode of [null, "OTHER-CODE"]) {
+      expect(await createBookingOrder(booking.id, "owner", { couponCode, expectedTotal: 176000 }))
+        .toMatchObject({ ok: false, pricingLocked: true, pricing: { total: 176000 } });
+    }
+    mocks.db.booking.findFirst.mockResolvedValue({ ...readyBooking, couponReservation: reservation });
+    expect((await startOnlineBooking({
+      listingId: "flat", guestId: "owner", guests: 3, checkIn: booking.checkIn, checkOut: booking.checkOut,
+    })).ok).toBe(false);
+    expect(mocks.createOrder).not.toHaveBeenCalled();
+    expect(mocks.db.booking.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not turn a non-coupon payment attempt into a coupon order", async () => {
+    mocks.db.booking.findUnique.mockResolvedValue({ ...readyBooking, razorpayOrderId: "original-order" });
+    expect((await createBookingOrder(booking.id, "owner", { couponCode: coupon.code, expectedTotal: 176000 })).ok).toBe(false);
+    expect(mocks.db.couponReservation.create).not.toHaveBeenCalled();
+    expect(mocks.createOrder).not.toHaveBeenCalled();
   });
 });
 

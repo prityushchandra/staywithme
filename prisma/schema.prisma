@@ -53,6 +53,11 @@ enum ListingStatus {
   PUBLISHED
 }
 
+enum CouponKind {
+  DAILY
+  MONTHLY
+}
+
 // ---------------------------------------------------------------------------
 // Auth & users (single account model; GUEST always, HOST opt-in, admin seeded)
 // ---------------------------------------------------------------------------
@@ -253,6 +258,7 @@ model Listing {
   reviews         Review[]
   availability    AvailabilityBlock[]
   bookings        Booking[]
+  coupons         ListingCoupon[]
   offlineBookings OfflineBooking[]
   onlineEarnings  OnlineEarning[]
   staffPayroll    StaffPayroll[]
@@ -487,11 +493,46 @@ model Booking {
   updatedAt DateTime @updatedAt
 
   idDocs BookingGuest[]
+  couponReservation CouponReservation?
 
   @@index([listingId])
   @@index([guestId])
   @@index([status])
   @@index([source])
+}
+
+model ListingCoupon {
+  id        String     @id @default(cuid())
+  listingId String
+  listing   Listing    @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  code      String     @unique
+  kind      CouponKind
+  amount    Int // paise per night, or per 30 nights; Platform Fee is separate
+  active    Boolean    @default(true)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  reservation CouponReservation?
+
+  @@index([listingId])
+}
+
+// Created at Pay now, never released by an abandoned or cancelled checkout.
+// Snapshot fields keep retries independent of later listing/coupon edits.
+model CouponReservation {
+  couponId           String        @id
+  coupon             ListingCoupon @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  bookingId          String?       @unique
+  booking            Booking?      @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  code               String
+  kind               CouponKind
+  amount             Int
+  baseAmount         Int
+  platformFee        Int
+  platformFeePercent Float
+  regularBase        Int
+  regularTotal       Int
+  createdAt          DateTime      @default(now())
 }
 
 // One staying guest and their government ID, captured before an online booking

@@ -49,12 +49,17 @@ beforeEach(() => {
 });
 
 describe("guest-facing stay terms", () => {
-  it("advertises calculated monthly savings and the 30-night price before dates, while preserving nightly-only cards", () => {
+  it("shows only nightly prices with separate monthly and nightly discount labels on cards", () => {
     const html = renderToStaticMarkup(createElement(ListingCard, { listing, platformFeePercent: 10 }));
-    expect(html).toContain("Monthly stays discount");
     expect(html).toContain("50% off monthly stays");
-    expect(html).toContain("₹33,000");
-    expect(html).toContain("₹66,000");
+    expect(html).toContain("25% off per night");
+    expect(html).toContain("₹1,650");
+    expect(html).toMatch(/<span[^>]*class="[^"]*line-through[^"]*"[^>]*>₹2,200<\/span>/);
+    expect(html).toContain(" / night");
+    expect(html).not.toContain("₹1,100");
+    expect(html).not.toContain("Monthly rate for");
+    expect(html).not.toContain("₹33,000");
+    expect(html).not.toContain("₹66,000");
     expect(html).toContain("Minimum 30 nights");
     expect(html).not.toContain("for 1 night");
     expect(renderToStaticMarkup(createElement(StayTerms, {}))).toBe("");
@@ -62,14 +67,14 @@ describe("guest-facing stay terms", () => {
       listing: { ...listing, monthlyPrice: null, minimumNights: null, monthlyStayDiscount: null }, platformFeePercent: 10,
     }));
     expect(unrestricted).not.toContain("Monthly stays discount");
-    expect(unrestricted).toContain("for 1 night");
+    expect(unrestricted).toContain(" / night");
+    expect(unrestricted).toContain("₹1,650");
   });
 
   it("shows the same 44-night total and crossed-out base nightly total on every booking surface", () => {
     mocks.searchDates.mockReturnValue({ checkIn: "2027-03-01", checkOut: "2027-04-14", query: "" });
     mocks.booking.mockReturnValue({ ...bookingState, checkOut: "2027-04-14", isCompactLayout: true });
     const outputs = [
-      renderToStaticMarkup(createElement(ListingCard, { listing, platformFeePercent: 10 })),
       renderToStaticMarkup(createElement(PricingBreakdown, { ...listing, basePrice: 150000, listPrice: 200000, nights: 44, platformFeePercent: 10 })),
       renderToStaticMarkup(createElement(MobileBookingBar, { ...listing, platformFeePercent: 10 })),
       renderToStaticMarkup(createElement(InquiryPanel, panelProps)),
@@ -78,9 +83,40 @@ describe("guest-facing stay terms", () => {
       expect(html).toContain("₹48,400");
       expect(html).toMatch(/<span[^>]*class="[^"]*line-through[^"]*"[^>]*>₹96,800<\/span>/);
     }
-    expect(outputs[1]).toContain("₹30,000 ÷ 30");
-    expect(outputs[1]).toContain("44 nights");
-    expect(outputs[1]).not.toContain("−₹48,400");
+    expect(outputs[0]).toContain("₹30,000 ÷ 30");
+    expect(outputs[0]).toContain("44 nights");
+    expect(outputs[0]).not.toContain("−₹48,400");
+    const card = renderToStaticMarkup(createElement(ListingCard, { listing, platformFeePercent: 10 }));
+    expect(card).toContain("₹1,650");
+    expect(card).toContain("₹2,200");
+    expect(card).toContain(" / night");
+    expect(card).not.toContain("₹1,100");
+    expect(card).not.toContain("Average for 44 nights");
+    expect(card).not.toContain("₹48,400");
+  });
+
+  it("shows the nightly sale rate for selected short dates, not a monthly rate the stay cannot use", () => {
+    mocks.searchDates.mockReturnValue({ checkIn: "2027-03-01", checkOut: "2027-03-03", query: "" });
+    const html = renderToStaticMarkup(createElement(ListingCard, {
+      listing: { ...listing, minimumNights: null }, platformFeePercent: 10,
+    }));
+    expect(html).toContain("₹1,650");
+    expect(html).toContain("₹2,200");
+    expect(html).not.toContain("₹1,100");
+    expect(html).not.toContain("Monthly rate for");
+    expect(html).toContain(" / night");
+    expect(html).not.toContain("Average for 2 nights");
+  });
+
+  it("does not invent a nightly discount when only a monthly discount is configured", () => {
+    const html = renderToStaticMarkup(createElement(ListingCard, {
+      listing: { ...listing, discountedPrice: null }, platformFeePercent: 10,
+    }));
+    expect(html).toContain("50% off monthly stays");
+    expect(html).toContain("₹2,200");
+    expect(html).not.toContain("₹1,100");
+    expect(html).not.toContain("line-through");
+    expect(html).not.toContain("off per night");
   });
 
   it("withholds the total and booking action for URL dates below the minimum", () => {

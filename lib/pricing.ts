@@ -61,6 +61,12 @@ export interface ListingStayPrice extends ListingPrice, ListingStayTerms {
   monthlyPrice?: number | null;
 }
 
+export interface StayCoupon {
+  code: string;
+  kind: "DAILY" | "MONTHLY";
+  amount: number;
+}
+
 export function meetsMinimumStay(nights: number, minimumNights?: number | null): boolean {
   return Number.isInteger(nights) && nights >= (minimumNights || 1);
 }
@@ -73,35 +79,47 @@ export function minimumStayMessage(minimumNights: number): string {
 export function computeStayPricing(
   listing: ListingStayPrice,
   nights: number,
-  settings: Pick<PricingSettings, "platformFeePercent">
+  settings: Pick<PricingSettings, "platformFeePercent">,
+  coupon: StayCoupon | null = null
 ) {
+  if (coupon && (!Number.isSafeInteger(coupon.amount) || coupon.amount <= 0 ||
+      !Number.isInteger(nights) || nights < 1)) {
+    throw new RangeError("Invalid coupon price or stay length.");
+  }
+  if (coupon?.kind === "MONTHLY" && nights < MONTHLY_MIN_NIGHTS) {
+    throw new RangeError("Monthly coupons require at least 30 nights.");
+  }
   const pricing = computePricing(
-    computeStayBase(nightlyPrice(listing), listing.monthlyPrice, nights),
+    coupon
+      ? Math.round((coupon.kind === "MONTHLY" ? coupon.amount / MONTHLY_MIN_NIGHTS : coupon.amount) * nights)
+      : computeStayBase(nightlyPrice(listing), listing.monthlyPrice, nights),
     settings
   );
-  const discount = listing.minimumNights && meetsMinimumStay(nights, listing.minimumNights)
+  const discount = !coupon && listing.minimumNights && meetsMinimumStay(nights, listing.minimumNights)
     ? listing.monthlyStayDiscount ?? 0
     : 0;
   if (!Number.isSafeInteger(discount) || discount < 0 || (discount > 0 && discount >= pricing.total)) {
     throw new RangeError("The monthly stays discount must be lower than the booking total.");
   }
   const total = pricing.total - discount;
-  const regularTotal = computePricing(
-    listing.basePrice * Math.max(1, Math.round(nights)),
-    settings
-  ).total;
+  const regularBase = listing.basePrice * Math.max(1, Math.round(nights));
+  const regularTotal = computePricing(regularBase, settings).total;
   const savings = Math.max(0, regularTotal - total);
   return {
     ...pricing,
     totalBeforeDiscount: pricing.total,
     monthlyStayDiscount: discount,
     total,
+    regularBase,
     regularTotal,
     savings,
     savingsPercent: savings > 0 ? Math.floor((savings / regularTotal) * 100) : 0,
-    monthly: isMonthlyRate(listing.monthlyPrice, nights),
+    monthly: coupon ? coupon.kind === "MONTHLY" : isMonthlyRate(listing.monthlyPrice, nights),
+    coupon,
   };
 }
+
+export type StayPricing = ReturnType<typeof computeStayPricing>;
 
 /** The advertised 30-night rate, compared with 30 nights at the regular base price. */
 export function getMonthlyStayOffer(

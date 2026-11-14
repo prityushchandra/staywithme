@@ -147,6 +147,33 @@ describe("nightlyPrice / strikePrice", () => {
     expect(strikePrice({ basePrice: 200000, discountedPrice: null })).toBeNull();
   });
 
+  describe("listing coupon pricing", () => {
+    const listing = {
+      basePrice: 200000, discountedPrice: 150000, monthlyPrice: 3000000,
+      minimumNights: 2, monthlyStayDiscount: 50000,
+    };
+
+    it("replaces every existing discount with the daily coupon and adds the fee once", () => {
+      expect(computeStayPricing(listing, 44, settings, { code: "DAILY-DEAL", kind: "DAILY", amount: 120000 })).toMatchObject({
+        base: 5280000, platformFee: 528000, total: 5808000, monthlyStayDiscount: 0,
+        regularBase: 8800000, regularTotal: 9680000, savings: 3872000, monthly: false,
+      });
+    });
+
+    it("prorates the complete monthly coupon amount before rounding, including extra nights", () => {
+      expect(computeStayPricing(listing, 44, settings, { code: "MONTH-DEAL", kind: "MONTHLY", amount: 3000100 })).toMatchObject({
+        base: 4400147, platformFee: 440000, total: 4840147, monthlyStayDiscount: 0,
+        regularTotal: 9680000, monthly: true,
+      });
+    });
+
+    it("does not apply a monthly coupon to a shorter stay", () => {
+      expect(() => computeStayPricing(listing, 29, settings, {
+        code: "MONTH-DEAL", kind: "MONTHLY", amount: 3000000,
+      })).toThrow("at least 30 nights");
+    });
+  });
+
   it("treats zero as 'no discount' rather than a free night", () => {
     expect(nightlyPrice({ basePrice: 200000, discountedPrice: 0 })).toBe(200000);
     expect(strikePrice({ basePrice: 200000, discountedPrice: 0 })).toBeNull();

@@ -60,5 +60,7 @@ export async function POST(req: Request) {
     total: result.total,
     nights: result.nights,
     docs: result.docs,
+    pricing: result.pricing,
+    pricingLocked: result.pricingLocked,
   });
 }

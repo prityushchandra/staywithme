@@ -19,6 +19,7 @@ import {
   CircleDot,
   Receipt,
   PenSquare,
+  TicketPercent,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -38,6 +39,7 @@ const NAV: NavItem[] = [
   { href: "/admin/booking-search", label: "Booking search", Icon: Search },
   { href: "/admin/guest-bookings", label: "Guest bookings", Icon: UserCheck, badge: "bookings" },
   { href: "/admin/payments", label: "Razorpay payments", Icon: Landmark },
+  { href: "/admin/coupons", label: "Coupon creator", Icon: TicketPercent },
   { href: "/admin/earnings", label: "Airbnb earnings", Icon: IndianRupee },
   { href: "/admin/expenses", label: "Expense tracker", Icon: Receipt },
   { href: "/admin/pnl", label: "P&L", Icon: TrendingUp },
