@@ -73,7 +73,8 @@ export function OnlineBookingReview({ booking: b }: { booking: OnlineBookingCard
     }
   }
 
-  const phone = digits(b.contactPhone ?? b.guestPhone);
+  const contactPhone = b.contactPhone ?? b.guestPhone;
+  const phone = digits(contactPhone);
   const wa = phone
     ? `https://wa.me/${phone}?text=${encodeURIComponent(
         `Hi ${b.guestName}, about your booking for ${b.listingTitle} (${b.checkIn} to ${b.checkOut}) — `
@@ -81,7 +82,7 @@ export function OnlineBookingReview({ booking: b }: { booking: OnlineBookingCard
     : null;
 
   return (
-    <div className="rounded-xl border border-amber-400/60 bg-amber-50/40 p-4 dark:bg-amber-500/5">
+    <div className="min-w-0 rounded-xl border border-amber-400/60 bg-amber-50/40 p-4 [overflow-wrap:anywhere] dark:bg-amber-500/5">
       {b.adminNote && (
         <p className="mb-3 flex items-start gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -89,7 +90,7 @@ export function OnlineBookingReview({ booking: b }: { booking: OnlineBookingCard
         </p>
       )}
 
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_16rem]">
         <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold">{b.guestName}</span>
@@ -98,7 +99,7 @@ export function OnlineBookingReview({ booking: b }: { booking: OnlineBookingCard
             <span className="font-mono text-xs text-muted-foreground">#{b.id.slice(-6)}</span>
           </div>
 
-          <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-sm">
+          <dl className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm [&>dd]:min-w-0">
             <dt className="text-muted-foreground">Flat</dt>
             <dd className="font-medium">{b.listingTitle}</dd>
             <dt className="text-muted-foreground">Check-in</dt>
@@ -117,15 +118,15 @@ export function OnlineBookingReview({ booking: b }: { booking: OnlineBookingCard
               {formatINR(b.amountPaid)}
               {b.amountPaid !== b.totalAmount && ` of ${formatINR(b.totalAmount)}`}
               {b.razorpayPaymentId && (
-                <span className="ml-2 font-mono text-xs font-normal text-muted-foreground">
+                <span className="mt-1 block font-mono text-xs font-normal text-muted-foreground">
                   {b.razorpayPaymentId}
                 </span>
               )}
             </dd>
-            {b.contactPhone && (
+            {contactPhone && (
               <>
                 <dt className="text-muted-foreground">Phone</dt>
-                <dd>{b.contactPhone}</dd>
+                <dd>{contactPhone}</dd>
               </>
             )}
             {b.reasonForVisit && (
@@ -173,7 +174,7 @@ export function OnlineBookingReview({ booking: b }: { booking: OnlineBookingCard
           )}
         </div>
 
-        <div className="w-full space-y-2 sm:w-64">
+        <div className="min-w-0 space-y-2">
           <input
             value={note}
             onChange={(e) => setNote(e.target.value)}

@@ -185,31 +185,36 @@ function ManualBookingCard({
   const paymentLink = waLink(b.guestPhone, paymentMessage);
 
   return (
-    <article data-booking-kind="manual" className="rounded-xl border p-4">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0 flex-1 space-y-2">
+    <article data-booking-kind="manual" className="min-w-0 rounded-xl border p-4">
+      <div className="space-y-4">
+        <div className="min-w-0 space-y-3 [overflow-wrap:anywhere]">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold">{b.guestName}</span>
             <Badge variant={b.status === "CANCELLED" ? "destructive" : "success"}>{statusLabel(b.status)}</Badge>
             <Badge variant="secondary">Manual · {b.source === "AIRBNB" ? "Airbnb" : "Offline / walk-in"}</Badge>
             <span className="font-mono text-xs text-muted-foreground">#{b.id.slice(-6)}</span>
           </div>
-          <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-sm">
+          <dl className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm [&>dd]:min-w-0">
             <dt className="text-muted-foreground">Flat</dt>
             <dd className="font-medium">{flat}</dd>
-            <dt className="text-muted-foreground">Dates</dt>
-            <dd>{fmt(b.checkIn)} → {fmt(b.checkOut)} · {n} night{n > 1 ? "s" : ""} · {b.guests} guest{b.guests > 1 ? "s" : ""}</dd>
+            <dt className="text-muted-foreground">Check-in</dt>
+            <dd>{checkinStr}</dd>
+            <dt className="text-muted-foreground">Check-out</dt>
+            <dd>{checkoutStr}</dd>
+            <dt className="text-muted-foreground">Stay</dt>
+            <dd>{n} night{n > 1 ? "s" : ""} · {b.guests} guest{b.guests > 1 ? "s" : ""}</dd>
             <dt className="text-muted-foreground">Amount</dt>
-            <dd>
-              Total {formatINR(b.totalPrice)} · Paid {formatINR(b.amountPaid)} · Due{" "}
-              <span className={b.due > 0 ? "font-medium text-destructive" : ""}>{formatINR(b.due)}</span>
+            <dd className="flex flex-wrap gap-x-3 gap-y-1">
+              <span>Total {formatINR(b.totalPrice)}</span>
+              <span>Paid {formatINR(b.amountPaid)}</span>
+              <span>Due <span className={b.due > 0 ? "font-medium text-destructive" : ""}>{formatINR(b.due)}</span></span>
             </dd>
             {b.guestPhone && <><dt className="text-muted-foreground">Phone</dt><dd>{b.guestPhone}</dd></>}
             {b.note && <><dt className="text-muted-foreground">Note</dt><dd className="text-muted-foreground">{b.note}</dd></>}
           </dl>
           <GuestDetails count={b.guests} primaryName={b.guestName} details={b.guestDetails} manual />
           {b.guestPhone ? (
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 border-t pt-3">
               <SendReceiptButton
                 key={b.updatedAt.toISOString()}
                 receiptUrl={receiptUrl}
@@ -254,21 +259,35 @@ function ManualBookingCard({
 function GuestBookingCard({ booking: b }: { booking: GuestBookingRecord }) {
   const phone = b.contactPhone ?? b.guest.phone;
   const receiptUrl = bookingReceiptUrl(b);
+  const n = nights(b.checkIn, b.checkOut);
   return (
-    <article data-booking-kind="guest" className="rounded-xl border p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
+    <article data-booking-kind="guest" className="min-w-0 rounded-xl border p-4">
+      <div className="space-y-4">
+        <div className="min-w-0 space-y-3 [overflow-wrap:anywhere]">
           <div className="flex flex-wrap items-center gap-2">
-            <Link href={`/listings/${b.listing.id}`} className="break-words font-semibold hover:underline">{b.listing.title}</Link>
+            <Link href={`/listings/${b.listing.id}`} className="max-w-full font-semibold hover:underline">{b.listing.title}</Link>
             <Badge variant={VARIANT[b.status] ?? "secondary"}>{statusLabel(b.status)}</Badge>
             <Badge variant="secondary">Guest · {b.source === "ONLINE" ? "Paid online" : "WhatsApp"}</Badge>
             <span className="font-mono text-xs text-muted-foreground">#{b.id.slice(-6)}</span>
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {fmt(b.checkIn)} → {fmt(b.checkOut)} · {b.guests} guest{b.guests > 1 ? "s" : ""} · {formatINR(b.totalAmount)}
-          </p>
-          <p className="text-sm text-muted-foreground">Guest: {b.guest.name ?? "—"}{phone ? ` · ${phone}` : ""}</p>
-          {b.reasonForVisit && <p className="mt-1 break-words text-sm text-muted-foreground">Reason for visit: {b.reasonForVisit}</p>}
+          <dl className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm [&>dd]:min-w-0">
+            <dt className="text-muted-foreground">Guest</dt>
+            <dd className="font-medium">{b.guest.name ?? "—"}</dd>
+            <dt className="text-muted-foreground">Check-in</dt>
+            <dd>{fmt(b.checkIn)}{b.listing.checkInTime?.trim() ? `, ${b.listing.checkInTime.trim()}` : ""}</dd>
+            <dt className="text-muted-foreground">Check-out</dt>
+            <dd>{fmt(b.checkOut)}{b.listing.checkOutTime?.trim() ? `, ${b.listing.checkOutTime.trim()}` : ""}</dd>
+            <dt className="text-muted-foreground">Stay</dt>
+            <dd>{n} night{n > 1 ? "s" : ""} · {b.guests} guest{b.guests > 1 ? "s" : ""}</dd>
+            <dt className="text-muted-foreground">Amount</dt>
+            <dd className="flex flex-wrap gap-x-3 gap-y-1">
+              <span>Total {formatINR(b.totalAmount)}</span>
+              <span>Paid {formatINR(b.amountPaid)}</span>
+              <span>Due {formatINR(Math.max(0, b.totalAmount - b.amountPaid))}</span>
+            </dd>
+            {phone && <><dt className="text-muted-foreground">Phone</dt><dd>{phone}</dd></>}
+            {b.reasonForVisit && <><dt className="text-muted-foreground">Reason</dt><dd className="whitespace-pre-wrap">{b.reasonForVisit}</dd></>}
+          </dl>
           <GuestDetails count={b.guests} primaryName={b.guest.name} details={b.idDocs} />
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {b.amountPaid > 0 && (
@@ -283,7 +302,7 @@ function GuestBookingCard({ booking: b }: { booking: GuestBookingRecord }) {
             <GuestContactActions phone={phone} guestName={b.guest.firstName?.trim() || b.guest.name} status={b.status} listing={b.listing} />
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 border-t pt-3">
           {b.amountPaid > 0 && (
             <>
               <a href={`${receiptUrl}${b.publicToken ? "&" : "?"}download=1`} download className="rounded-lg border px-3 py-1.5 text-sm font-medium transition hover:border-foreground">

@@ -18,7 +18,7 @@ const db = vi.hoisted(() => ({
 
 vi.mock("@/lib/db", () => ({ prisma: db }));
 vi.mock("@/lib/auth", () => ({ auth: db.auth }));
-vi.mock("next/navigation", () => ({ redirect: db.redirect }));
+vi.mock("next/navigation", () => ({ redirect: db.redirect, useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("@/lib/settings", () => ({
   getPlatformSettings: vi.fn(async () => ({ upiId: "example@upi" })),
 }));
@@ -85,6 +85,27 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 
 describe("unified booking search", () => {
+  it("labels dates and payment amounts separately for guest and manual booking details", async () => {
+    db.booking.findMany.mockResolvedValue([{ ...booking, amountPaid: 1000000, reasonForVisit: "Work trip\nLate arrival" }]);
+    db.offlineBooking.findMany.mockResolvedValue([manualBooking]);
+    const html = renderToStaticMarkup(await AdminBookingsPage({ kind: "search", searchParams: Promise.resolve({}) }));
+    const cards = html.match(/<article[\s\S]*?<\/article>/g)!;
+    const guest = cards.find((card) => card.includes('data-booking-kind="guest"'))!;
+    const manual = cards.find((card) => card.includes('data-booking-kind="manual"'))!;
+    expect(guest).toMatch(/>Guest<\/dt><dd[^>]*>Account Full Name<\/dd>/);
+    expect(guest).toMatch(/>Check-in<\/dt><dd[^>]*>Nov 2, 2026, 3:30 PM<\/dd>/);
+    expect(guest).toMatch(/>Check-out<\/dt><dd[^>]*>Nov 5, 2026, 11:15 AM<\/dd>/);
+    expect(guest).toContain("<span>Total ₹15,000</span>");
+    expect(guest).toContain("<span>Paid ₹10,000</span>");
+    expect(guest).toContain("<span>Due ₹5,000</span>");
+    expect(guest).toMatch(/>Phone<\/dt><dd[^>]*>\+447700900123<\/dd>/);
+    expect(guest).toMatch(/>Reason<\/dt><dd[^>]*>Work trip\nLate arrival<\/dd>/);
+    expect(manual).toMatch(/>Check-in<\/dt><dd[^>]*>Oct 2, 2025, 3:30 PM<\/dd>/);
+    expect(manual).toMatch(/>Check-out<\/dt><dd[^>]*>Oct 5, 2025, 11:15 AM<\/dd>/);
+    expect(manual).toContain("<span>Total ₹9,000</span>");
+    expect(manual).toContain("<span>Paid ₹9,000</span>");
+  });
+
   it.each([null, { user: { isAdmin: false } }])("requires admin access before searching guest data", async (session) => {
     db.auth.mockResolvedValue(session);
     await expect(AdminBookingsPage({ kind: "search", searchParams: Promise.resolve({}) })).rejects.toThrow("redirect");
@@ -273,6 +294,26 @@ describe("unified booking search", () => {
     expect(articles[2]).toContain("Account Full Name");
     expect(articles[3]).toContain("Manual Primary");
     expect(db.booking.findMany.mock.calls[0][0].where.checkOut).toBeUndefined();
+  });
+});
+
+describe("paid booking review details", () => {
+  it("shows the account phone when the booking has no separate contact phone", async () => {
+    const { OnlineBookingReview } = await vi.importActual<typeof import("./online-booking-review")>("./online-booking-review");
+    const html = renderToStaticMarkup(createElement(OnlineBookingReview, {
+      booking: {
+        id: "review-example", listingTitle: "Example stay", guestName: "Example Guest",
+        guestPhone: "+919876543210", contactPhone: null,
+        checkIn: "Nov 2, 2026", checkOut: "Nov 5, 2026", checkInTime: "3:30 PM", checkOutTime: "11:15 AM",
+        nights: 3, guests: 1, totalAmount: 1500000, amountPaid: 1500000,
+        reasonForVisit: "Work trip", adminNote: null, paidAt: null, razorpayPaymentId: "pay_example",
+        docs: [], receiptUrl: "/api/receipts/booking/review-example", receiptFileName: "booking_receipt_example.pdf",
+      },
+    }));
+    expect(html).toMatch(/>Phone<\/dt><dd[^>]*>\+919876543210<\/dd>/);
+    expect(html).toContain('href="tel:+919876543210"');
+    expect(html).toContain("pay_example");
+    expect(html).toContain("Work trip");
   });
 });
 
